@@ -28,7 +28,13 @@ the aggregator reindexed, not that the farm sold. So:
   loses most or all of its inventory on a fixed timer, not because the market
   moved. :func:`_absence_status` splits those out as EXPIRED *before* either
   guard above runs, so a fortnightly billing cycle is never mistaken for the
-  parser rot the guards exist to catch.
+  parser rot the guards exist to catch - and it obeys the same **no verifying
+  source still shows it** rule as REMOVED, so one source's ad timing out never
+  downgrades a listing a different verifying source still carries live.
+  EXPIRED is not a dead end either: it stays on the ordinary stale clock
+  (:data:`hofradar.lifecycle._rules.STALE_ELIGIBLE_STATUSES`), because a
+  farmstead that genuinely sold looks identical to one whose ad merely expired
+  until somebody re-confirms it either way.
 """
 
 from __future__ import annotations
@@ -75,20 +81,30 @@ class ImplausibleAbsence(RuntimeError):
     """A run's absences are too broad to be believed, so nothing is written."""
 
 
-def _absence_status(source: Source, prop: Property, now: datetime) -> str:
+def _absence_status(
+    source: Source, prop: Property, ps: PropertySource, now: datetime
+) -> ListingStatus:
     """Did the advert expire on a timer, or did the seller actually withdraw it?
 
     A source with a ``listing_ttl_days`` sells a fixed advertising window (a
-    newspaper's two weeks). Once a listing has been up for at least that long,
-    its disappearance is the billing cycle ending and carries no information
-    about the farmstead. Before that window, or for a source with no such
-    window at all, a disappearance is the seller acting - real news, handled
-    as REMOVED exactly as before.
+    newspaper's two weeks). Once *this advert* has been up for at least that
+    long, its disappearance is the billing cycle ending and carries no
+    information about the farmstead. Before that window, or for a source with
+    no such window at all, a disappearance is the seller acting - real news,
+    handled as REMOVED exactly as before.
+
+    Ages from ``ps.first_seen`` - when *this source* first carried the
+    listing - not ``prop.first_seen``, which is the property's first sighting
+    by any source and may predate this advert by months. A farmstead known
+    for 300 days that OVB only started advertising yesterday is not evidence
+    of anything if that OVB ad drops after one day; a real withdrawal there
+    would be misread as an expiry. ``prop.first_seen`` is only a fallback for
+    a row with no ``first_seen`` of its own.
     """
     ttl = source.listing_ttl_days
     if not ttl:
         return ListingStatus.REMOVED
-    first_seen = _rules.as_utc(prop.first_seen)
+    first_seen = _rules.as_utc(ps.first_seen) or _rules.as_utc(prop.first_seen)
     if first_seen is None:
         return ListingStatus.REMOVED
     age_days = (now - first_seen).days
@@ -172,10 +188,18 @@ def mark_missing(
         if (
             prop is not None
             and prop.merged_into_id is None
-            and _absence_status(source, prop, now) is ListingStatus.EXPIRED
+            and _absence_status(source, prop, ps, now) is ListingStatus.EXPIRED
         ):
             ps.last_listing_visible = False
-            if prop.listing_status != ListingStatus.EXPIRED:
+            # Same rule as the REMOVED loop below: a status only moves once no
+            # *verifying* source still shows the listing. OVB's ad running out
+            # is not news about a farmstead a primary portal still lists live -
+            # that would downgrade a verified, visible property on someone
+            # else's billing timer.
+            if (
+                prop.listing_status != ListingStatus.EXPIRED
+                and not _any_verifying_source_visible(session, prop.id)
+            ):
                 _transition(
                     session, prop, ListingStatus.EXPIRED, ChangeKind.STATUS_CHANGE,
                     detail=f"advert window of {source.listing_ttl_days} days elapsed "

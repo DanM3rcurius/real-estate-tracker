@@ -30,9 +30,17 @@ ALIVE_STATUSES = frozenset(
 DORMANT_STATUSES = frozenset({ListingStatus.REMOVED, ListingStatus.STALE})
 
 #: Statuses that ``apply_stale_rules`` may time out.
+#:
+#: EXPIRED belongs here and deliberately not in GONE_STATUSES: an expired
+#: advert is not evidence the farmstead is gone, but it also cannot be
+#: allowed to sit at full availability forever - a property that genuinely
+#: sold has its advert expire in exactly the same way, and needs a path out
+#: of the ranking too. If it renews, ingest re-sets it to ACTIVE long before
+#: the stale clock (45 days) would fire, so a normal fortnightly cycle never
+#: reaches this at all.
 STALE_ELIGIBLE_STATUSES = frozenset(
     {ListingStatus.ACTIVE, ListingStatus.VERIFIED, ListingStatus.PRICE_CHANGED,
-     ListingStatus.DISCOVERED}
+     ListingStatus.DISCOVERED, ListingStatus.EXPIRED}
 )
 
 _ROLE_RANK = {SourceRole.DISCOVERY: 0, SourceRole.LOCAL: 1, SourceRole.PRIMARY: 2}
