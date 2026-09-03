@@ -154,6 +154,25 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Undo the phantom removals of GitHub issue #2. Dry run unless --apply."""
+    from hofradar.lifecycle import repair_phantom_removals
+    from hofradar.sources import get_adapter, sync_sources_to_db
+
+    init_db()
+    cfg = reload_config()
+    with session_scope() as session:
+        sources = sync_sources_to_db(session, cfg.sources)
+        non_reporting = {s.key for s in sources if not get_adapter(s).enumerates}
+        report = repair_phantom_removals(
+            session, non_reporting_source_keys=non_reporting, dry_run=not args.apply
+        )
+    print(report.summary())
+    if report.dry_run and report.total:
+        print("\nnothing was written. re-run with --apply to restore them.")
+    return 0
+
+
 def cmd_hash_password(args: argparse.Namespace) -> int:
     """Print a PBKDF2 hash to put in HOFRADAR_PASSWORD_HASH.
 
@@ -237,6 +256,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_import = sub.add_parser("import", help="import listings from a CSV file")
     p_import.add_argument("path")
     p_import.set_defaults(func=cmd_import)
+
+    p_repair = sub.add_parser(
+        "repair-removals",
+        help="restore properties wrongly marked removed (GitHub issue #2)",
+    )
+    p_repair.add_argument(
+        "--apply", action="store_true", help="actually write; default is a dry run"
+    )
+    p_repair.set_defaults(func=cmd_repair)
 
     p_hash = sub.add_parser(
         "hash-password", help="print a PBKDF2 hash for HOFRADAR_PASSWORD_HASH"

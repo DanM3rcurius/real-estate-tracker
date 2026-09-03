@@ -48,7 +48,12 @@ def mark_missing(session, seen_property_ids: set[int], *, source: Source,
     # enumeration_complete has no default on purpose: absence is only evidence
     # when the source listed its whole inventory without error or truncation.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
+                      unverified_stale_after_days: int = 180,
+                      non_reporting_source_ids: set[int] | None = None,
                       run_id: int | None = None) -> list[ChangeResult]
+    # Two clocks: a source that re-reports every run vs one that never will.
+def repair_phantom_removals(session, *, non_reporting_source_keys: set[str],
+                            dry_run: bool = True) -> RepairReport
 def changes_since(session, since: datetime, *, kinds: list[str] | None = None) -> list[dict]
 ```
 

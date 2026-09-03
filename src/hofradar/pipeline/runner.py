@@ -56,7 +56,7 @@ async def run_pipeline(
     trigger: str = "manual",
     source_keys: list[str] | None = None,
     dry_run: bool = False,
-    stale_after_days: int = 45,
+    stale_after_days: int | None = None,
 ) -> SearchRun:
     """Execute one full search run. Returns the persisted :class:`SearchRun`."""
     from hofradar.costmodel import estimate_costs  # noqa: F401  (used via scoring)
@@ -183,8 +183,22 @@ async def run_pipeline(
                         enumeration_complete=enumeration_complete.get(source.id, False),
                     )
                     removed += sum(1 for c in changes if c.kind == "removed")
+                # Sources that will never mention a listing again must not put
+                # their properties on the "we stopped hearing" clock - nobody
+                # was ever going to speak.
+                non_reporting = {
+                    s.id for s in sources if not get_adapter(s).enumerates
+                }
                 apply_stale_rules(
-                    session, stale_after_days=stale_after_days, run_id=run_id
+                    session,
+                    stale_after_days=(
+                        stale_after_days
+                        if stale_after_days is not None
+                        else profile.gates.stale_after_days
+                    ),
+                    unverified_stale_after_days=profile.gates.unverified_stale_after_days,
+                    non_reporting_source_ids=non_reporting,
+                    run_id=run_id,
                 )
             run.removed = removed
             _log_stage(session, run, RunStage.CHANGE_DETECTION, removed=removed)

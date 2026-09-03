@@ -43,6 +43,11 @@ EMPTY_RESULT_GUARD_MIN_ROWS = 3
 #: Default patience before an unseen ACTIVE property is called STALE.
 DEFAULT_STALE_AFTER_DAYS = 45
 
+#: Patience for a property no source will ever re-report. Longer, because
+#: there was never a stream to fall silent - only a human who has not been
+#: back to look.
+DEFAULT_UNVERIFIED_STALE_AFTER_DAYS = 180
+
 
 def mark_missing(
     session: Session,
@@ -126,37 +131,94 @@ def apply_stale_rules(
     session: Session,
     *,
     stale_after_days: int = DEFAULT_STALE_AFTER_DAYS,
+    unverified_stale_after_days: int = DEFAULT_UNVERIFIED_STALE_AFTER_DAYS,
+    non_reporting_source_ids: set[int] | None = None,
     run_id: int | None = None,
 ) -> list[ChangeResult]:
     """Age out properties nobody has mentioned for a while.
 
     STALE, never REMOVED: we did not prove the farm is gone, we merely stopped
     hearing about it, and the difference matters to every downstream score.
+
+    Two clocks, because "we stopped hearing" only means something where there
+    was a stream to fall silent:
+
+    * a property carried by a source that re-reports every run (a portal, a
+      feed, the ZVG register) is stale ``stale_after_days`` after that source
+      last mentioned it - the source kept talking and stopped naming this one;
+    * a property carried only by sources that never re-report - the paste box,
+      a one-shot CSV, a bulletin archive - was never going to be mentioned
+      again by anybody. Ageing it on the same clock says "we stopped hearing"
+      about something we were never listening to. It still ages out, because
+      an unconfirmed six-month-old listing *is* stale information, but on the
+      longer ``unverified_stale_after_days`` clock and with a detail line that
+      says what actually happened: nobody has re-checked it.
+
+    ``non_reporting_source_ids`` names the sources in the second class. The
+    caller works it out from the adapters (``SourceAdapter.enumerates``);
+    passing nothing keeps every source on the short clock.
     """
     now = utcnow()
-    cutoff = now - timedelta(days=stale_after_days)
+    non_reporting = set(non_reporting_source_ids or ())
+    # Query on the SHORTER of the two clocks so every candidate is caught, then
+    # apply the one that actually governs each property. Using the longer clock
+    # here would silently skip self-reporting properties in the gap between the
+    # two. One query, no per-property round trip.
+    shortest = min(stale_after_days, unverified_stale_after_days) if non_reporting else stale_after_days
     props = session.execute(
         select(Property).where(
             Property.listing_status.in_(sorted(_rules.STALE_ELIGIBLE_STATUSES)),
-            Property.last_seen < cutoff,
+            Property.last_seen < now - timedelta(days=shortest),
             Property.merged_into_id.is_(None),
         )
     ).scalars().all()
 
-    changes = [
-        _transition(
-            session,
-            prop,
-            ListingStatus.STALE,
-            ChangeKind.STALE,
-            detail=f"not seen since {prop.last_seen:%Y-%m-%d} (> {stale_after_days} d)",
-            run_id=run_id,
-            now=now,
+    # One query for the whole candidate set rather than a lookup per property.
+    reporting_by_property = _reporting_sources(session, [p.id for p in props], non_reporting)
+
+    changes: list[ChangeResult] = []
+    for prop in props:
+        self_reporting = reporting_by_property.get(prop.id, True)
+        days = stale_after_days if self_reporting else unverified_stale_after_days
+        if prop.last_seen >= now - timedelta(days=days):
+            continue
+        if self_reporting:
+            detail = f"not seen since {prop.last_seen:%Y-%m-%d} (> {days} d)"
+        else:
+            detail = (
+                f"no source re-checks this listing; unconfirmed since "
+                f"{prop.last_seen:%Y-%m-%d} (> {days} d)"
+            )
+        changes.append(
+            _transition(
+                session, prop, ListingStatus.STALE, ChangeKind.STALE,
+                detail=detail, run_id=run_id, now=now,
+            )
         )
-        for prop in props
-    ]
     session.flush()
     return changes
+
+
+def _reporting_sources(
+    session: Session, property_ids: list[int], non_reporting: set[int]
+) -> dict[int, bool]:
+    """property_id -> does at least one source still re-report this listing?
+
+    A property with no sources at all counts as not self-reporting: nothing is
+    going to mention it again either.
+    """
+    if not property_ids:
+        return {}
+    rows = session.execute(
+        select(PropertySource.property_id, PropertySource.source_id).where(
+            PropertySource.property_id.in_(property_ids)
+        )
+    ).all()
+    out: dict[int, bool] = {pid: False for pid in property_ids}
+    for property_id, source_id in rows:
+        if source_id not in non_reporting:
+            out[property_id] = True
+    return out
 
 
 def _any_verifying_source_visible(session: Session, property_id: int) -> bool:

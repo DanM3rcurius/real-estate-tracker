@@ -210,6 +210,11 @@ class GateConfig(BaseModel):
     exceptional_development_min: float = 8
     #: A listing proven gone is never shortlisted.
     reject_removed: bool = True
+    #: A self-reporting source kept talking and stopped naming this listing.
+    stale_after_days: int = 45
+    #: Nothing re-reports this listing (paste box, CSV, bulletin): it ages out
+    #: on a longer clock, because there was never a stream to fall silent.
+    unverified_stale_after_days: int = 180
     #: A listing matching the profile's `exclude` vocabulary is rejected unless
     #: it carries genuine farmstead substance that contradicts the match.
     reject_excluded: bool = True
