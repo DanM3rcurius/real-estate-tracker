@@ -34,3 +34,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ---- hofradar ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+data/*.sqlite3
+data/*.sqlite3-*
+data/raw/
+data/documents/
+data/images/
+data/exports/
+reports/weekly/*.md
+reports/weekly/*.html
+!.gitkeep

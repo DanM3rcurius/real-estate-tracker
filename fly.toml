@@ -1,0 +1,33 @@
+# Deploy to a single small Fly.io machine with a persistent volume:
+#   fly launch --no-deploy && fly volumes create hofradar_data --size 3 && fly deploy
+app = "hofradar"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8000"
+  HOFRADAR_DATA_DIR = "/data"
+
+[[mounts]]
+  source = "hofradar_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

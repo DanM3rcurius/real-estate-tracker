@@ -1,0 +1,48 @@
+# The zero-infrastructure way to run this: `docker compose up -d`, then open
+# http://localhost:8000. SQLite on a volume is genuinely enough for one user and
+# a few thousand properties; switch to the postgres service below when it isn't.
+services:
+  hofradar:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - hofradar-data:/data
+      - ./config:/app/config:ro
+      - ./reports:/app/reports
+    environment:
+      HOFRADAR_DATA_DIR: /data
+      # Optional. Without it the LLM review stage is skipped and everything else works.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Uncomment to use the postgres service instead of SQLite:
+      # HOFRADAR_DATABASE_URL: postgresql+psycopg://hofradar:hofradar@db:5432/hofradar
+    restart: unless-stopped
+
+  # Weekly pipeline. Runs Mondays 06:00 local time via the app's own scheduler.
+  scheduler:
+    build: .
+    command: ["python", "-m", "hofradar.schedule"]
+    volumes:
+      - hofradar-data:/data
+      - ./config:/app/config:ro
+      - ./reports:/app/reports
+    environment:
+      HOFRADAR_DATA_DIR: /data
+      HOFRADAR_SCHEDULE_CRON: ${HOFRADAR_SCHEDULE_CRON:-0 6 * * 1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      - hofradar
+    restart: unless-stopped
+
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: hofradar
+  #     POSTGRES_PASSWORD: hofradar
+  #     POSTGRES_DB: hofradar
+  #   volumes:
+  #     - hofradar-pg:/var/lib/postgresql/data
+
+volumes:
+  hofradar-data:
+  # hofradar-pg:
