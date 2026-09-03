@@ -26,11 +26,8 @@ a hash of the search profile.
 
 ## Quickstart
 
-```bash
-docker compose up -d          # → http://localhost:8000
-```
-
-or without Docker:
+Docker is optional — this is a plain Python project and the virtualenv route is
+the simpler one for local use:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -39,7 +36,17 @@ hofradar init-db
 hofradar serve                # → http://localhost:8000
 ```
 
+or, if you would rather not manage the environment:
+
+```bash
+docker compose up -d          # → http://localhost:8000
+```
+
 Nothing else is required. No API keys, no database server, no npm.
+
+> **`does not appear to be a Python project`?** You are on a branch that does
+> not have the code yet. `git fetch origin && git checkout <branch>`, then
+> re-run the install.
 
 ## Before you put it on a public URL
 

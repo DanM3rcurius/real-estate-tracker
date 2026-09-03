@@ -22,7 +22,12 @@ jobs:
           pip install -e ".[dev,pdf,images]"
 
       - name: Lint
-        run: ruff check src tests
+        run: ruff check src tests scripts
+
+      - name: Config defaults are in sync
+        run: |
+          python scripts/sync_config_defaults.py
+          git diff --exit-code src/hofradar/_config_defaults
 
       # The suite mocks every outbound call with respx and asserts on the
       # request that would have been made, so it must NOT run with

@@ -19,7 +19,42 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, computed_field, field_validator
 
-CONFIG_DIR = Path(os.environ.get("HOFRADAR_CONFIG_DIR", "config"))
+#: Bundled copies of the YAML files, installed with the package.
+PACKAGED_CONFIG_DIR = Path(__file__).parent / "_config_defaults"
+
+
+def find_config_dir() -> Path:
+    """Locate the search DNA.
+
+    ``hofradar serve`` from the wrong directory used to silently fall back to
+    hard-coded defaults - the app came up, said "registered 0 sources", and
+    quietly ignored the user's radius, budget and keyword vocabulary. Config is
+    now looked for in a defined order and the resolution is logged, so a wrong
+    answer is visible instead of silent:
+
+    1. ``HOFRADAR_CONFIG_DIR`` if set - always wins, never guessed past
+    2. ``./config`` in the current directory
+    3. a ``config/`` directory in any parent (running from ``src/`` or ``tests/``)
+    4. the copies bundled inside the installed package
+    """
+    from_env = os.environ.get("HOFRADAR_CONFIG_DIR")
+    if from_env:
+        return Path(from_env)
+
+    here = Path.cwd().resolve()
+    for candidate in (here, *here.parents):
+        directory = candidate / "config"
+        if (directory / "search.yaml").is_file():
+            return directory
+
+    return PACKAGED_CONFIG_DIR
+
+
+def __getattr__(name: str) -> Any:
+    """``CONFIG_DIR`` stays importable, but is resolved when it is read."""
+    if name == "CONFIG_DIR":
+        return find_config_dir()
+    raise AttributeError(name)
 
 
 # --------------------------------------------------------------------------- #
@@ -303,7 +338,7 @@ def _read_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_profile(config_dir: Path | None = None) -> SearchProfile:
-    d = config_dir or CONFIG_DIR
+    d = config_dir or find_config_dir()
     search = _read_yaml(d / "search.yaml").get("search", {})
     scoring = _read_yaml(d / "scoring.yaml").get("scoring", {})
     merged = {**search, **scoring}
@@ -311,12 +346,12 @@ def load_profile(config_dir: Path | None = None) -> SearchProfile:
 
 
 def load_keywords(config_dir: Path | None = None) -> KeywordConfig:
-    d = config_dir or CONFIG_DIR
+    d = config_dir or find_config_dir()
     return KeywordConfig(**_read_yaml(d / "keywords.yaml").get("keywords", {}))
 
 
 def load_sources(config_dir: Path | None = None) -> list[SourceConfig]:
-    d = config_dir or CONFIG_DIR
+    d = config_dir or find_config_dir()
     raw = _read_yaml(d / "sources.yaml").get("sources", [])
     return [SourceConfig(**item) for item in raw]
 

@@ -62,6 +62,9 @@ tests/           mirrors src/, one directory per package
 
 ## Running things
 
+After editing anything in `config/`, run `python scripts/sync_config_defaults.py`
+so the copies bundled into the package stay identical. CI fails if they drift.
+
 ```bash
 pip install -e ".[dev,pdf,images]"
 hofradar init-db && hofradar serve
