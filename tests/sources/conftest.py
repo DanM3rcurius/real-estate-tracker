@@ -11,6 +11,7 @@ read the HTML/XML/CSV fixtures this package owns.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,8 @@ def make_source_config() -> Callable[..., SourceConfig]:
             "enabled": True,
             "rate_limit_seconds": 0.0,
             "respect_robots": False,
+            "terms_checked_at": date(2026, 9, 3),
+            "terms_excerpt": "Test fixture source - not a real site, no terms apply.",
             "options": {},
         }
         defaults.update(kwargs)

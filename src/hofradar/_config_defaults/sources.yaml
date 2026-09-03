@@ -18,6 +18,9 @@ sources:
     adapter: manual
     reliability: 0.95
     enabled: true
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Local ingest only, no outbound requests - no site terms apply.
     notes: >
       Paste a listing URL or an entire exposé text into the web UI. Always
       available, never blocked, and the fastest way to get value on day one.
@@ -28,6 +31,9 @@ sources:
     adapter: csv
     reliability: 0.9
     enabled: true
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Local ingest only, no outbound requests - no site terms apply.
     notes: "Bulk import from a spreadsheet export."
 
   - key: zvg_bayern
@@ -39,6 +45,10 @@ sources:
     reliability: 0.95
     enabled: true
     rate_limit_seconds: 3.0
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Official public foreclosure register, published for public inspection.
+      robots.txt permits /index.php; no clause restricting automated retrieval.
     notes: "Official public foreclosure register. Highest-signal hidden source."
     options:
       land_abk: "by"
@@ -50,6 +60,10 @@ sources:
     reliability: 0.75
     enabled: true
     rate_limit_seconds: 2.0
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Terms are a property of each configured feed, not of this adapter. Every
+      entry added to options.feeds/options.sites carries its own check.
     notes: "Feed URLs are configured per broker in options.feeds."
     options:
       feeds: []
@@ -61,6 +75,10 @@ sources:
     reliability: 0.7
     enabled: true
     rate_limit_seconds: 3.0
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Terms are a property of each configured feed, not of this adapter. Every
+      entry added to options.feeds/options.sites carries its own check.
     notes: "Polite sitemap.xml crawl of small broker sites that publish one."
     options:
       sites: []
