@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,6 +30,9 @@ from hofradar.config import KeywordConfig, SearchProfile, load_config
 from hofradar.db.enums import RunStage, SourceRole
 from hofradar.db.models import Property, PropertySource, SearchRun, Source
 from hofradar.db.session import session_scope
+
+if TYPE_CHECKING:
+    from hofradar.sources.base import SourceAdapter
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +142,15 @@ async def run_pipeline(
                             updated_count += 1
                         if change.kind == "price_change":
                             price_changes += 1
+                    # A pre-filter that skips a detail fetch (see e.g.
+                    # DenkmalboerseAdapter's Bezirk/radius gates) never yields
+                    # a RawListing for the URL it skipped, so the "record
+                    # seen before any filter" step above never runs for it
+                    # either. That is not the source withdrawing the listing
+                    # - the row was still examined this run - so any such URL
+                    # a property is already on record under also counts as
+                    # seen, exactly like a yielded one does.
+                    _mark_enumerated_as_seen(session, source, adapter, seen_by_source[source.id])
                     source.last_run_at = datetime.now(UTC)
                     source.consecutive_failures = 0
                     source.last_error = None
@@ -266,6 +278,26 @@ def _known_property_id(session: Session, source_id: int, url: str) -> int | None
             PropertySource.source_id == source_id, PropertySource.url == url
         )
     )
+
+
+def _mark_enumerated_as_seen(
+    session: Session, source: Source, adapter: SourceAdapter, seen: set[int]
+) -> None:
+    """Credit a pre-filtered-but-examined row the same as a yielded one.
+
+    ``adapter.enumerated_urls`` holds every URL discover() looked at this run,
+    including ones a pre-filter chose not to (re-)fetch - see
+    :attr:`hofradar.sources.base.SourceAdapter.enumerated_urls`. Without this,
+    a property whose listing a pre-filter skipped this run - still live, just
+    not re-checked - is indistinguishable from one the source actually
+    stopped carrying, and :func:`hofradar.lifecycle.mark_missing` would write
+    a false REMOVED into append-only history the next time absence detection
+    runs for this source.
+    """
+    for url in adapter.enumerated_urls:
+        known_id = _known_property_id(session, source.id, url)
+        if known_id is not None:
+            seen.add(known_id)
 
 
 async def _llm_review(session: Session, profile: SearchProfile, *, run_id: int | None) -> int:

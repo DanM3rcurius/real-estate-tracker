@@ -23,13 +23,19 @@ catalogue as a ``<table>`` of ``<tr>`` rows, no pagination - so ``discover()``
 row-scans rather than anchor-scans, and a genuinely complete walk of it can
 leave ``enumeration_complete`` true (see ``mark_enumeration_incomplete``
 below). Second, the last ``<td>`` of every row carries the object's
-Regierungsbezirk. On that capture the bundled gazetteer (Upper-Bavaria-only,
-and a real GET only ever reaches it through a town name it already knows) does
-not skip a single fetch, while the Regierungsbezirk alone - checked before the
-gazetteer, on every row - skips the 194 objects outside the configured scope
-with certainty. So it runs first, as a wider and more reliable gate; the
-gazetteer stays as a second, narrower one for the towns it does recognise
-within scope. See ``docs/SOURCES.md`` for the counts.
+Regierungsbezirk. On that capture the bundled gazetteer (Upper-Bavaria-only)
+skips very few rows outright, while the Regierungsbezirk alone - checked
+before the gazetteer, on every row - skips most of the 237 objects with
+certainty. So it runs first, as a wider and more reliable gate; the gazetteer
+stays as a second, narrower one for the towns it does recognise within scope.
+See ``docs/SOURCES.md`` for the counts.
+
+A Bezirk gate that only ever *saves* a fetch must never make it possible for
+a still-live listing to be read as withdrawn: a row either pre-filter skips
+is still recorded in ``self.enumerated_urls`` (see ``SourceAdapter``), because
+``hofradar.pipeline.runner`` needs to tell "skipped this run" apart from
+"the source stopped carrying it" before it ever asks
+``hofradar.lifecycle.mark_missing`` a question about absence.
 """
 
 from __future__ import annotations
@@ -87,10 +93,46 @@ BAVARIAN_REGIERUNGSBEZIRKE: frozenset[str] = frozenset(
 )
 
 #: Regierungsbezirke in scope absent an ``options.regierungsbezirke`` override.
-#: This project's search profile is centred on Upper Bavaria (see
-#: config/search.yaml), so that is the only district worth a detail fetch by
-#: default.
-DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE: tuple[str, ...] = ("Oberbayern",)
+#: Tied to the *default* search profile's ``air_km_max`` (80 km, see
+#: config/search.yaml), not just to "near the origin": Landshut (Nieder-
+#: bayern) is 73.8 km out and Landsberg am Lech (Schwaben) is 73.1 km out by
+#: this project's own ``haversine_km``, both inside that radius, so both
+#: Bezirke belong here even though the search is centred well inside Ober-
+#: bayern. A pre-filter may only ever save a fetch, never lose a property -
+#: an operator who raises ``air_km_max`` well past 80 km should widen
+#: ``options.regierungsbezirke`` to match, since this constant does not
+#: derive itself from the profile at runtime.
+DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE: tuple[str, ...] = ("Oberbayern", "Niederbayern", "Schwaben")
+
+
+def _resolve_in_scope_bezirke(options: dict[str, object]) -> frozenset[str]:
+    """The effective in-scope Regierungsbezirk set for this run.
+
+    ``options`` absent the key at all means "no override" -> the default.
+    An explicit empty list is a deliberate "nothing in scope", not the same
+    thing, so it is honoured as given rather than silently falling back.
+    Matching is case-insensitive so an operator typo like "oberbayern" still
+    lines up with the row value "Oberbayern" - the alternative is a filter
+    that looks configured but matches nothing, silently skipping every row
+    in Bavaria, which is exactly what a pre-filter may never do. Only when
+    *none* of the configured values match any of Bavaria's seven at all -
+    a value that is not a case variant, just wrong - does this fall back to
+    the default, loudly, rather than leave the source silently empty.
+    """
+    if "regierungsbezirke" not in options:
+        return frozenset(DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE)
+    configured = options["regierungsbezirke"] or []
+    folded = {str(value).casefold() for value in configured}
+    in_scope = frozenset(b for b in BAVARIAN_REGIERUNGSBEZIRKE if b.casefold() in folded)
+    if configured and not in_scope:
+        logger.warning(
+            "options.regierungsbezirke=%r matched none of Bavaria's seven "
+            "Regierungsbezirke - falling back to the default %s",
+            configured,
+            DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE,
+        )
+        return frozenset(DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE)
+    return in_scope
 
 
 def _town_from_title(title: str | None) -> str | None:
@@ -115,18 +157,30 @@ def _object_anchor(row: Node) -> Node | None:
     return None
 
 
+#: A "PLZ Ort" address paragraph starts with a 5-digit postcode. Roughly 1 in
+#: 5 rows opens its info cell with a "Kaufpreis: ..." paragraph instead (no
+#: address line at all) - ``row.css_first("p")`` would silently return that
+#: price text there, which is truthy and so would defeat the title fallback
+#: below without ever tripping it. Scanning every ``<p>`` for the one that
+#: actually looks like an address, instead of trusting position, is what
+#: keeps that fallback reachable.
+_ADDRESS_PARAGRAPH_RE = re.compile(r"^\d{5}\s")
+
+
 def _town_from_row(row: Node, title: str | None) -> str | None:
     """The row's "PLZ Ort" address line, falling back to the title heuristics.
 
     The address paragraph (e.g. "84453 Mühldorf am Inn") needs no dash/comma
     splitting and matches the gazetteer far more often than a parsed title
     does - a title's "Mühldorf a. Inn" does not match the gazetteer's
-    "Muehldorf am Inn", but the row's own address line does. The title is only
-    a fallback for a row that is ever missing its address paragraph.
+    "Muehldorf am Inn", but the row's own address line does. The title is the
+    fallback for a row that has no address paragraph, which real rows do.
     """
-    address = row.css_first("p")
-    address_text = address.text(strip=True) if address is not None else None
-    return address_text or _town_from_title(title)
+    for paragraph in row.css("p"):
+        text = paragraph.text(strip=True)
+        if _ADDRESS_PARAGRAPH_RE.match(text):
+            return text
+    return _town_from_title(title)
 
 
 def _regierungsbezirk_from_row(row: Node) -> str | None:
@@ -177,78 +231,97 @@ class DenkmalboerseAdapter(SourceAdapter):
         tree = HTMLParser(response.text)
         rows = tree.css("tbody tr")
 
-        in_scope = frozenset(
-            self.options.get("regierungsbezirke") or DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE
-        )
+        in_scope = _resolve_in_scope_bezirke(self.options)
 
         seen: set[str] = set()
         object_count = 0
         any_detail_failed = False
+        rows_walked_fully = False
 
-        for row in rows:
-            anchor = _object_anchor(row)
-            if anchor is None:
-                continue
-            href = anchor.attributes.get("href") or ""
-            match = OBJECT_HREF_RE.search(href)
-            if match is None:
-                continue
-            object_id = match.group(1)
-            if object_id in seen:
-                continue
-            seen.add(object_id)
-            object_count += 1
+        try:
+            for row in rows:
+                anchor = _object_anchor(row)
+                if anchor is None:
+                    continue
+                href = anchor.attributes.get("href") or ""
+                match = OBJECT_HREF_RE.search(href)
+                if match is None:
+                    continue
+                object_id = match.group(1)
+                if object_id in seen:
+                    continue
+                seen.add(object_id)
+                object_count += 1
 
-            # The primary pre-filter: on the 2026-09-03 capture this alone
-            # skips 194 of 237 rows with certainty, dwarfing what the
-            # gazetteer saves on the same response (see docs/SOURCES.md). Only
-            # a value this adapter actually recognises as a Regierungsbezirk
-            # may reject a row - anything else (missing, mangled, a template
-            # change) falls through, same as the gazetteer's None.
-            bezirk = _regierungsbezirk_from_row(row)
-            if bezirk in BAVARIAN_REGIERUNGSBEZIRKE and bezirk not in in_scope:
-                logger.debug(
-                    "%s: skipping %s - Regierungsbezirk %r out of scope",
-                    self.key,
-                    object_id,
-                    bezirk,
+                detail_url = urljoin(self.base_url, match.group(0))
+                # Examined this run whether or not a pre-filter below skips
+                # its fetch: a filtered row is a choice not to re-check
+                # something already on file, never a claim the source
+                # withdrew it. See SourceAdapter.enumerated_urls.
+                self.record_enumerated_url(detail_url)
+
+                # The primary pre-filter: on the 2026-09-03 capture this
+                # alone skips most rows with certainty, dwarfing what the
+                # gazetteer saves on the same response (see
+                # docs/SOURCES.md). Only a value this adapter actually
+                # recognises as a Regierungsbezirk may reject a row -
+                # anything else (missing, mangled, a template change) falls
+                # through, same as the gazetteer's None.
+                bezirk = _regierungsbezirk_from_row(row)
+                if bezirk in BAVARIAN_REGIERUNGSBEZIRKE and bezirk not in in_scope:
+                    logger.debug(
+                        "%s: skipping %s - Regierungsbezirk %r out of scope",
+                        self.key,
+                        object_id,
+                        bezirk,
+                    )
+                    continue
+
+                title = anchor.text(strip=True)
+                # The second, narrower pre-filter. It may only ever save a
+                # fetch: False means the gazetteer is sure this is outside
+                # the radius; None means it has never heard of the place,
+                # which is precisely where a hamlet with a farmstead lives -
+                # so None still falls through to a fetch.
+                if town_in_radius(_town_from_row(row, title), profile) is False:
+                    logger.debug(
+                        "%s: skipping %s (%s) - outside radius", self.key, object_id, title
+                    )
+                    continue
+
+                listing = await self.fetch_detail(detail_url)
+                if listing is None:
+                    any_detail_failed = True
+                    continue
+                yield listing
+            rows_walked_fully = True
+        finally:
+            # Invariant 4b: absence needs a complete enumeration, not just
+            # permission. A consumer that stops draining early (a caller
+            # that breaks out of the loop) tears this generator down via
+            # GeneratorExit at the last yield, same as any other early exit
+            # - the ``finally`` here is what still runs the check below in
+            # that case, rather than silently leaving the True that
+            # begin_enumeration() set. A zero-row parse is indistinguishable
+            # from a template change that broke every selector above, and a
+            # detail page that failed to fetch means this run did not
+            # actually see everything the index promised - either way, this
+            # run's silence must not be read as "everything else was
+            # removed".
+            if not rows_walked_fully:
+                self.mark_enumeration_incomplete(
+                    "discover() was not fully consumed - only "
+                    f"{object_count} row(s) were examined"
                 )
-                continue
-
-            title = anchor.text(strip=True)
-            # The second, narrower pre-filter. It may only ever save a fetch:
-            # False means the gazetteer is sure this is outside the radius;
-            # None means it has never heard of the place, which is precisely
-            # where a hamlet with a farmstead lives - so None still falls
-            # through to a fetch.
-            if town_in_radius(_town_from_row(row, title), profile) is False:
-                logger.debug(
-                    "%s: skipping %s (%s) - outside radius", self.key, object_id, title
+            elif object_count == 0:
+                self.mark_enumeration_incomplete(
+                    "parsed zero object rows from the search CGI response - "
+                    "possibly a template change"
                 )
-                continue
-
-            detail_url = urljoin(self.base_url, match.group(0))
-            listing = await self.fetch_detail(detail_url)
-            if listing is None:
-                any_detail_failed = True
-                continue
-            yield listing
-
-        # Invariant 4b: absence needs a complete enumeration, not just
-        # permission. A zero-row parse is indistinguishable from a template
-        # change that broke every selector above, and a detail page that
-        # failed to fetch means this run did not actually see everything the
-        # index promised - either way, this run's silence must not be read as
-        # "everything else was removed".
-        if object_count == 0:
-            self.mark_enumeration_incomplete(
-                "parsed zero object rows from the search CGI response - "
-                "possibly a template change"
-            )
-        elif any_detail_failed:
-            self.mark_enumeration_incomplete(
-                "one or more detail fetches failed during this run"
-            )
+            elif any_detail_failed:
+                self.mark_enumeration_incomplete(
+                    "one or more detail fetches failed during this run"
+                )
 
     async def fetch_detail(self, url: str) -> RawListing | None:
         try:

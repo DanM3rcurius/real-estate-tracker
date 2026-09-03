@@ -130,7 +130,9 @@ async def test_discover_skips_the_detail_fetch_for_an_out_of_radius_town(
         respx.get(INDEX).mock(
             return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
         )
-        detail = respx.get(out_of_radius_detail).mock(return_value=httpx.Response(200, text="<html></html>"))
+        detail = respx.get(out_of_radius_detail).mock(
+            return_value=httpx.Response(200, text="<html></html>")
+        )
         # Every other row that survives the Bezirk and radius gates at 60km -
         # a respx catch-all so this test does not need to enumerate them.
         respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
@@ -148,8 +150,8 @@ async def test_discover_fetches_an_unknown_town_rather_than_discarding_it(
 ) -> None:
     # Object 009199, "Attraktives Ackerbürgerhaus in Ingolstadt", is a real
     # Oberbayern row ("85049 Ingolstadt") the bundled gazetteer has never
-    # heard of - one of the 37-of-43 unknown-town rows docs/SOURCES.md
-    # records. It must still reach fetch_detail.
+    # heard of - one of the 32-of-43 unknown-town Oberbayern rows
+    # docs/SOURCES.md records. It must still reach fetch_detail.
     adapter = get_adapter(
         make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
     )
@@ -162,8 +164,9 @@ async def test_discover_fetches_an_unknown_town_rather_than_discarding_it(
         detail = respx.get(unknown_town_detail).mock(
             return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME))
         )
-        # The other 42 in-scope (Oberbayern) rows also fall through at this
-        # profile's default radius (none of them are known-and-outside).
+        # The other 97 in-scope rows (default scope: Oberbayern, Nieder-
+        # bayern, Schwaben - 98 rows total) also fall through at this
+        # profile's default radius (the gazetteer skips none of them either).
         others = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
             return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
         )
@@ -172,7 +175,7 @@ async def test_discover_fetches_an_unknown_town_rather_than_discarding_it(
 
     assert detail.called, "an unknown town must fall through to the full path"
     assert any(item.external_id == "009199" for item in listings)
-    assert others.call_count == 42
+    assert others.call_count == 97
 
 
 @pytest.mark.asyncio
@@ -180,9 +183,11 @@ async def test_discover_skips_detail_fetches_for_out_of_scope_regierungsbezirk(
     make_source_config, search_profile, sample_keywords, read_fixture
 ) -> None:
     """The real capture carries 237 rows across all seven Regierungsbezirke;
-    only 43 are Oberbayern, the in-scope default. The Bezirk column - checked
-    before the gazetteer - must skip the other 194 with certainty, which is
-    the entire reason it runs first (see the adapter's module docstring).
+    98 are Oberbayern (43), Niederbayern (27) or Schwaben (28) - the default
+    in-scope set, tied to this profile's 80km radius (see
+    DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE). The Bezirk column - checked before
+    the gazetteer - must skip the other 139 with certainty, which is the
+    entire reason it runs first (see the adapter's module docstring).
     """
     adapter = get_adapter(
         make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
@@ -198,8 +203,8 @@ async def test_discover_skips_detail_fetches_for_out_of_scope_regierungsbezirk(
 
         listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
 
-    assert details.call_count == 43, "only the 43 Oberbayern rows should reach fetch_detail"
-    assert len(listings) == 43
+    assert details.call_count == 98, "only the 98 in-scope-Bezirk rows should reach fetch_detail"
+    assert len(listings) == 98
 
 
 @pytest.mark.asyncio
@@ -230,6 +235,98 @@ async def test_discover_regierungsbezirk_option_overrides_the_default_scope(
 
     assert details.call_count == 38, "the real capture carries 38 Mittelfranken rows"
     assert len(listings) == 38
+
+
+@pytest.mark.asyncio
+async def test_discover_regierungsbezirk_option_is_case_insensitive(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """An operator typo like "oberbayern" must still match the row value
+    "Oberbayern" - the alternative is a filter that looks configured but
+    matches nothing, silently skipping every row in Bavaria, which is exactly
+    what a pre-filter may never do.
+    """
+    adapter = get_adapter(
+        make_source_config(
+            key="denkmalboerse",
+            adapter="denkmalboerse",
+            base_url=BASE,
+            options={"regierungsbezirke": ["oberbayern"]},
+        )
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        details = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert details.call_count == 43, "case must not matter: still just the Oberbayern rows"
+
+
+@pytest.mark.asyncio
+async def test_discover_regierungsbezirk_empty_option_means_nothing_in_scope(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """An explicit empty list is a deliberate "nothing in scope", distinct
+    from the key being absent entirely (which means "use the default").
+    """
+    adapter = get_adapter(
+        make_source_config(
+            key="denkmalboerse",
+            adapter="denkmalboerse",
+            base_url=BASE,
+            options={"regierungsbezirke": []},
+        )
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        details = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert details.call_count == 0
+    assert listings == []
+
+
+@pytest.mark.asyncio
+async def test_discover_regierungsbezirk_garbage_option_falls_back_to_default(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """A configured value that matches none of Bavaria's seven Bezirke at
+    all (not a case variant, just wrong) must not silently zero the source's
+    yield - it falls back to the default rather than reject every property
+    on a config nobody can act on.
+    """
+    adapter = get_adapter(
+        make_source_config(
+            key="denkmalboerse",
+            adapter="denkmalboerse",
+            base_url=BASE,
+            options={"regierungsbezirke": ["Nordrhein-Westfalen"]},
+        )
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        details = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert details.call_count == 98, "an unrecognisable override falls back to the default scope"
 
 
 @pytest.mark.asyncio
@@ -348,6 +445,63 @@ async def test_discover_marks_enumeration_incomplete_when_no_object_rows_parse(
 
     assert adapter.enumeration_complete is False
     assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_enumeration_incomplete_when_not_fully_consumed(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """A consumer that stops draining early must not leave
+    ``can_prove_absence`` true for a walk it never actually finished.
+    ``hofradar.pipeline.runner`` always drains discover() fully today, so
+    this is latent rather than an observed failure - but the adapter's own
+    honesty must not depend on that being true forever, hence the
+    ``finally`` in discover() this pins.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        gen = adapter.discover(search_profile, sample_keywords)
+        drained = 0
+        async for _item in gen:
+            drained += 1
+            if drained >= 3:
+                break
+        await gen.aclose()
+
+    assert drained == 3
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_enumeration_incomplete_on_a_transport_error(
+    make_source_config, search_profile, sample_keywords
+) -> None:
+    """The initial GET can fail outright (DNS, a reset connection) rather
+    than come back with an HTTP error status - a distinct branch from the
+    non-200 case below.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(side_effect=httpx.ConnectError("boom"))
+
+        with pytest.raises(SourceDiscoveryError):
+            [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert adapter.enumeration_complete is False
 
 
 @pytest.mark.asyncio
