@@ -226,3 +226,24 @@ that no later work can repair.
 
 **Consequence.** `scripts/backup_db.py` runs before any migration, and
 `render_as_batch=True` is set because SQLite cannot ALTER a column in place.
+
+---
+
+## 15. An expired advert and a removed listing are different facts
+
+**Decision.** `ListingStatus.EXPIRED` is a distinct status, set when a source
+that sells a fixed advertising window (`listing_ttl_days`) stops carrying a
+listing that has been up for at least that long. `EXPIRED` is not in
+`GONE_STATUSES`.
+
+**Why.** A regional newspaper's ad package runs two weeks. Reading its silence
+as REMOVED marks every listing gone on a fortnightly timer, drops live
+farmsteads out of the ranking through `REJECT_LISTING_GONE`, and turns the
+change feed into a REMOVED/REACTIVATED metronome that fills a ten-entry digest
+with churn. Decision 4 says a source's *role* decides what it may prove; this
+adds that a source's *retention policy* decides what its silence means.
+
+**Alternative rejected.** Classifying such sources as `discovery` so their
+silence proves nothing. That would also forfeit their ability to verify a
+listing is live and to set freshness — both of which a newspaper legitimately
+can do. The retention policy is the narrower and truer fix.

@@ -35,6 +35,7 @@ class ListingStatus(StrEnum):
     PRICE_CHANGED = "price_changed"
     STALE = "stale"
     REMOVED = "removed"
+    EXPIRED = "expired"  # the advert's paid run ended; says nothing about the property
     SOLD = "sold"
     FORECLOSURE = "foreclosure"
     OFF_MARKET_SIGNAL = "off_market_signal"

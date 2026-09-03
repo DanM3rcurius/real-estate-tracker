@@ -326,6 +326,10 @@ class SourceConfig(BaseModel):
     enabled: bool = False
     rate_limit_seconds: float = 2.0
     respect_robots: bool = True
+    #: How many days a listing stays up before the advert simply expires. Set
+    #: for sources that sell a fixed ad window (a newspaper's two weeks), so
+    #: their silence after that window is read as EXPIRED, not REMOVED.
+    listing_ttl_days: int | None = None
     notes: str | None = None
     #: The day somebody actually read this source's robots.txt and terms, and
     #: what they found. A source nobody has checked may be written and tested,

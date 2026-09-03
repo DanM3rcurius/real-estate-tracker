@@ -83,6 +83,10 @@ class Source(Base, TimestampMixin):
     #: Per-source politeness. Adapters must honour this.
     rate_limit_seconds: Mapped[float] = mapped_column(Float, default=2.0)
     respect_robots: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Fixed advertising window (days) for sources that sell one, e.g. a
+    #: newspaper's fortnight. None means the source has no such window and its
+    #: silence, once allowed to prove anything at all, always means REMOVED.
+    listing_ttl_days: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     notes: Mapped[str | None] = mapped_column(Text)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
 

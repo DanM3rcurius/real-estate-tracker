@@ -22,13 +22,19 @@ the aggregator reindexed, not that the farm sold. So:
   is the guard against that: a run that saw nothing from a source that used to
   carry a real inventory, or that would remove an implausibly large slice of
   it in one pass, is refused outright rather than written to the append-only
-  history where the fiction can never be told apart from the truth later.
+  history where the fiction can never be told apart from the truth later;
+* and a source can be telling the truth while still explaining nothing about
+  the farmstead. A source with ``listing_ttl_days`` (a newspaper's ad package)
+  loses most or all of its inventory on a fixed timer, not because the market
+  moved. :func:`_absence_status` splits those out as EXPIRED *before* either
+  guard above runs, so a fortnightly billing cycle is never mistaken for the
+  parser rot the guards exist to catch.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -67,6 +73,26 @@ IMPLAUSIBLE_ABSENCE_MIN_MISSING = 2
 
 class ImplausibleAbsence(RuntimeError):
     """A run's absences are too broad to be believed, so nothing is written."""
+
+
+def _absence_status(source: Source, prop: Property, now: datetime) -> str:
+    """Did the advert expire on a timer, or did the seller actually withdraw it?
+
+    A source with a ``listing_ttl_days`` sells a fixed advertising window (a
+    newspaper's two weeks). Once a listing has been up for at least that long,
+    its disappearance is the billing cycle ending and carries no information
+    about the farmstead. Before that window, or for a source with no such
+    window at all, a disappearance is the seller acting - real news, handled
+    as REMOVED exactly as before.
+    """
+    ttl = source.listing_ttl_days
+    if not ttl:
+        return ListingStatus.REMOVED
+    first_seen = _rules.as_utc(prop.first_seen)
+    if first_seen is None:
+        return ListingStatus.REMOVED
+    age_days = (now - first_seen).days
+    return ListingStatus.EXPIRED if age_days >= ttl else ListingStatus.REMOVED
 
 
 #: Default patience before an unseen ACTIVE property is called STALE.
@@ -126,6 +152,39 @@ def mark_missing(
         )
     ).scalars().all()
 
+    # Expiring adverts are separated out before either plausibility guard
+    # below runs, and transitioned to EXPIRED immediately: a source that sells
+    # a fixed advertising window (listing_ttl_days) legitimately clears a
+    # large slice - sometimes all - of its inventory on a fortnightly timer,
+    # which is exactly the shape both guards exist to reject for a source
+    # whose silence really does mean the market moved. Only what is left after
+    # this split - a disappearance the TTL cannot explain - ever reaches the
+    # guards or the REMOVED loop.
+    missing = [ps for ps in rows if ps.property_id not in seen]
+    genuinely_missing: list[PropertySource] = []
+    for ps in missing:
+        prop = session.get(Property, ps.property_id)
+        # A missing or already-merged property falls straight through to
+        # genuinely_missing unexamined - exactly as it did before this split
+        # existed. It is a no-op in the write loop below either way; what
+        # matters here is that it is not silently pulled out of the guards'
+        # accounting the way a real expiry is.
+        if (
+            prop is not None
+            and prop.merged_into_id is None
+            and _absence_status(source, prop, now) is ListingStatus.EXPIRED
+        ):
+            ps.last_listing_visible = False
+            if prop.listing_status != ListingStatus.EXPIRED:
+                _transition(
+                    session, prop, ListingStatus.EXPIRED, ChangeKind.STATUS_CHANGE,
+                    detail=f"advert window of {source.listing_ttl_days} days elapsed "
+                           f"({source.key})",
+                    run_id=run_id, now=now,
+                )
+            continue
+        genuinely_missing.append(ps)
+
     # Last line of defence against silent parser rot. A site redesign makes
     # selectors match nothing: HTTP 200, no exception, zero results - and the
     # enumeration looks complete. This guard is deliberately unconditional on
@@ -137,8 +196,11 @@ def mark_missing(
     # (a missed removal is a stale row; a wrong removal is lost history), so
     # we refuse to write anything and make the operator look instead - a
     # returned [] here reads as "a quiet run", which is exactly the fiction
-    # that must not survive.
-    if rows and not seen:
+    # that must not survive. It is gated on genuinely_missing, not missing: a
+    # source whose entire "absence" this run is explained by expired adverts
+    # (all still visible rows just aged out of a fortnightly window) is not a
+    # parser matching nothing, and must not be refused as if it were.
+    if rows and not seen and genuinely_missing:
         raise ImplausibleAbsence(
             f"source {source.key!r} saw nothing while {len(rows)} of its listings "
             "are still marked visible; refusing to mark them removed"
@@ -152,19 +214,24 @@ def mark_missing(
     # Skipping single removals here is what keeps a small source from
     # deadlocking: without the floor, a 3-listing source losing exactly one
     # (33%) would raise every run forever, since a refused run writes nothing
-    # and the next run sees the same "still visible" row again.
-    missing = [ps for ps in rows if ps.property_id not in seen]
-    if len(rows) >= FRACTION_GUARD_MIN_ROWS and len(missing) >= IMPLAUSIBLE_ABSENCE_MIN_MISSING:
-        fraction = len(missing) / len(rows)
+    # and the next run sees the same "still visible" row again. The
+    # denominator stays len(rows) - the source's whole visible inventory - so
+    # an expiring source is judged by what fraction of it is a *real*
+    # disappearance, not by a fraction of an already-filtered count.
+    if (
+        len(rows) >= FRACTION_GUARD_MIN_ROWS
+        and len(genuinely_missing) >= IMPLAUSIBLE_ABSENCE_MIN_MISSING
+    ):
+        fraction = len(genuinely_missing) / len(rows)
         if fraction >= IMPLAUSIBLE_ABSENCE_FRACTION:
             raise ImplausibleAbsence(
-                f"source {source.key!r} would remove {len(missing)} of {len(rows)} "
-                f"listings ({fraction:.0%}); refusing above "
+                f"source {source.key!r} would remove {len(genuinely_missing)} of "
+                f"{len(rows)} listings ({fraction:.0%}); refusing above "
                 f"{IMPLAUSIBLE_ABSENCE_FRACTION:.0%}"
             )
 
     changes: list[ChangeResult] = []
-    for ps in missing:
+    for ps in genuinely_missing:
         ps.last_listing_visible = False
         prop = session.get(Property, ps.property_id)
         if prop is None or prop.merged_into_id is not None:
