@@ -128,7 +128,20 @@ def build_report(session, profile: SearchProfile, *, run_id: int | None = None,
                  since: datetime | None = None) -> ReportData
 def render_markdown(data: ReportData) -> str
 def render_html(data: ReportData) -> str
+
+# hofradar.report.yield_stats - was a source worth building?
+@dataclass
+class SourceYield:
+    source_key: str
+    observed: int    # distinct properties observed since `since`
+    in_radius: int    # of those, how many have distance_air_km <= YIELD_RADIUS_AIR_KM
+                       # (an unknown distance is never counted as in-radius)
+
+def source_yield(session, *, since: datetime) -> list[SourceYield]
 ```
+
+`ReportData.source_yields` carries a `source_yield(..., since=now - 28 days)`
+snapshot into both renderers - see docs/DECISIONS.md entry 14.
 
 ## `hofradar.pipeline`
 

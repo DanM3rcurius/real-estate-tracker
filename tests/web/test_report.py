@@ -140,6 +140,38 @@ def test_render_html_is_an_embeddable_fragment(db, seeded, default_profile):
     assert data.week_label in html
 
 
+def test_report_shows_source_yield_with_in_radius_as_its_own_column(db, source, default_profile):
+    """Both renderers must carry the yield section, and never fold in_radius into observed.
+
+    A source that parses perfectly and yields nothing inside the radius is a
+    source that should not have been built - see hofradar.report.yield_stats.
+    If someone deletes the "Quellen-Ausbeute" section or collapses in_radius
+    into the total, that regression must fail a test, not just a hand-check.
+    """
+    near = make_property(db, public_id="HF-YIELD-NEAR", distance_air_km=30.0)
+    far = make_property(db, public_id="HF-YIELD-FAR", distance_air_km=250.0)
+    add_observation(db, near, source, at=NOW - timedelta(days=1))
+    add_observation(db, far, source, at=NOW - timedelta(days=1))
+
+    data = build_report(db, default_profile, since=since_week(), now=NOW)
+    row = next(r for r in data.source_yields if r.source_key == source.key)
+    assert row.observed == 2
+    assert row.in_radius == 1  # only the near property is inside the profile's radius
+
+    heading = f"## Quellen-Ausbeute (letzte {data.yield_window_weeks} Wochen)"
+    markdown = render_markdown(data)
+    assert heading in markdown
+    # Both counts must appear as distinct table cells - not one number covering both.
+    assert f"| {source.key} | {row.observed} | {row.in_radius} |" in markdown
+
+    html = render_html(data)
+    assert f"<h2>Quellen-Ausbeute (letzte {data.yield_window_weeks} Wochen)</h2>" in html
+    assert (
+        f'<th scope="row">{source.key}</th><td>{row.observed}</td><td>{row.in_radius}</td>'
+        in html
+    )
+
+
 def test_report_entry_never_borrows_air_distance_for_driving(db, seeded, default_profile):
     data = build_report(db, default_profile, since=since_week(), now=NOW)
     entry = next(e for e in data.entries if e.public_id == "HF-0001")

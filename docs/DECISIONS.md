@@ -226,3 +226,25 @@ that no later work can repair.
 
 **Consequence.** `scripts/backup_db.py` runs before any migration, and
 `render_as_batch=True` is set because SQLite cannot ALTER a column in place.
+
+---
+
+## 14. A source's yield is reported, and a source's terms gate its enablement
+
+**Decision.** The weekly report carries per-source *in-radius* yield, and
+`SourceConfig` refuses `enabled: true` without a recorded `terms_checked_at`
+and `terms_excerpt`.
+
+**Why.** Two failures that a green test suite cannot detect. A source can parse
+perfectly and produce nothing inside the radius, which is invisible unless the
+number is printed; and a source's terms can forbid the whole approach, which is
+invisible until somebody reads them — after the abstractions built on it exist.
+Both are cheap to prevent and expensive to discover late.
+
+**Consequence.** New sources carry a yield expectation before they are built.
+The Denkmalbörse's is 5 in-radius objects across its first four runs; below
+that, the dependent scoring and cost work does not start. The Denkmalbörse
+itself ships in `config/sources.yaml` with `enabled: false` and no
+`terms_checked_at` / `terms_excerpt` — its terms check is still outstanding
+(see `docs/SOURCES.md`), and this decision's own gate is what keeps it off
+until that is resolved for real, rather than with a placeholder.

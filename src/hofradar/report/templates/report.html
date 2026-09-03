@@ -29,6 +29,24 @@
     </table>
   </section>
 
+  <section class="hof-report__yield">
+    <h2>Quellen-Ausbeute (letzte {{ data.yield_window_weeks }} Wochen)</h2>
+    {% if not data.source_yields %}
+      <p class="hof-report__empty">Keine Beobachtungen im Zeitraum.</p>
+    {% else %}
+    <table>
+      <thead>
+        <tr><th scope="col">Quelle</th><th scope="col">Objekte gesehen</th><th scope="col">davon im Radius</th></tr>
+      </thead>
+      <tbody>
+        {% for row in data.source_yields %}
+        <tr><th scope="row">{{ row.source_key }}</th><td>{{ row.observed | de_number }}</td><td>{{ row.in_radius | de_number }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
   <section class="hof-report__shortlist">
     <h2>Shortlist</h2>
     {% if not data.entries %}
