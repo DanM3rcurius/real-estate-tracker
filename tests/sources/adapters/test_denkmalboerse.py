@@ -18,6 +18,7 @@ import respx
 
 from hofradar.config import RadiusConfig
 from hofradar.sources import get_adapter
+from hofradar.sources.adapters.denkmalboerse import _town_from_title
 
 BASE = "https://www.blfd.bayern.de"
 DETAIL = f"{BASE}/information-service/denkmalboerse/objekte/005816/index.html"
@@ -45,6 +46,9 @@ async def test_fetch_detail_requests_the_static_object_page(
     assert listing.external_id == "005816"
     # Contact is published in the exposé itself - not Chiffre, not via the Amt.
     assert listing.contact_kind == "private"
+    # The only fixture-dependent claim in this file: it holds because the
+    # synthetic fixture happens to carry an og:title _htmlutil prefers, not
+    # because BLfD's real markup has been validated against this adapter.
     assert "Altenstadt" in (listing.title or "")
 
 
@@ -128,3 +132,51 @@ async def test_discover_fetches_an_unknown_town_rather_than_discarding_it(
 
     assert detail.called, "an unknown town must fall through to the full path"
     assert len(listings) == 1
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        # A spaced dash sets off a district suffix.
+        ("Historische Hofstelle in Reichenschwand - Leuzenberg", "Reichenschwand"),
+        # A comma sets off a district/region, same as a spaced dash.
+        ("Bauernhaus in Rosenheim, Oberbayern", "Rosenheim"),
+        ("Hof in Bruckmühl, Ortsteil Götting", "Bruckmühl"),
+        # An unspaced hyphen is part of the town's own name, not a separator.
+        ("Pfarrhof in Neumarkt-Sankt Veit", "Neumarkt-Sankt Veit"),
+        # No separator at all: the whole remainder is the town.
+        ("Kleinbauernhof in Altenstadt bei Schongau", "Altenstadt bei Schongau"),
+        ("Historische Hofstelle in Hinterdupfing", "Hinterdupfing"),
+        # An em dash is recognised as a district separator too.
+        ("Hofstelle in Bad Aibling — Mietraching", "Bad Aibling"),
+    ],
+)
+def test_town_from_title_separates_the_town_from_a_district_suffix(
+    title: str, expected: str
+) -> None:
+    assert _town_from_title(title) == expected
+
+
+@pytest.mark.asyncio
+async def test_discover_never_claims_a_complete_enumeration(
+    make_source_config, search_profile, sample_keywords
+) -> None:
+    """Invariant 4b: enumerates=True (the class default) plus role=primary
+    would make can_prove_absence True unless discover() says otherwise - and
+    a bare GET against the search CGI has never been checked against a real
+    response for pagination or a search-form-instead-of-results reply (see
+    the OUTSTANDING note in docs/SOURCES.md). So this run's silence must
+    never be readable as "everything else was removed", regardless of what
+    the mocked response here looks like.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+    index = f"{BASE}/cgi-bin/fts_search_verkauf.pl"
+
+    with respx.mock:
+        respx.get(index).mock(return_value=httpx.Response(200, text="<html></html>"))
+        [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False

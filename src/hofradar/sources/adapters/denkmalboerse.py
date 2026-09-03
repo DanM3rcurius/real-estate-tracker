@@ -49,11 +49,16 @@ SEARCH_PATH = "/cgi-bin/fts_search_verkauf.pl"
 #: Object detail pages: /information-service/denkmalboerse/objekte/007148/index.html
 OBJECT_HREF_RE = re.compile(r"/information-service/denkmalboerse/objekte/(\d{6})/index\.html")
 #: Titles read "Historische Hofstelle in Reichenschwand - Leuzenberg" (a district
-#: suffix set off by a *spaced* dash) or "Pfarrhof in Neumarkt-Sankt Veit" (a
+#: suffix set off by a *spaced* dash), "Bauernhaus in Rosenheim, Oberbayern" (a
+#: district/region set off by a comma), or "Pfarrhof in Neumarkt-Sankt Veit" (a
 #: town name that itself contains an unspaced hyphen). Only a dash with
-#: whitespace on both sides is treated as the district separator, so a
-#: hyphenated town name is never truncated.
-TITLE_TOWN_RE = re.compile(r"\bin\s+([^,]+?)(?=\s[-–]\s|$)", re.IGNORECASE)
+#: whitespace on both sides, or a comma, ends the town - so a hyphenated town
+#: name is never truncated, and a comma-separated district still is. Trailing
+#: prose with none of those separators (e.g. "in Schwindegg zu verkaufen") is
+#: not specially handled: the false positive just costs one extra fetch the
+#: gazetteer would otherwise have saved, and guessing at a stoplist of German
+#: verb phrases is not worth the regex complexity it would add.
+TITLE_TOWN_RE = re.compile(r"\bin\s+([^,]+?)(?=\s[-–—]\s|,|$)", re.IGNORECASE)
 
 
 def _town_from_title(title: str | None) -> str | None:
@@ -79,7 +84,20 @@ class DenkmalboerseAdapter(SourceAdapter):
         if not self.base_url:
             raise SourceDiscoveryError(f"{self.key}: no base_url configured")
 
-        index_url = self.base_url.rstrip("/") + SEARCH_PATH
+        self.begin_enumeration()
+        # This adapter has never seen a real response from the search CGI (see
+        # the OUTSTANDING note in docs/SOURCES.md): whether a bare GET returns
+        # every current object, only one page of a paginated list, or a search
+        # *form* instead of results is unverified. Per invariant 4b, being
+        # allowed to verify (role=primary) is not the same as having listed
+        # everything, so this run's silence may never be read as "removed"
+        # until a real capture confirms what a bare GET actually returns.
+        self.mark_enumeration_incomplete(
+            "search CGI response shape (pagination / form-vs-results) has "
+            "never been captured against a real response"
+        )
+
+        index_url = urljoin(self.base_url, SEARCH_PATH)
         response = await self.client.get(index_url)
         tree = HTMLParser(response.text)
 
@@ -111,7 +129,11 @@ class DenkmalboerseAdapter(SourceAdapter):
                 yield listing
 
     async def fetch_detail(self, url: str) -> RawListing | None:
-        response = await self.client.get(url)
+        try:
+            response = await self.client.get(url)
+        except Exception as exc:  # noqa: BLE001 - one bad detail page must not abort the run
+            logger.warning("%s: fetch_detail failed for %s: %s", self.key, url, exc)
+            return None
         if response.status_code >= 400:
             return None
         listing = raw_listing_from_html(
