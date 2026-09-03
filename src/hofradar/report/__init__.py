@@ -5,7 +5,7 @@ Public surface (see ``docs/MODULE_API.md``)::
     build_report(session, profile, *, run_id=None, since=None) -> ReportData
     render_markdown(data) -> str
     render_html(data) -> str
-    source_yield(session, *, since) -> list[SourceYield]
+    source_yield(session, *, since, radius_air_km=None) -> list[SourceYield]
 
 ``ReportData`` (and its parts) are exported because they appear in those
 signatures. ``save_report`` / ``latest_report`` / ``list_reports`` are exported

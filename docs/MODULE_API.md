@@ -137,7 +137,11 @@ class SourceYield:
     in_radius: int    # of those, how many have distance_air_km <= YIELD_RADIUS_AIR_KM
                        # (an unknown distance is never counted as in-radius)
 
-def source_yield(session, *, since: datetime) -> list[SourceYield]
+def source_yield(session, *, since: datetime, radius_air_km: float | None = None) -> list[SourceYield]
+    # radius_air_km overrides the "in radius" threshold; omit it and the module
+    # falls back to YIELD_RADIUS_AIR_KM. build_report always passes the
+    # configured profile.radius.air_km_max, so the table matches the radius
+    # printed in the report header rather than an unrelated hardcoded value.
 ```
 
 `ReportData.source_yields` carries a `source_yield(..., since=now - 28 days)`
