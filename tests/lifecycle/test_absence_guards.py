@@ -8,10 +8,17 @@ observation history where it cannot be distinguished from the truth later.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from hofradar.db.enums import ChangeKind, ListingStatus, SourceRole
+from hofradar.db.models import PropertySource
 from hofradar.lifecycle import ImplausibleAbsence, ingest, mark_missing
+
+#: Older than any ``listing_ttl_days`` a source in the registry sets, so every
+#: advert in the TTL test below is unambiguously past its paid window.
+_PAST_ANY_TTL_DAYS = 60
 
 #: Deliberately spread across town, postcode, land and year so the
 #: deduplicator never folds them into one property - a collision here would
@@ -98,6 +105,62 @@ def test_two_row_empty_seen_set_still_raises(session, make_source, make_listing)
         mark_missing(session, set(), source=source, enumeration_complete=True)
 
     assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
+
+
+def test_a_ttl_source_that_saw_nothing_is_refused_like_any_other(
+    session, make_source, make_listing
+) -> None:
+    """The empty-seen-set guard must sit BEFORE the TTL expiry split.
+
+    A source with ``listing_ttl_days`` has every one of its aged-out rows
+    reclassified as EXPIRED before either plausibility guard would otherwise
+    look at them. Gate the empty-seen-set guard on what survives that split
+    and a TTL source has *no* absence guard left at all: a template change
+    that parses zero listings walks straight through and writes one false
+    EXPIRED StatusHistory row per listing, then returns ``[]`` - a run
+    indistinguishable from a quiet one, with the fiction now permanent in the
+    append-only history.
+
+    A ``listing_ttl_days`` explains why an individual advert vanished. It
+    explains nothing about why the run produced no rows at all, so it may not
+    excuse one. The genuine fortnightly mass-expiry this must not break is a
+    different shape - some ads age out while the rest of the inventory is
+    still listed, so the seen-set is not empty - and it is pinned separately
+    in ``tests/lifecycle/test_listing_ttl.py``.
+    """
+    source = make_source(key="ovbimmo", role=SourceRole.LOCAL, listing_ttl_days=14)
+    props = []
+    for index, (town, postcode, land, year) in enumerate(_DISTINCT_PLACES[:4]):
+        listing = make_listing(
+            source_key=source.key,
+            url=f"https://ovbimmo.example/immobilien/objekt-{index}",
+            town=town,
+            postcode=postcode,
+            land_sqm=land,
+            year_built=year,
+        )
+        prop, _ = ingest(session, listing, source=source, run_id=1)
+        props.append(prop)
+    session.flush()
+    # Every advert is older than the two-week window, so without the fix every
+    # missing row is classified EXPIRED and neither guard ever engages.
+    for ps in session.query(PropertySource).all():
+        ps.first_seen = datetime.now(UTC) - timedelta(days=_PAST_ANY_TTL_DAYS)
+    session.flush()
+
+    with pytest.raises(ImplausibleAbsence, match="saw nothing"):
+        mark_missing(session, set(), source=source, enumeration_complete=True)
+
+    # Nothing written: no EXPIRED transition, no history row, no cleared
+    # visibility flag. A refused run leaves the database exactly as it was.
+    assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
+    assert not [
+        row
+        for prop in props
+        for row in prop.status_history
+        if row.new_status == ListingStatus.EXPIRED
+    ]
+    assert all(ps.last_listing_visible for ps in session.query(PropertySource).all())
 
 
 def test_a_single_removal_on_a_three_listing_source_does_not_deadlock(
