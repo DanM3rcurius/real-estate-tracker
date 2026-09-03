@@ -50,6 +50,7 @@ data/raw/
 data/documents/
 data/images/
 data/exports/
+backups/
 reports/weekly/*.md
 reports/weekly/*.html
 !.gitkeep
