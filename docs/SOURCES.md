@@ -64,12 +64,13 @@ full history.
 ## Pending a terms check: Denkmalbörse (BLfD)
 
 `hofradar.sources.adapters.denkmalboerse.DenkmalboerseAdapter` is written and
-tested against a fixture (see the note on that fixture below), but the source
-is **not** in `config/sources.yaml` yet and must stay `enabled: false` when it
-is added, because invariant 7's terms/robots check has not been run: the
-build environment's egress proxy denies the `www.blfd.bayern.de` host outright
-(an organisation policy decision, not a transient failure), so it cannot be
-checked from here.
+tested against a fixture (see the note on that fixture below). `denkmalboerse`
+**is** now in `config/sources.yaml`, with `enabled: false` and no
+`terms_checked_at` / `terms_excerpt` keys at all - `SourceConfig` refuses
+`enabled: true` without both, and neither can honestly be written yet, because
+invariant 7's terms/robots check has not been run: the build environment's
+egress proxy denies the `www.blfd.bayern.de` host outright (an organisation
+policy decision, not a transient failure), so it cannot be checked from here.
 
 Terms check status: **OUTSTANDING**. Before this source may be enabled,
 someone with real network access must run these four commands and record
@@ -87,6 +88,18 @@ automated retrieval, the adapter stays written but permanently disabled -
 same treatment as the three portal adapters above. Only once the result is
 recorded here (or in the registry entry's `terms_excerpt`) may
 `config/sources.yaml` set `enabled: true` for `denkmalboerse`.
+
+Partial evidence *has* since arrived from a networked machine, though it does
+**not** close the terms check above - `robots.txt` and the terms text remain
+unread:
+
+- `https://www.blfd.bayern.de/information-service/denkmalboerse/objekte/005816/index.html`
+  genuinely returns HTTP 200, served by a `CERN httpd` static server.
+- The real page carries `<div class="immo-inhalt">`, and an "Eigentümer des
+  Anwesens" block with a direct `mailto:` link - confirming
+  `contact_kind="private"` is the right reading for this source.
+- An Exposé PDF is published under
+  `/mam/information_und_service/denkmal_boerse/oberbayern/`.
 
 Also outstanding: `tests/fixtures/html/denkmalboerse_object_005816.html` is a
 hand-written *synthetic* fixture, not a real captured page - the same egress

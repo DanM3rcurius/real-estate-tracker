@@ -53,6 +53,26 @@ sources:
     options:
       land_abk: "by"
 
+  - key: denkmalboerse
+    name: "BLfD Denkmalbörse"
+    role: primary
+    adapter: denkmalboerse
+    base_url: "https://www.blfd.bayern.de"
+    region: Bayern
+    reliability: 0.8
+    enabled: false
+    rate_limit_seconds: 4.0
+    notes: >
+      A state authority's listing exchange for Baudenkmäler. role=primary
+      because the exposé is the origin of the advert, not a copy - it is
+      withdrawn when the owner withdraws it, so its silence is the seller's own
+      signal. reliability 0.8 rather than 0.95 because BLfD publishes owner
+      statements and explicitly disclaims their accuracy: that is a fact about
+      the data, which reliability models, not about provenance, which role does.
+      Ships disabled: its terms check is outstanding (SourceConfig requires
+      terms_checked_at and terms_excerpt before enabled: true can be set) - see
+      the OUTSTANDING note in docs/SOURCES.md.
+
   - key: generic_rss
     name: "Regionale Makler (RSS/Atom)"
     role: primary

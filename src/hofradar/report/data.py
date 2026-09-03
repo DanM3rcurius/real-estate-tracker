@@ -24,11 +24,18 @@ from sqlalchemy.orm import Session, selectinload
 from hofradar.config import SearchProfile
 from hofradar.db.enums import ChangeKind, ListingStatus, VerificationStatus
 from hofradar.db.models import Property, Score
+from hofradar.report.yield_stats import SourceYield, source_yield
 from hofradar.web import history, lazy
 from hofradar.web.filters import de_eur, de_km, de_pct, de_sqm, week_label
 
 #: How far back a weekly report looks when the caller does not say.
 DEFAULT_PERIOD_DAYS = 7
+
+#: How far back the per-source yield table looks. Wider than the weekly window
+#: on purpose - a source's worth is judged over its first several runs, not
+#: one week's trickle, and the go/no-go in docs/DECISIONS.md entry 14 is
+#: itself phrased as "across its first four weekly runs".
+YIELD_WINDOW_DAYS = 28
 
 ACTION_CALL = "📞 SOFORT"
 ACTION_WATCH = "👀 BEOBACHTEN"
@@ -151,8 +158,20 @@ class ReportData:
     counts: ReportCounts
     entries: list[ReportEntry] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: Per-source in-radius yield since ``since`` - see ``hofradar.report.yield_stats``.
+    #: A source can parse flawlessly and still produce nothing worth ranking; this is
+    #: how that becomes visible instead of discovered five weeks later.
+    source_yields: list[SourceYield] = field(default_factory=list)
+    #: How many days :attr:`source_yields` covers. Carried on the data rather than
+    #: baked into the renderers' heading text, so ``YIELD_WINDOW_DAYS`` has exactly
+    #: one place to change.
+    yield_window_days: int = YIELD_WINDOW_DAYS
     run_id: int | None = None
     center_name: str = ""
+
+    @property
+    def yield_window_weeks(self) -> int:
+        return self.yield_window_days // 7
 
     def summary(self) -> dict[str, Any]:
         """The JSON blob persisted on :class:`~hofradar.db.models.ReportRecord`."""
@@ -477,6 +496,12 @@ def build_report(
     counts.shortlisted = len(entries)
     counts.not_listed = max(0, counts.tracked_total - counts.shortlisted)
 
+    yields = source_yield(
+        session,
+        since=now - timedelta(days=YIELD_WINDOW_DAYS),
+        radius_air_km=profile.radius.air_km_max,
+    )
+
     return ReportData(
         week_label=week_label(now),
         generated_at=now,
@@ -493,6 +518,8 @@ def build_report(
         counts=counts,
         entries=entries,
         notes=notes,
+        source_yields=yields,
+        yield_window_days=YIELD_WINDOW_DAYS,
         run_id=run_id,
         center_name=profile.center.name,
     )
