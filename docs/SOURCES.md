@@ -31,6 +31,7 @@ can never make something look current.
 | `zvg_bayern` | The official public foreclosure register. High signal, public by design, and exactly the kind of listing a normal search misses. |
 | `generic_rss` | Regional brokers who publish a feed. Add their URLs to `options.feeds`. |
 | `generic_sitemap` | Small broker sites with a `sitemap.xml`. Polite, capped, robots-respecting. |
+| `ovbimmo` | Regional newspaper portal for Lkr. Rosenheim/Mühldorf/West-Traunstein — brokers plus the papers' own classified ads, including private Chiffre sellers. See below. |
 
 `gemeindeblatt_pdf` ships enabled-capable but empty: it needs a list of your
 municipalities' bulletin index pages in `options.bulletins`. This is where
@@ -130,6 +131,112 @@ captured from `www.blfd.bayern.de` on 2026-09-03 (see the provenance comment
 at the top of the fixture and `tests/sources/adapters/test_denkmalboerse.py`).
 The search CGI's response shape (pagination / form-vs-results) is still
 unverified, which is why `discover()` still calls `mark_enumeration_incomplete`.
+
+## OVBimmo (OVB Heimatzeitungen): terms check complete, source enabled
+
+`hofradar.sources.adapters.ovbimmo.OvbimmoAdapter` is written and tested
+against a real search-results capture. `ovbimmo` is enabled in
+`config/sources.yaml` (`enabled: true`, `role: local`, `terms_checked_at:
+2026-09-03`) - the registry entry's `terms_excerpt` carries the same finding
+recorded here.
+
+Terms check status: **DONE (2026-09-03)**, by a human on a networked
+machine, per Ruling 1 in the plan's shared context (the container's own
+egress to `ovbimmo.de` was blocked when the terms were checked; it was
+opened later in the same session to capture the detail page below). Two
+pages were read for the terms check:
+
+- `https://ovbimmo.de/robots.txt`: `User-agent: *` carries **no blanket
+  `Disallow`**. Only `*/2823228/`, `/_widget/*` and `/search-widget/*` are
+  excluded - none of which this adapter touches. `/immobilien/*` is
+  explicitly `Allow`ed, and a sitemap is advertised. `/kaufen/...` (the
+  faceted search this adapter uses) is not disallowed.
+- `https://www.rosenheim24.de/ueber-uns/agb/` (linked by ovbimmo's own footer
+  as its AGB; publisher OVB24 GmbH, Stand April 2024) has three parts: (I)
+  AGB für Online-Werbung, which defers to `ovb24.de/agb/`; (II) AGB für
+  Shop-Produkte, covering purchase, delivery, payment and Widerruf for
+  **purchased** products (E-Books, paid article access) - its §6
+  "Nutzungsrecht bei digitalen Produkten" governs those purchased products,
+  not the public listing pages this adapter reads; (III)
+  Teilnahmebedingungen für Gewinnspiele. **No clause anywhere in it restricts
+  automated retrieval, crawling or scraping.**
+
+Both findings are scoped to the two pages actually read; neither is a claim
+about the whole site. Search-result rendering was also confirmed
+server-side: the real capture at
+`tests/fixtures/html/ovbimmo_search_rosenheim.html` has the result cards in
+the HTML, not injected by JavaScript.
+
+**Pagination.** A single search page carries a small fraction of the total
+result count - the real capture shows 20 of 186 results for one facet, with
+`<link rel="next" href="...?page=2" />` in `<head>`. `discover()` follows
+that trail per municipality/property-type facet, capped at
+`options.max_pages_per_search` (module default
+`ovbimmo.DEFAULT_MAX_PAGES_PER_SEARCH = 5`). Per invariant 4b, any run that
+stops before the trail runs out - the cap, a bad page, a failed fetch, or no
+municipalities configured at all, or a listed id's own detail fetch fails
+(a 4xx/5xx or transport error) - calls `mark_enumeration_incomplete` with
+the reason, so this source's silence is never misread as "removed" for a
+run that saw only page one of ten, nor for a single listing whose detail
+page 500'd once inside its 14-day `listing_ttl_days` window.
+
+**The detail page, against a real capture.**
+`tests/fixtures/html/ovbimmo_detail.html` is a real page captured from
+`ovbimmo.de` on 2026-09-03 (see the provenance comment at the top of the
+fixture and `tests/sources/adapters/test_ovbimmo.py`). It confirms the
+structure expected going in: a `dataLayer` JSON blob carrying `listing_id`
+(the same 6-char code as the URL), `property_price` **in cents**, `rooms`,
+`area`, `postal_code`, `locality`, `geo_hierarchy_*`; and the headline price/
+rooms/area figures rendered as three `eps-item` blocks, e.g. `<div
+class="eps-item eps-item-price col-4">690.000,00 €<br> <span
+class="eps-item-unit">Kaufpreis</span></div>` (value first, label in a
+nested span). The page also carries `col-label`/`col-value` divs, but those
+are unrelated sidebar widgets (Umzugsrechner, Immobilienwert, Kredit) - not
+where the Objektdaten figures live.
+
+None of that structured data is parsed by this adapter. `fetch_detail` uses
+only `_htmlutil`'s generic, markup-agnostic HTML fallback - and against the
+real page, that gets:
+
+- **title** and **image_urls** cleanly, via `og:title` / `og:image`;
+- **description**, the full visible body text - which means the price,
+  room count and phrases like "Provision für Käufer" all reach it as plain
+  text, so the `hidden_score` keyword vocabulary still fires on them;
+- **nothing** for `price_raw`/`rooms_raw`/`living_raw`/`land_raw`/etc.
+  `extract_labeled_fields` wants a single "Label: value" line, and this
+  page's `eps-item` blocks render the value *before* its label, each on its
+  own line after the body text is flattened ("690.000,00 €" then
+  "Kaufpreis", never "Kaufpreis: 690.000,00 €") - so it genuinely extracts
+  nothing here. This is a real limitation, not a bug in this task's scope:
+  reading the dataLayer JSON or the `eps-item` blocks would need a
+  purpose-built extension to this adapter (or to `_htmlutil`) that does not
+  exist yet.
+- `external_id` always comes from the **URL**, never the page - the same
+  6-char code the dataLayer also carries, but reading it from the URL needs
+  no parser at all and survives a broker rewriting the title.
+
+`contact_kind` is deliberately left `None` rather than hardcoded. The one
+real detail page captured so far is a **broker** listing ("Provision für
+Käufer", Robert Schlamp Immobilien e. K.) - not representative of the
+private/Chiffre inventory this source exists to reach. One capture is one
+page; guessing either way would corrupt the `hidden_score` signal.
+
+**Coverage.** `ovbimmo` covers Lkr. Rosenheim, Mühldorf and western
+Traunstein. It does **not** cover Lkr. Miesbach or Ebersberg — those are
+Ippen/Münchner Merkur titles with a different portal. Until an Ippen source
+exists, those municipalities are served only by `gemeindeblatt_pdf`. See
+`docs/coverage.md`.
+
+**URL slug vs. town name - a deliberate asymmetry.** `options.municipalities`
+in the registry uses OVB's own URL slugs (`feldkirchen-westerham`,
+`bad-aibling`, `wasserburg-a-inn`, ...), verified live against all 12
+configured facets (6 municipalities × 2 property types): 10 return 200 with
+real result cards, and the other two (`wasserburg-am-inn`, the gazetteer's
+own spelling) 301-redirect to `wasserburg-a-inn`. `docs/coverage.md` and
+`config/search.yaml`'s `coverage.municipalities` instead use **"Wasserburg
+am Inn"**, because that is the name the gazetteer and the normalizer
+produce. These are two different namespaces, each correct in its own place -
+do not "fix" one to match the other.
 
 ## Adding a regional source
 
