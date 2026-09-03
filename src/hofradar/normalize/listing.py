@@ -105,6 +105,7 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
 
     year_value = parse_german_number(raw.year_raw)
     year_built: int | None = None
+    year_already_warned = False
     if year_value is not None:
         year_int = int(year_value)
         if year_int in _PLAUSIBLE_YEAR_RANGE:
@@ -113,11 +114,15 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
             listing.warnings.append(
                 f"year_built: implausible value {year_int} from {raw.year_raw!r}"
             )
-    elif raw.year_raw:
-        listing.warnings.append(f"year_built: could not parse a value from {raw.year_raw!r}")
+            year_already_warned = True
     listing.year_built = year_built
     _add_numeric_evidence(
-        listing, "year_built", year_built, raw.year_raw, source_key=raw.source_key, url=raw.url
+        listing,
+        "year_built",
+        year_built,
+        None if year_already_warned else raw.year_raw,
+        source_key=raw.source_key,
+        url=raw.url,
     )
 
     location = parse_location(raw.location_raw)

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://broker.example/immobilien/hofstelle-feldkirchen</loc>
+    <lastmod>2026-08-20</lastmod>
+  </url>
+  <url>
+    <loc>https://broker.example/immobilien/resthof-vogtareuth</loc>
+    <lastmod>2026-08-22</lastmod>
+  </url>
+  <url>
+    <loc>https://broker.example/blog/marktbericht-2026</loc>
+    <lastmod>2026-08-01</lastmod>
+  </url>
+</urlset>

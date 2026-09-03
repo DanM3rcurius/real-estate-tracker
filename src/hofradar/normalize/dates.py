@@ -10,7 +10,7 @@ lifecycle stage never has to guess what "recently" means.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 
 from dateutil.relativedelta import relativedelta
@@ -33,18 +33,22 @@ _MONTHS: dict[str, int] = {
     "dezember": 12,
 }
 
-_RELATIVE_RE = re.compile(r"vor\s+(\d+)\s+(tag|tage|woche|wochen|monat|monate)\b")
+#: Ordered so that dative-plural forms ("Tagen", "Monaten" - the case "vor"
+#: governs) are tried before their shorter prefixes; plain alternation
+#: backtracking would otherwise match "tag" inside "Tagen" and then fail the
+#: trailing \b (no word boundary before the "en").
+_RELATIVE_RE = re.compile(r"vor\s+(\d+)\s+(tagen|tage|tag|wochen|woche|monaten|monate|monat)\b")
 _KW_RE = re.compile(r"\bkw\s*(\d{1,2})\s*/\s*(\d{4})\b", re.IGNORECASE)
 _MONTHNAME_RE = re.compile(r"\b(\d{1,2})\.\s*([A-Za-zÀ-ÿ]+)\s+(\d{4})\b")
 _DOTTED_RE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b")
 
 
 def _today_utc() -> datetime:
-    return datetime.combine(datetime.now(timezone.utc).date(), dtime.min, tzinfo=timezone.utc)
+    return datetime.combine(datetime.now(UTC).date(), dtime.min, tzinfo=UTC)
 
 
 def _as_utc_midnight(d: date) -> datetime:
-    return datetime.combine(d, dtime.min, tzinfo=timezone.utc)
+    return datetime.combine(d, dtime.min, tzinfo=UTC)
 
 
 def parse_german_date(text: str | None) -> datetime | None:
@@ -122,5 +126,5 @@ def parse_german_date(text: str | None) -> datetime | None:
     except ValueError:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)

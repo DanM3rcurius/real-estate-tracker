@@ -1,0 +1,4 @@
+Titel,Preis,Grundstueck,Wohnflaeche,Ort,PLZ,Baujahr,Bilder,Notiz,URL
+Alter Bauernhof mit Stadel,450.000 €,5.000 m²,180 m²,Feldkirchen-Westerham,83620,1890,https://img.example/a.jpg|https://img.example/b.jpg,"Sehr gepflegt, ruhige Lage",https://makler.example/hof-1
+Resthof ohne Angaben,,,,,,,,,
+"Kein Preis, nur VB",VB,,120 m²,Vogtareuth,83569,,,,https://makler.example/hof-2

@@ -108,20 +108,29 @@ def _slug_for_hidden_phrase(term: str) -> str:
 def extract_features(text: str, keywords: KeywordConfig) -> FeatureExtraction:
     """Extract canonical feature tags and boolean signals from ``text``.
 
-    ``keywords.buildings`` -> ``outbuildings`` (Scheune, Stadel, Stall, ...);
-    ``keywords.regional`` -> ``special_features`` (Sacherl, Hoamat, ...);
-    ``keywords.hidden_phrases`` -> ``hidden_signals`` (slugified, with a
-    handful of canonical-name overrides plus a foreclosure detector that
-    fires independently of the configured vocabulary); ``keywords.negative``
-    -> ``exclusion_flags``. ``building_features`` currently has no dedicated
-    source group in ``config/keywords.yaml`` (the whole-farm-type terms in
-    ``keywords.core`` feed :func:`classify_property_type` instead) and so is
-    always empty unless a future keyword group targets it explicitly.
+    Group mapping, all driven by ``config/keywords.yaml``:
+
+    - ``keywords.buildings`` -> ``outbuildings`` (Scheune, Stadel, Stall, ...)
+    - ``keywords.features`` -> ``building_features``: qualities of the place
+      itself rather than structures on it (Alleinlage, Obstgarten, teilbar,
+      Bebauungsplan). The seclusion and development terms of the fit score read
+      this list, so it is deliberately separate from ``outbuildings``.
+    - ``keywords.regional`` -> ``special_features`` (Sacherl, Hoamat, ...)
+    - ``keywords.hidden_phrases`` -> ``hidden_signals``, slugified, with a
+      handful of canonical-name overrides plus a foreclosure detector that
+      fires independently of the configured vocabulary
+    - ``keywords.negative`` -> ``exclusion_flags``
+
+    The whole-farm type names in ``keywords.core`` are not a feature group;
+    they feed :func:`classify_property_type` instead.
     """
     text = text or ""
     norm_text = normalize_text(text)
 
     outbuildings = sorted({slugify(t) for t in _matched_terms(norm_text, text, keywords.buildings)})
+    building_features = sorted(
+        {slugify(t) for t in _matched_terms(norm_text, text, keywords.features)}
+    )
     special_features = sorted(
         {slugify(t) for t in _matched_terms(norm_text, text, keywords.regional)}
     )
@@ -136,7 +145,7 @@ def extract_features(text: str, keywords: KeywordConfig) -> FeatureExtraction:
             hidden_signals.add(slug)
 
     return FeatureExtraction(
-        building_features=[],
+        building_features=building_features,
         outbuildings=outbuildings,
         special_features=special_features,
         exclusion_flags=exclusion_flags,
@@ -160,13 +169,15 @@ _PROPERTY_TYPE_SPECIFICITY: list[str] = [
     "Austragshaus",
     "Hofanwesen",
     "Bauernanwesen",
+    # A qualified form ("former farm") is more specific than the bare term
+    # it contains, so it must rank ahead of it.
+    "ehemaliger Bauernhof",
     "Bauernhof",
     "Bauernhaus",
     "Hof mit Nebengebäuden",
     "Hofstelle",
     "Landgut",
     "landwirtschaftliches Anwesen",
-    "ehemaliger Bauernhof",
     "ehemalige Landwirtschaft",
     "Landwirtschaft",
     "Einöde",

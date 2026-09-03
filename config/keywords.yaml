@@ -39,6 +39,42 @@ keywords:
     - Maschinenhalle
     - Nebengebäude
 
+  # Qualities of the place itself, as opposed to the buildings on it.
+  # These feed the seclusion, development and substance terms of the fit score.
+  features:
+    - Alleinlage
+    - Einzellage
+    - Ortsrand
+    - Außenbereich
+    - Aussenbereich
+    - freie Lage
+    - ruhige Lage
+    - Südlage
+    - historische Bausubstanz
+    - denkmalgeschützt
+    - Denkmalschutz
+    - Baudenkmal
+    - Obstgarten
+    - Streuobstwiese
+    - Weide
+    - Wiese
+    - Wald
+    - Bachlauf
+    - Quelle
+    - Brunnen
+    - Photovoltaik
+    - teilbar
+    - Teilung möglich
+    - Bauerwartungsland
+    - Bebauungsplan
+    - Bauvoranfrage
+    - Flurstück
+    - Entwicklungspotenzial
+    - Entwicklungspotential
+    - Innenbereich
+    - Bestandsschutz
+    - Nachverdichtung
+
   # The gold seam: phrases that mark an under-marketed or hidden listing.
   hidden_phrases:
     - "nicht mehr landwirtschaftlich genutzt"

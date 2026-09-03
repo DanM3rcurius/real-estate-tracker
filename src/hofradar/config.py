@@ -251,6 +251,7 @@ class SearchProfile(BaseModel):
 class KeywordConfig(BaseModel):
     core: list[str] = Field(default_factory=list)
     buildings: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
     hidden_phrases: list[str] = Field(default_factory=list)
     regional: list[str] = Field(default_factory=list)
     negative: list[str] = Field(default_factory=list)
@@ -258,7 +259,13 @@ class KeywordConfig(BaseModel):
     @property
     def all_terms(self) -> list[str]:
         seen: dict[str, None] = {}
-        for group in (self.core, self.buildings, self.hidden_phrases, self.regional):
+        for group in (
+            self.core,
+            self.buildings,
+            self.features,
+            self.hidden_phrases,
+            self.regional,
+        ):
             for term in group:
                 seen.setdefault(term, None)
         return list(seen)

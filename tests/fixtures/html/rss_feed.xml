@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+  <title>Makler Feldkirchen Immobilien</title>
+  <link>https://makler.example</link>
+  <description>Aktuelle Angebote</description>
+  <item>
+    <title>Resthof mit Scheune bei Feldkirchen</title>
+    <link>https://makler.example/objekt/1</link>
+    <guid>obj-1</guid>
+    <description>Schoener Resthof mit Nebengebaeuden und grossem Grundstueck.</description>
+    <pubDate>Mon, 01 Sep 2026 08:00:00 GMT</pubDate>
+  </item>
+  <item>
+    <title>Ohne Link - sollte uebersprungen werden</title>
+    <description>Dieser Eintrag hat keinen Link und darf nicht als Listing erscheinen.</description>
+  </item>
+</channel>
+</rss>
