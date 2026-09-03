@@ -44,6 +44,29 @@ search:
     preferred_min_sqm: 2000
     strong_min_sqm: 5000
 
+  # Municipalities believed to fall inside the search radius, per docs/coverage.md.
+  # Not a slider - this list does not touch scoring or profile_hash. It feeds
+  # hofradar.report.yield_stats.coverage_by_municipality so a town that produced
+  # nothing shows up as a named silence, not as an absence from a list nobody
+  # kept. Reconstructed from public knowledge of which Landkreis each Gemeinde
+  # belongs to and which newspaper group covers that Landkreis - NOT verified
+  # against each municipality's own website. See docs/coverage.md.
+  coverage:
+    municipalities:
+      - Feldkirchen-Westerham
+      - Bruckmühl
+      - Bad Aibling
+      - Kolbermoor
+      - Rosenheim
+      - Wasserburg a. Inn
+      - Irschenberg
+      - Weyarn
+      - Valley
+      - Holzkirchen
+      - Otterfing
+      - Aying
+      - Glonn
+
   property_types:
     - Hofstelle
     - Sacherl

@@ -24,7 +24,12 @@ from sqlalchemy.orm import Session, selectinload
 from hofradar.config import SearchProfile
 from hofradar.db.enums import ChangeKind, ListingStatus, VerificationStatus
 from hofradar.db.models import Property, Score
-from hofradar.report.yield_stats import SourceYield, source_yield
+from hofradar.report.yield_stats import (
+    MunicipalityCoverage,
+    SourceYield,
+    coverage_by_municipality,
+    source_yield,
+)
 from hofradar.web import history, lazy
 from hofradar.web.filters import de_eur, de_km, de_pct, de_sqm, week_label
 
@@ -162,6 +167,13 @@ class ReportData:
     #: A source can parse flawlessly and still produce nothing worth ranking; this is
     #: how that becomes visible instead of discovered five weeks later.
     source_yields: list[SourceYield] = field(default_factory=list)
+    #: Per-municipality observation counts over the same window as
+    #: :attr:`source_yields`, for every town ``config/search.yaml`` names as
+    #: expected - see ``hofradar.report.yield_stats.coverage_by_municipality``.
+    #: A town with ``observed == 0`` is a dark municipality: the report must
+    #: say so by name, because silence alone cannot distinguish a quiet market
+    #: from an uncovered one.
+    municipality_coverage: list[MunicipalityCoverage] = field(default_factory=list)
     #: How many days :attr:`source_yields` covers. Carried on the data rather than
     #: baked into the renderers' heading text, so ``YIELD_WINDOW_DAYS`` has exactly
     #: one place to change.
@@ -496,10 +508,10 @@ def build_report(
     counts.shortlisted = len(entries)
     counts.not_listed = max(0, counts.tracked_total - counts.shortlisted)
 
-    yields = source_yield(
-        session,
-        since=now - timedelta(days=YIELD_WINDOW_DAYS),
-        radius_air_km=profile.radius.air_km_max,
+    yield_since = now - timedelta(days=YIELD_WINDOW_DAYS)
+    yields = source_yield(session, since=yield_since, radius_air_km=profile.radius.air_km_max)
+    coverage = coverage_by_municipality(
+        session, since=yield_since, expected=profile.coverage.municipalities
     )
 
     return ReportData(
@@ -519,6 +531,7 @@ def build_report(
         entries=entries,
         notes=notes,
         source_yields=yields,
+        municipality_coverage=coverage,
         yield_window_days=YIELD_WINDOW_DAYS,
         run_id=run_id,
         center_name=profile.center.name,
