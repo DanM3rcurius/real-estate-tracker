@@ -206,3 +206,23 @@ host, so it trades one deployment unit for three.
 **Consequence.** The Dockerfile and `docker-compose.yml` are the deployment
 contract, and `fly.toml` is the worked example. A volume at `/data` is not
 optional anywhere.
+
+---
+
+## 13. Alembic, from the first schema change against real data
+
+**Decision.** `alembic upgrade head` is now the schema command. `init_db()`
+keeps `create_all()` for a brand-new database, but no column may be added by
+`create_all()` against an existing one.
+
+**Why.** Decision 10 deferred this until "the schema changes against real
+data", which the Denkmalbörse work reached. `create_all()` is a no-op on an
+existing table, so the alternative to a migration is recreating the database —
+and the append-only `observations` history that decision 2 calls the product
+cannot be refetched from any source. Losing it is the one failure in this area
+that no later work can repair.
+
+**Supersedes.** Decision 10, which remains as the record of why it was deferred.
+
+**Consequence.** `scripts/backup_db.py` runs before any migration, and
+`render_as_batch=True` is set because SQLite cannot ALTER a column in place.
