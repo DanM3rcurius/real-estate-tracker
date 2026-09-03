@@ -1,0 +1,32 @@
+# TLS terminator in front of the app. Caddy gets a Let's Encrypt certificate on
+# its own and, importantly, sets X-Forwarded-Proto - which is how hofradar.web
+# .auth decides to mark the session cookie Secure. Without a proxy that sets it,
+# you would have to force it with HOFRADAR_FORCE_SECURE_COOKIES=1.
+#
+# With HOFRADAR_DOMAIN unset this falls back to plain HTTP on :80, which is fine
+# only while you are reaching the box over an SSH tunnel or Tailscale. Point a
+# DNS A record at the server and set the variable before it is really public.
+
+{
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+{$HOFRADAR_DOMAIN::80} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# The app's own health endpoint tells an anonymous caller only {"status":"ok"},
+	# so it is safe to let Caddy poll it and safe to leave reachable.
+	reverse_proxy hofradar:8000 {
+		health_uri /healthz
+		health_interval 30s
+		health_timeout 5s
+	}
+}

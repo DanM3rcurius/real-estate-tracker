@@ -6,6 +6,7 @@
 |---|---|---|
 | **Your own machine + Tailscale** | ✅ best fit | Free, private, no public attack surface, disk is real |
 | **Fly.io** | ✅ recommended cloud | Persistent volume, always-on process, `fly.toml` is already in the repo |
+| **Hetzner VPS** | ✅ most control | A real disk and a real cron for ~€4/month; `deploy/hetzner/cloud-init.yaml` builds the box unattended |
 | **Railway / Render** | ✅ browser-only path | Deploy straight from GitHub, add a persistent disk, no CLI needed |
 | **Vercel** | ❌ wrong shape | No persistent disk, no long-running process, no real scheduler |
 | **Netlify / Cloudflare Pages** | ❌ same reasons | Same serverless model |
@@ -37,7 +38,8 @@ the scheduler still need a real host. One host is simpler than three.
 
 ## Do you need to wait for a local machine?
 
-**No.** Two of the three good options are fully browser-driven.
+**No.** Two of the good options are fully browser-driven, and a third builds
+itself from a pasted file.
 
 ### Option A — Render or Railway, entirely from a browser
 
@@ -85,6 +87,28 @@ tailscale up            # then reach it at http://<machine>:8000 from anywhere
 Zero cost, zero public attack surface, the disk is a real disk, and you can
 still open it from your phone. The password gate still applies — belt and
 braces.
+
+### Option D — a Hetzner VPS, built unattended from cloud-init
+
+The most control and the most disk per euro, at the cost of owning a machine.
+`deploy/hetzner/cloud-init.yaml` does the whole build: Docker, ufw, fail2ban,
+unattended upgrades, Caddy with an automatic certificate, the compose project as
+a systemd unit, and a nightly SQLite backup with 14 days of retention.
+
+```bash
+# edit three lines first: your SSH key, HOFRADAR_DOMAIN, ACME_EMAIL
+hcloud server create --name hofradar --type cx22 --image ubuntu-24.04 \
+  --location nbg1 --user-data-from-file deploy/hetzner/cloud-init.yaml
+```
+
+A `cx22` (2 vCPU, 4 GB, 40 GB) is comfortable. The app is published on
+`127.0.0.1:8000` only and Caddy is the sole thing listening publicly — Docker
+writes its own iptables rules and would otherwise punch straight through ufw.
+
+If you supply no `HOFRADAR_PASSWORD_HASH`, first boot mints a password and
+leaves it in `/home/hofradar/INITIAL_PASSWORD.txt`; the gate is never simply
+absent on a public IP. Details, day-to-day commands and the private-repo case
+are in `deploy/hetzner/README.md`.
 
 ## The password gate
 
@@ -135,6 +159,9 @@ The whole database is one SQLite file. That is a feature:
 docker compose exec hofradar sh -c 'sqlite3 /data/hofradar.sqlite3 ".backup /data/backup.sqlite3"'
 docker compose cp hofradar:/data/backup.sqlite3 ./hofradar-backup.sqlite3
 ```
+
+On the Hetzner box this already runs nightly — `hofradar-backup`, landing in
+`/var/backups/hofradar`.
 
 On Fly: `fly ssh console` then the same, or snapshot the volume
 (`fly volumes snapshots list`). Do this before changing the schema — v0.1 has
