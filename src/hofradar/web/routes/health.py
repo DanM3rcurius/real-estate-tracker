@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -19,7 +19,15 @@ router = APIRouter(tags=["system"])
 
 
 @router.get("/healthz")
-def healthz(session: Session = Depends(get_db)) -> dict[str, Any]:
+def healthz(request: Request, session: Session = Depends(get_db)) -> dict[str, Any]:
+    # This endpoint is public so a container healthcheck can reach it without a
+    # session, which means an anonymous caller must not learn anything about the
+    # search. Liveness only, unless they are signed in.
+    from hofradar.web import auth
+
+    if not auth.is_authenticated(request):
+        return {"status": "ok"}
+
     try:
         properties = session.scalar(select(func.count(Property.id))) or 0
     except Exception:  # noqa: BLE001 - an unmigrated DB is still "up"

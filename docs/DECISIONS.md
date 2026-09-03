@@ -156,3 +156,53 @@ already written to be autogenerate-friendly.
 
 **Risk accepted.** A schema change before that point means recreating the
 database or hand-writing an `ALTER TABLE`.
+
+---
+
+## 11. One shared password, not a user model
+
+**Decision.** A single password in the environment, verified in constant time
+against a PBKDF2 hash, plus an HMAC-signed session cookie that carries nothing
+but an expiry. No users table, no registration, no reset flow. The gate is not
+installed at all when no password is configured.
+
+**Why.** There is exactly one user, and every part of an account system that
+was built anyway would be a part that could be got wrong. The things that
+actually matter on a public URL are covered: constant-time comparison so the
+password cannot be discovered a byte at a time, an unforgeable and unreplayable
+cookie, a persisted signing key so restarts do not log you out, a login
+throttle so the URL is not a free brute-force oracle, `401` rather than an HTML
+login page for API and HTMX callers, a `/healthz` that tells an anonymous
+caller nothing, and a validated `next` parameter so the form cannot be turned
+into an open redirect.
+
+**Alternatives considered.**
+- HTTP Basic auth. Two lines of code, but no logout, an ugly browser prompt,
+  and the password on every single request.
+- A real identity provider (OAuth, Authelia in front). Correct if this is ever
+  shared with a second person; today it is more moving parts than the app.
+- No auth, bind to localhost only. What Option C in `docs/DEPLOY.md`
+  recommends, but it cannot be the only answer once there is a public URL.
+
+**When to revisit.** The moment a second person needs access. That is an
+identity provider in front of the app, not a bigger `auth.py`.
+
+---
+
+## 12. Hosting needs a disk and a long-running process, which rules out Vercel
+
+**Decision.** Target Fly.io, Railway or Render — a container with a persistent
+volume mounted at `/data` and an always-on process. Not Vercel, Netlify or
+Cloudflare Pages.
+
+**Why.** Serverless platforms give an ephemeral filesystem, a request-duration
+cap and a cron that is just a timed HTTP call. This app's product *is* the
+database that remembers across months; a crawl is a multi-minute background job
+across a dozen sources; and the weekly run needs a process that stays alive.
+Each of those is a straight mismatch. The UI alone could run on Vercel against
+an external Postgres, but the crawler and scheduler would still need a real
+host, so it trades one deployment unit for three.
+
+**Consequence.** The Dockerfile and `docker-compose.yml` are the deployment
+contract, and `fly.toml` is the worked example. A volume at `/data` is not
+optional anywhere.

@@ -154,6 +154,29 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hash_password(args: argparse.Namespace) -> int:
+    """Print a PBKDF2 hash to put in HOFRADAR_PASSWORD_HASH.
+
+    Preferred over HOFRADAR_PASSWORD: the hash can sit in a compose file, a
+    Fly secret or a shell history without being the password itself.
+    """
+    import getpass
+
+    from hofradar.web.auth import hash_password
+
+    password = args.password or getpass.getpass("Passwort: ")
+    if not password:
+        print("no password given", file=sys.stderr)
+        return 1
+    if not args.password:
+        again = getpass.getpass("Wiederholen: ")
+        if again != password:
+            print("passwords do not match", file=sys.stderr)
+            return 1
+    print(hash_password(password))
+    return 0
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     cfg = reload_config()
     profile = cfg.profile
@@ -214,6 +237,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_import = sub.add_parser("import", help="import listings from a CSV file")
     p_import.add_argument("path")
     p_import.set_defaults(func=cmd_import)
+
+    p_hash = sub.add_parser(
+        "hash-password", help="print a PBKDF2 hash for HOFRADAR_PASSWORD_HASH"
+    )
+    p_hash.add_argument(
+        "--password",
+        help="read the password from the command line instead of prompting "
+        "(it will land in your shell history)",
+    )
+    p_hash.set_defaults(func=cmd_hash_password)
 
     sub.add_parser("config", help="show the resolved search profile").set_defaults(
         func=cmd_config

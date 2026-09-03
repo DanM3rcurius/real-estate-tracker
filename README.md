@@ -41,6 +41,24 @@ hofradar serve                # → http://localhost:8000
 
 Nothing else is required. No API keys, no database server, no npm.
 
+## Before you put it on a public URL
+
+There is one password, and it is off by default so that localhost stays
+frictionless:
+
+```bash
+hofradar hash-password        # prompts, prints a pbkdf2_sha256$… string
+```
+
+Put that in `HOFRADAR_PASSWORD_HASH` and restart. Signed `HttpOnly` session
+cookie, constant-time comparison, lockout after 8 failed attempts, `/api/*`
+answers `401` rather than an HTML page. With no password set the app logs a
+warning at startup telling you it is open.
+
+See [docs/DEPLOY.md](docs/DEPLOY.md) for hosting — including why Vercel is the
+wrong shape for this (no persistent disk, no long-running crawl, no real
+scheduler) and which options work from a browser alone.
+
 ## What it does, in order
 
 ```
@@ -84,6 +102,7 @@ hofradar rescore --air-km 40 --budget 800000   # what would the sliders do?
 hofradar report --out reports/weekly/kw35.md
 hofradar import listings.csv
 hofradar config                         # show the resolved profile
+hofradar hash-password                  # password hash for HOFRADAR_PASSWORD_HASH
 ```
 
 ## Configuration
@@ -111,6 +130,7 @@ your own regional feeds — which is where the hidden listings actually are.
 ## Docs
 
 - [docs/DECISIONS.md](docs/DECISIONS.md) — the load-bearing architecture calls and why
+- [docs/DEPLOY.md](docs/DEPLOY.md) — hosting, the password gate, backups
 - [docs/SOURCES.md](docs/SOURCES.md) — source strategy, legality, adding your own
 - [docs/MODULE_API.md](docs/MODULE_API.md) — the internal package contract
 

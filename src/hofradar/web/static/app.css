@@ -316,3 +316,98 @@ small { color: var(--ink-soft); }
 .hof-report__entry { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
 .hof-report__rank { color: var(--ink-faint); }
 .hof-report__action { font-weight: 700; }
+
+/* ---- login ------------------------------------------------------------- */
+
+.login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 2rem 1rem;
+}
+
+.login__card {
+  width: 100%;
+  max-width: 22rem;
+  padding: 2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+}
+
+.login__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.4rem;
+}
+
+.login__lead {
+  margin: 0 0 1.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.login__error {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--danger-bg, #fdecea);
+  color: var(--danger, #a4302a);
+  font-size: 0.88rem;
+}
+
+.login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.login__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.login__input {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.login__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.login__button {
+  margin-top: 0.5rem;
+  padding: 0.65rem 1rem;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.topbar__logout {
+  display: inline;
+  margin: 0;
+}
+
+.topbar__link--button {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}

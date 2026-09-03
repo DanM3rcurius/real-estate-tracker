@@ -24,6 +24,10 @@ before changing a package's public surface.
    `profile_hash`, because the sliders move.
 6. **The LLM may not write a number.** Advisory fields only.
 7. **No bot-defence evasion**, ever. If a source blocks us, we record it and stop.
+8. **The password gate is opt-in but never half-installed.** With no
+   password configured the middleware is absent entirely; with one, every
+   path outside `PUBLIC_PATHS` needs a valid session, and `/healthz` tells
+   an anonymous caller nothing about the database.
 
 ## Layout
 
@@ -44,6 +48,7 @@ src/hofradar/
   pipeline/      the orchestrator
   report/        weekly digest (max 10 entries, everything else counted)
   web/           FastAPI + Jinja + HTMX + Leaflet
+  web/auth.py    one password, one signed cookie (see docs/DEPLOY.md)
 tests/           mirrors src/, one directory per package
 ```
 

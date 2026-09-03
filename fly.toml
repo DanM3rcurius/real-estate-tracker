@@ -1,5 +1,12 @@
 # Deploy to a single small Fly.io machine with a persistent volume:
-#   fly launch --no-deploy && fly volumes create hofradar_data --size 3 && fly deploy
+#
+#   fly launch --no-deploy
+#   fly volumes create hofradar_data --size 3
+#   fly secrets set HOFRADAR_PASSWORD_HASH="$(hofradar hash-password)"
+#   fly deploy
+#
+# The volume is not optional: the database remembering what it has seen IS the
+# product, and a machine without a volume forgets every restart.
 app = "hofradar"
 primary_region = "fra"
 

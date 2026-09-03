@@ -336,4 +336,12 @@ def shared_context(request: Request) -> dict[str, Any]:
         "budget_max_slider": BUDGET_MAX,
         "budget_step": BUDGET_STEP,
         "nav_path": request.url.path,
+        "auth_enabled": _auth_enabled(),
     }
+
+
+def _auth_enabled() -> bool:
+    """Templates only show the logout control when there is a session to end."""
+    from hofradar.web import auth
+
+    return auth.password_configured()

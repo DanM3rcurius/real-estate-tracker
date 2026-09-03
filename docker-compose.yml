@@ -12,6 +12,11 @@ services:
       - ./reports:/app/reports
     environment:
       HOFRADAR_DATA_DIR: /data
+      # Set one of these to require a password. Empty means no gate at all -
+      # only do that when the port is not reachable from outside this machine.
+      HOFRADAR_PASSWORD_HASH: ${HOFRADAR_PASSWORD_HASH:-}
+      HOFRADAR_PASSWORD: ${HOFRADAR_PASSWORD:-}
+      HOFRADAR_SECRET_KEY: ${HOFRADAR_SECRET_KEY:-}
       # Optional. Without it the LLM review stage is skipped and everything else works.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Uncomment to use the postgres service instead of SQLite:

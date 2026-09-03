@@ -9,6 +9,7 @@ still being written must not be able to stop the UI from booting.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ from hofradar.web.filters import JINJA_FILTERS
 PACKAGE_DIR = Path(__file__).parent
 TEMPLATE_DIR = PACKAGE_DIR / "templates"
 STATIC_DIR = PACKAGE_DIR / "static"
+
+log = logging.getLogger(__name__)
 
 APP_TITLE = "Hofradar"
 APP_SUBTITLE = "Hofstellen im Blick behalten"
@@ -92,6 +95,7 @@ def create_app(
         add,
         dossier,
         health,
+        login,
         map_view,
         radar,
         reports,
@@ -101,6 +105,20 @@ def create_app(
 
     for module in (radar, dossier, map_view, reports, runs, add, settings, health):
         app.include_router(module.router)
+
+    # Authentication is opt-in: with no password configured the gate is not
+    # installed at all, so a localhost run stays as frictionless as before.
+    from hofradar.web import auth
+
+    if auth.password_configured():
+        app.include_router(login.router)
+        app.add_middleware(auth.PasswordGateMiddleware)
+        log.info("password gate enabled")
+    else:
+        log.warning(
+            "no HOFRADAR_PASSWORD or HOFRADAR_PASSWORD_HASH set - the UI is open to "
+            "anyone who can reach it. Fine on localhost, not on a public URL."
+        )
 
     @app.exception_handler(404)
     async def _not_found(request: Request, exc: Exception) -> HTMLResponse:  # noqa: ARG001

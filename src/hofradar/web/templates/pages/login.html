@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Anmelden – {{ app_title }}{% endblock %}
+{% block nav %}{% endblock %}
+
+{% block content %}
+<section class="login">
+  <div class="login__card">
+    <h1 class="login__title"><span aria-hidden="true">🌾</span> {{ app_title }}</h1>
+    <p class="login__lead">{{ app_subtitle }}</p>
+
+    {% if error %}
+    <p class="login__error" role="alert">
+      {{ error }}
+      {% if locked_for %}<br><small>Erneut möglich in {{ locked_for }} Sekunden.</small>{% endif %}
+    </p>
+    {% endif %}
+
+    <form method="post" action="/login" class="login__form">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label class="login__label" for="password">Passwort</label>
+      <input class="login__input" type="password" id="password" name="password"
+             autocomplete="current-password" required autofocus
+             {% if locked_for %}disabled{% endif %}>
+      <button class="login__button" type="submit" {% if locked_for %}disabled{% endif %}>
+        Anmelden
+      </button>
+    </form>
+  </div>
+</section>
+{% endblock %}
