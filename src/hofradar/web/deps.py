@@ -337,6 +337,11 @@ def shared_context(request: Request) -> dict[str, Any]:
         "budget_step": BUDGET_STEP,
         "nav_path": request.url.path,
         "auth_enabled": _auth_enabled(),
+        # Set only by the static exporter. Templates use it to drop the parts
+        # of the UI that need a server to write to, and to show the banner
+        # saying the page is a frozen snapshot of invented data.
+        "static_export": getattr(request.app.state, "static_export", False),
+        "snapshot_built_at": getattr(request.app.state, "snapshot_built_at", ""),
     }
 
 

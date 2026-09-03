@@ -68,11 +68,18 @@ def create_app(
     session_factory: Any | None = None,
     engine: Engine | None = None,
     create_tables: bool = False,
+    static_export: bool = False,
+    snapshot_built_at: str = "",
 ) -> FastAPI:
     """Build the application.
 
     ``session_factory`` wins over ``engine``; passing neither uses the real
     database from ``HOFRADAR_DATABASE_URL`` / ``data/hofradar.sqlite3``.
+
+    ``static_export`` is for :mod:`hofradar.web.export` only. It does not change
+    what any route computes - the snapshot must show what the app shows - it
+    only tells the templates to leave out the controls that would post to a
+    server that will not be there, and to carry the snapshot banner.
     """
     if session_factory is None:
         if engine is not None:
@@ -87,6 +94,13 @@ def create_app(
     app = FastAPI(title=APP_TITLE, docs_url="/api/docs", redoc_url=None)
     app.state.session_factory = session_factory
     app.state.templates = build_templates()
+    app.state.static_export = static_export
+    app.state.snapshot_built_at = snapshot_built_at
+    if static_export:
+        # Both write UIs. Neither has anything to show without a server.
+        app.state.templates.env.globals["nav_items"] = tuple(
+            item for item in NAV_ITEMS if item[0] not in ("/add", "/settings")
+        )
 
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

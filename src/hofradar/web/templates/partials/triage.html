@@ -1,4 +1,11 @@
 {# Human judgement. Posted with HTMX; survives every re-run and profile change. #}
+{% if static_export %}
+<p class="notice">
+  <span aria-hidden="true">🔒</span>
+  Einschätzung und Notiz werden in der Datenbank gespeichert und sind im
+  statischen Schnappschuss nicht verfügbar.
+</p>
+{% else %}
 <form class="triage" id="triage"
       hx-post="/property/{{ prop.public_id }}/triage"
       hx-target="#triage"
@@ -22,3 +29,4 @@
     {% if saved %}<span class="notice notice--ok" role="status">Gespeichert: {{ prop.user_state or 'kein Status' }}</span>{% endif %}
   </fieldset>
 </form>
+{% endif %}

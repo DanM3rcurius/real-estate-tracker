@@ -14,9 +14,11 @@
   </p>
   {% endif %}
 
+  {% if not static_export %}
   <form method="post" action="/report">
     <button class="btn" type="submit">Report für Profil {{ profile.profile_hash }} erzeugen</button>
   </form>
+  {% endif %}
 
   {% if markdown %}
   <p>

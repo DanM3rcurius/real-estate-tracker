@@ -1,10 +1,12 @@
 {# The product. Two sliders, and everything they imply, visible while dragging. #}
 <form id="controls" class="controls" role="search"
+{% if not static_export %}
       hx-get="/api/results"
       hx-target="#results"
       hx-swap="innerHTML"
       hx-trigger="input delay:250ms, change delay:250ms, submit"
       hx-indicator="#thinking"
+{% endif %}
       data-driving-soft="{{ profile.radius.driving_factor_soft }}"
       data-driving-hard="{{ profile.radius.driving_factor_hard }}"
       data-purchase-share="{{ profile.budget.purchase_share_of_total }}"
@@ -93,7 +95,9 @@
       <span>auch abgelehnte zeigen</span>
     </label>
 
+    {% if not static_export %}
     <noscript><button type="submit" class="btn">Anwenden</button></noscript>
+    {% endif %}
   </div>
 
   <p class="controls__links">

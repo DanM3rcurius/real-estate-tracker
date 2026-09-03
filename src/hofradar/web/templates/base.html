@@ -41,6 +41,18 @@
 </header>
 
 <main id="main">
+  {% if static_export %}
+  {# A public snapshot of invented data must never be mistakable for the real
+     market. This is the one piece of chrome that is not optional. #}
+  <p class="notice notice--warn snapshot-banner">
+    <span aria-hidden="true">📸</span>
+    <b>Statischer Schnappschuss mit erfundenen Beispieldaten.</b>
+    Keines der gezeigten Objekte existiert. Die Regler rechnen die abgeleiteten
+    Bänder weiterhin live aus, die Ergebnisliste ist aber eingefroren
+    ({{ snapshot_built_at }}).
+    <a href="https://github.com/DanM3rcurius/real-estate-tracker">Quellcode</a>
+  </p>
+  {% endif %}
   {% block content %}{% endblock %}
 </main>
 

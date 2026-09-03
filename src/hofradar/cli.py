@@ -219,6 +219,19 @@ def cmd_seed_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_site(args: argparse.Namespace) -> int:
+    """Render the app to a directory of static files (GitHub Pages)."""
+    from hofradar.web.export import export_site
+
+    init_db()
+    result = export_site(Path(args.out), base_path=args.base_path or "")
+    print(
+        f"exported {result.page_count} pages "
+        f"({result.properties} properties, {result.assets} assets) to {args.out}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hofradar", description="Hofradar")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -268,6 +281,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_seed.add_argument("--path", help="path to the seed YAML")
     p_seed.set_defaults(func=cmd_seed_demo)
+
+    p_export = sub.add_parser(
+        "export-site", help="render a static snapshot of the UI for GitHub Pages"
+    )
+    p_export.add_argument("--out", default="site", help="output directory")
+    p_export.add_argument(
+        "--base-path",
+        default="",
+        help="subdirectory the site is served from, e.g. /real-estate-tracker",
+    )
+    p_export.set_defaults(func=cmd_export_site)
 
     sub.add_parser("config", help="show the resolved search profile").set_defaults(
         func=cmd_config

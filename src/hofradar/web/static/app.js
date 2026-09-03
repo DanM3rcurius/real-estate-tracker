@@ -9,6 +9,12 @@
 (function () {
   "use strict";
 
+  /* Every URL this file builds is root-absolute, which is correct when the app
+   * is served from the root and wrong when a static export of it is served
+   * from a subdirectory (GitHub Pages project sites). The exporter sets
+   * window.HOFRADAR_BASE; unset, this is "" and nothing changes. */
+  var base = window.HOFRADAR_BASE || "";
+
   var deFormat = function (value, decimals) {
     try {
       return new Intl.NumberFormat("de-DE", {
@@ -69,12 +75,12 @@
   function syncUrl(form) {
     if (!form || !window.history || !window.history.replaceState) return;
     var params = new URLSearchParams(new FormData(form)).toString();
-    var target = window.location.pathname === "/" ? "/" : "/";
+    var target = base + "/";
     window.history.replaceState({}, "", target + (params ? "?" + params : ""));
     var links = document.querySelectorAll(".controls__links a");
     for (var i = 0; i < links.length; i++) {
-      var base = links[i].getAttribute("href").split("?")[0];
-      links[i].setAttribute("href", base + "?" + params);
+      var href = links[i].getAttribute("href").split("?")[0];
+      links[i].setAttribute("href", href + "?" + params);
     }
   }
 
@@ -180,7 +186,7 @@
         "Luftlinie " + (point.distance_air_km === null ? "k. A." : km(point.distance_air_km)) + "<br>" +
         "Fahrstrecke " + driving + "<br>" +
         (point.precise ? "" : "<i>Standort nur " + point.geo_precision + "</i><br>") +
-        '<a href="/property/' + point.public_id + '">Dossier öffnen</a>'
+        '<a href="' + base + '/property/' + point.public_id + '">Dossier öffnen</a>'
       );
       marker.addTo(map);
       bounds.push([point.lat, point.lon]);

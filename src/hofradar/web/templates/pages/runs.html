@@ -13,10 +13,12 @@
   </p>
   {% endif %}
 
+  {% if not static_export %}
   <p>
     <button class="btn" hx-post="/api/run?air_km_max={{ profile.radius.air_km_max }}&total_budget_max={{ profile.budget.total_budget_max }}"
             hx-target="#run-status" hx-swap="innerHTML">▶ Jetzt suchen</button>
   </p>
+  {% endif %}
 
   {% if not runs %}
   <p class="empty">Noch kein Lauf aufgezeichnet.</p>
