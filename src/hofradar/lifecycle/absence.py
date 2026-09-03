@@ -43,16 +43,17 @@ log = logging.getLogger(__name__)
 #: A source holding at least this many listings must clear this floor before
 #: the *fraction* guard below is allowed to reason about it at all. Below it,
 #: a percentage is meaningless (a broker's last listing selling is 100%). It
-#: has nothing to do with the *empty*-result guard, which is unconditional:
-#: seeing literally nothing is not a percentage, it is the signature of a
-#: parser that produced no output, and that is exactly as suspicious for a
-#: 1-2 listing source as for a much larger one.
-EMPTY_RESULT_GUARD_MIN_ROWS = 3
+#: has nothing to do with the *empty*-result guard below, which is
+#: unconditional and does not reference this constant at all: seeing
+#: literally nothing is not a percentage, it is the signature of a parser
+#: that produced no output, and that is exactly as suspicious for a 1-2
+#: listing source as for a much larger one.
+FRACTION_GUARD_MIN_ROWS = 3
 
 #: A run that saw this fraction or more of a source's visible inventory
 #: disappear is treated as a parser failure, not as a market event. Half an
 #: inventory never goes in one week; a changed HTML template does. Only
-#: applied once a source clears EMPTY_RESULT_GUARD_MIN_ROWS.
+#: applied once a source clears FRACTION_GUARD_MIN_ROWS.
 IMPLAUSIBLE_ABSENCE_FRACTION = 0.30
 
 #: ... and only once at least this many listings would actually be removed.
@@ -146,15 +147,14 @@ def mark_missing(
     # The fraction guard is different in kind: a *partial* result is not
     # inherently suspicious the way a total-zero one is, so it only engages
     # once there is enough inventory for a percentage to mean anything
-    # (EMPTY_RESULT_GUARD_MIN_ROWS) AND enough would actually be removed for
-    # that to be more than a single ordinary sale
-    # (IMPLAUSIBLE_ABSENCE_MIN_MISSING). Skipping single removals here is
-    # what keeps a small source from deadlocking: without the floor, a
-    # 3-listing source losing exactly one (33%) would raise every run
-    # forever, since a refused run writes nothing and next run sees the same
-    # "still visible" row again.
+    # (FRACTION_GUARD_MIN_ROWS) AND enough would actually be removed for that
+    # to be more than a single ordinary sale (IMPLAUSIBLE_ABSENCE_MIN_MISSING).
+    # Skipping single removals here is what keeps a small source from
+    # deadlocking: without the floor, a 3-listing source losing exactly one
+    # (33%) would raise every run forever, since a refused run writes nothing
+    # and the next run sees the same "still visible" row again.
     missing = [ps for ps in rows if ps.property_id not in seen]
-    if len(rows) >= EMPTY_RESULT_GUARD_MIN_ROWS and len(missing) >= IMPLAUSIBLE_ABSENCE_MIN_MISSING:
+    if len(rows) >= FRACTION_GUARD_MIN_ROWS and len(missing) >= IMPLAUSIBLE_ABSENCE_MIN_MISSING:
         fraction = len(missing) / len(rows)
         if fraction >= IMPLAUSIBLE_ABSENCE_FRACTION:
             raise ImplausibleAbsence(

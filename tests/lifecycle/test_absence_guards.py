@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from hofradar.db.enums import ListingStatus, SourceRole
+from hofradar.db.enums import ChangeKind, ListingStatus, SourceRole
 from hofradar.lifecycle import ImplausibleAbsence, ingest, mark_missing
 
 #: Deliberately spread across town, postcode, land and year so the
@@ -84,3 +84,44 @@ def test_a_normal_single_removal_still_works(session, make_source, make_listing)
 
     assert len(changes) == 1
     assert props[9].listing_status == ListingStatus.REMOVED
+
+
+def test_two_row_empty_seen_set_still_raises(session, make_source, make_listing) -> None:
+    """The case the old size gate (>= 3 rows) let straight through: a source
+    with only two visible listings - the modal inventory for a search DNA
+    this narrow, not an edge case - reporting zero. The empty-seen-set guard
+    is unconditional precisely so this size no longer gets a free pass.
+    """
+    source, props = _seed(session, make_source, make_listing, count=2)
+
+    with pytest.raises(ImplausibleAbsence, match="saw nothing"):
+        mark_missing(session, set(), source=source, enumeration_complete=True)
+
+    assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
+
+
+def test_a_single_removal_on_a_three_listing_source_does_not_deadlock(
+    session, make_source, make_listing
+) -> None:
+    """The controller ruling's deadlock case. 1 missing of 3 is 33% - over
+    IMPLAUSIBLE_ABSENCE_FRACTION - but below IMPLAUSIBLE_ABSENCE_MIN_MISSING,
+    so the fraction guard must not engage: the removal has to actually
+    succeed, and it has to keep succeeding on the next run over the same
+    seen-set rather than raising forever (a refused run writes nothing, so
+    without the floor the same "still visible" row would trip the guard
+    again every time).
+    """
+    source, props = _seed(session, make_source, make_listing, count=3)
+    seen = {p.id for p in props[1:]}
+
+    changes = mark_missing(session, seen, source=source, enumeration_complete=True)
+
+    assert len(changes) == 1
+    assert changes[0].kind == ChangeKind.REMOVED
+    assert props[0].listing_status == ListingStatus.REMOVED
+    assert props[0].removed_at is not None
+
+    # The "forever" half of the deadlock: the same seen-set, run again, must
+    # complete quietly - not raise a second time.
+    again = mark_missing(session, seen, source=source, enumeration_complete=True)
+    assert again == []

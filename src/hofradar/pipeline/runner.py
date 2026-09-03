@@ -189,7 +189,12 @@ async def run_pipeline(
                         # above, so the run continues for every other source.
                         # consecutive_failures escalates it: a source stuck in
                         # permanent refusal must not stay invisible just
-                        # because the run itself still finishes "ok".
+                        # because the run itself still finishes "ok". Note it
+                        # gets pinned at 1, not accumulated - the crawl above
+                        # already reset it to 0 on its own success, since a
+                        # phantom-parser run is by definition a *successful*
+                        # crawl. Nothing reads this counter today; if that
+                        # changes, this reset is the thing to revisit.
                         log.error("absence detection refused for %s: %s", source.key, exc)
                         source.consecutive_failures += 1
                         source.last_error = str(exc)

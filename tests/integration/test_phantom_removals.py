@@ -19,7 +19,7 @@ from sqlalchemy import select
 from hofradar.db.enums import ListingStatus, SourceRole
 from hofradar.db.models import Property, PropertySource, Source
 from hofradar.lifecycle import ImplausibleAbsence, ingest, mark_missing
-from hofradar.lifecycle.absence import EMPTY_RESULT_GUARD_MIN_ROWS
+from hofradar.lifecycle.absence import FRACTION_GUARD_MIN_ROWS
 from hofradar.sources import get_adapter
 
 # --------------------------------------------------------------------------- #
@@ -147,7 +147,7 @@ def test_a_source_going_from_many_to_zero_is_treated_as_broken(
     same fiction with a longer fuse.
     """
     source, props = _seed(
-        db_session, make_source, make_listing, count=EMPTY_RESULT_GUARD_MIN_ROWS
+        db_session, make_source, make_listing, count=FRACTION_GUARD_MIN_ROWS
     )
 
     with pytest.raises(ImplausibleAbsence, match="saw nothing"):
@@ -160,7 +160,7 @@ def test_a_partial_result_still_removes_only_what_is_missing(
     db_session, make_source, make_listing
 ) -> None:
     source, props = _seed(
-        db_session, make_source, make_listing, count=EMPTY_RESULT_GUARD_MIN_ROWS + 1
+        db_session, make_source, make_listing, count=FRACTION_GUARD_MIN_ROWS + 1
     )
     still_listed = {p.id for p in props[1:]}
 
