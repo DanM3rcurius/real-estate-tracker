@@ -308,6 +308,14 @@ class SourceAdapter:
         #: a page cap was hit, a paginator gave up, a partial result was
         #: returned. Reset at the start of every discover().
         self.enumeration_complete: bool = True
+        #: URLs discover() examined this run, whether or not it chose to
+        #: fetch them. A pre-filter that skips a detail fetch is a decision
+        #: not to re-check something already on file, never a claim that the
+        #: source stopped carrying it - so hofradar.pipeline.runner also
+        #: treats a URL in this set as "still seen" for a property already on
+        #: record under it, exactly as it does for a yielded RawListing.
+        #: Reset at the start of every discover().
+        self.enumerated_urls: set[str] = set()
         # An operator can override the class default per source, for a feed
         # they know to be exhaustive (or one they know is not).
         override = self.options.get("enumerates")
@@ -339,13 +347,22 @@ class SourceAdapter:
     # -- enumeration ---------------------------------------------------------- #
 
     def begin_enumeration(self) -> None:
-        """Adapters call this at the top of discover() to reset the flag."""
+        """Adapters call this at the top of discover() to reset per-run state."""
         self.enumeration_complete = True
+        self.enumerated_urls = set()
 
     def mark_enumeration_incomplete(self, reason: str) -> None:
         """Adapters call this when they know they did not see everything."""
         self.enumeration_complete = False
         logger.info("%s: enumeration incomplete - %s", self.key, reason)
+
+    def record_enumerated_url(self, url: str) -> None:
+        """Adapters call this for every item discover() examines, fetched or not.
+
+        A pre-filtered row and a withdrawn listing must stay distinguishable:
+        see :attr:`enumerated_urls`.
+        """
+        self.enumerated_urls.add(url)
 
     @property
     def can_prove_absence(self) -> bool:
