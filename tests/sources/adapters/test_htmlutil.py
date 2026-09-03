@@ -37,3 +37,29 @@ def test_grundstuecksflaeche_still_matches_after_the_change() -> None:
     # normalisation was added and must keep matching unchanged.
     fields = extract_labeled_fields("Grundstücksfläche: ca. 435 m²")
     assert fields == {"land_raw": "ca. 435 m²"}
+
+
+def test_a_stripped_label_never_lands_on_a_different_known_field() -> None:
+    # "Zimmer (Wohnfläche)" must resolve to its own base field, rooms_raw -
+    # never bleed onto living_raw just because "Wohnfläche" is also a known
+    # label. No two distinct known labels may collapse onto each other via
+    # the parenthetical strip.
+    fields = extract_labeled_fields("Zimmer (Wohnfläche): 4")
+    assert fields == {"rooms_raw": "4"}
+
+
+def test_malformed_parentheticals_never_match() -> None:
+    # None of these are a known label with a trailing balanced qualifier, so
+    # none may match: a parenthetical that splits the word itself, one with
+    # no closing paren, one with nothing but a parenthetical, and - the
+    # discriminating case - one with a parenthetical in the *middle* of an
+    # otherwise-known label. That last one is what actually distinguishes the
+    # anchored regex (r"\s*\([^)]*\)\s*$") from an unanchored r"\([^)]*\)":
+    # unanchored, "wohn(x)fläche" becomes "wohnfläche" by deleting the
+    # matched span wherever it sits, not just at the end, so it would wrongly
+    # match living_raw. The anchored regex only ever strips a parenthetical
+    # that ends the string, so it leaves "wohn(x)fläche" alone.
+    assert extract_labeled_fields("Wohn(fläche): 5") == {}
+    assert extract_labeled_fields("Wohnfläche (unbalanced: 12") == {}
+    assert extract_labeled_fields("(Wohnfläche): 9") == {}
+    assert extract_labeled_fields("Wohn(x)fläche: 5") == {}

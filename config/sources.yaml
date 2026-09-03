@@ -60,18 +60,37 @@ sources:
     base_url: "https://www.blfd.bayern.de"
     region: Bayern
     reliability: 0.8
-    enabled: false
+    enabled: true
     rate_limit_seconds: 4.0
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      https://www.blfd.bayern.de/robots.txt returns HTTP 404 Not Found
+      (Server: CERN httpd) - no robots.txt exists, so no crawl directives to
+      honour or violate. The Impressum's Nutzungsbedingungen section
+      (/blfd/impressum/index.html) reads: "Als Privatperson dürfen Sie
+      urheberrechtlich geschütztes Material zum privaten und sonstigen
+      eigenen Gebrauch im Rahmen des § 53 Urheberrechtsgesetz (UrhG)
+      verwenden. Eine Vervielfältigung oder Verwendung dieser Seiten oder
+      Teilen davon in anderen elektronischen oder gedruckten Publikationen
+      und deren Veröffentlichung ist nur mit unserer Einwilligung gestattet."
+      Neither the robots.txt (absent) nor the Impressum's Nutzungsbedingungen
+      restricts automated retrieval, crawling or machine access - no other
+      page was read. A Haftungsausschluss disclaims accuracy, completeness
+      and currency of the published information.
     notes: >
       A state authority's listing exchange for Baudenkmäler. role=primary
       because the exposé is the origin of the advert, not a copy - it is
       withdrawn when the owner withdraws it, so its silence is the seller's own
       signal. reliability 0.8 rather than 0.95 because BLfD publishes owner
-      statements and explicitly disclaims their accuracy: that is a fact about
-      the data, which reliability models, not about provenance, which role does.
-      Ships disabled: its terms check is outstanding (SourceConfig requires
-      terms_checked_at and terms_excerpt before enabled: true can be set) - see
-      the OUTSTANDING note in docs/SOURCES.md.
+      statements and explicitly disclaims their accuracy in a Haftungsausschluss
+      (see terms_excerpt): that is a fact about the data, which reliability
+      models, not about provenance, which role does.
+      Terms check completed 2026-09-03 (see terms_excerpt): private/own use is
+      permitted under § 53 UrhG, but republication - reproducing these pages or
+      parts of them in other electronic or printed publications - requires
+      BLfD's consent. Hofradar does not publish: the weekly digest and the web
+      UI must stay private to the household running it, never republished or
+      exposed outside that gate.
 
   - key: generic_rss
     name: "Regionale Makler (RSS/Atom)"
