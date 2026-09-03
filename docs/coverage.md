@@ -49,7 +49,7 @@ for content.
 | Bad Aibling | RO | OVB (Mangfall-Bote) | yes | 100 (`de.rosenheim-kreis`) | covered |
 | Kolbermoor | RO | OVB | yes | 100 (`de.rosenheim-kreis`) | covered |
 | Rosenheim | RO | OVB | yes | 100 (`de.rosenheim-kreis`) | covered |
-| Wasserburg a. Inn | RO | OVB (Wasserburger Ztg.) | yes | 100 (`de.rosenheim-kreis`) | covered |
+| Wasserburg am Inn | RO | OVB (Wasserburger Ztg.) | yes | 100 (`de.rosenheim-kreis`) | covered |
 | Irschenberg | MB | Miesbacher Merkur (Ippen) | **dark** | 14 (`de.miesbach`, Lkr.-wide, not Gemeinde-attributed) | newspaper dark, portal thin |
 | Weyarn | MB | Miesbacher Merkur (Ippen) | **dark** | 14 (`de.miesbach`, Lkr.-wide, not Gemeinde-attributed) | newspaper dark, portal thin |
 | Valley | MB | Miesbacher Merkur (Ippen) | **dark** | 14 (`de.miesbach`, Lkr.-wide, not Gemeinde-attributed) | newspaper dark, portal thin |
@@ -78,18 +78,16 @@ a fact.
 
 `config/search.yaml`'s `coverage.municipalities` list (which
 `hofradar.report.yield_stats.coverage_by_municipality` reads) mirrors the
-"Gemeinde" column above, with one deliberate exception: this table keeps the
-plan's original abbreviated spelling **"Wasserburg a. Inn"** verbatim, but
-`config/search.yaml` spells it **"Wasserburg am Inn"** — the canonical form
-`hofradar.geo.gazetteer` and `hofradar.normalize.location.parse_location`
-actually produce and store on `Property.town`/`Observation.town`. Because
-`coverage_by_municipality`'s `Property.town.in_(expected)` match is exact, the
-abbreviated form as written in this table would never match a single real
-observation and Wasserburg would read as falsely dark on day one, in the one
-Lkr.-Rosenheim town that is definitely covered. If this table is ever
-"corrected" back to match `search.yaml` verbatim, use the *canonical* spelling
-("Wasserburg am Inn"), not the abbreviated one — the abbreviated form here is
-a leftover from the plan text, not a second valid spelling to preserve.
+"Gemeinde" column above exactly, including **"Wasserburg am Inn"**. That
+spelling is not cosmetic: it is the canonical form `hofradar.geo.gazetteer`
+and `hofradar.normalize.location.parse_location` produce and store on
+`Property.town`/`Observation.town`, and `coverage_by_municipality`'s
+`Property.town.in_(expected)` match is exact. An earlier version of this
+table carried the plan's abbreviated **"Wasserburg a. Inn"** — which matches
+no real observation, so Wasserburg would have read as falsely dark on day
+one, in the one Lkr.-Rosenheim town that is definitely covered. Never
+reintroduce the abbreviated form: it is a leftover from the plan text, not a
+second valid spelling.
 
 For every other row, mismatch risk is still real. If a source ever stores a
 town name spelled differently than the config list (a different umlaut

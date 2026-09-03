@@ -50,6 +50,13 @@ is_private_seller, is_off_market_signal` (lists of canonical lowercase tags / bo
 def fingerprint(listing: NormalizedListing | Property) -> str
 def find_duplicate(session, listing: NormalizedListing, *, lat=None, lon=None) -> DuplicateVerdict
 def compare(a, b) -> DuplicateVerdict            # a/b: NormalizedListing | Property
+    # Three short-circuit proofs, then the weighted evidence model. The proofs
+    # are: the same (source_key, external_id); the same canonical listing URL
+    # on ANY source (a URL names one page on one host, so this is the one
+    # proof that crosses source boundaries - it is what joins a portal reached
+    # by both a dedicated adapter and a syndicated feed of the same site); and
+    # a shared image phash. Everything else needs >= 2 corroborating numeric
+    # dimensions; text similarity alone never merges.
 def merge_properties(session, keep: Property, drop: Property) -> Property
 ```
 
@@ -63,13 +70,14 @@ def mark_missing(session, seen_property_ids: set[int], *, source: Source,
     # enumeration_complete has no default on purpose: absence is only evidence
     # when the source listed its whole inventory without error or truncation.
     # A listing missing past source.listing_ttl_days is set EXPIRED, not
-    # REMOVED, and is pulled out of both guards below before they run - see
-    # docs/DECISIONS.md entry 15. Raises ImplausibleAbsence - and writes
-    # nothing - when what remains (the non-expired absences) is too broad to
-    # be believed: the seen-set is empty against a real inventory
-    # (unconditionally, even a single visible listing), or would remove >= 2
-    # listings AND >= 30% of a source with at least 3 visible listings in one
-    # run.
+    # REMOVED - see docs/DECISIONS.md entry 15. Raises ImplausibleAbsence -
+    # and writes nothing - in two cases. First, unconditionally and BEFORE
+    # that EXPIRED split: the seen-set is empty against a real inventory (even
+    # a single visible listing). A listing_ttl_days explains why one advert
+    # vanished, never why a run produced no rows at all, so it cannot excuse
+    # that. Second, after the split: what remains would remove >= 2 listings
+    # AND >= 30% of a source with at least 3 visible listings in one run - a
+    # genuine fortnightly mass-expiry is pulled out before this one and passes.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
                       unverified_stale_after_days: int = 180,
                       non_reporting_source_ids: set[int] | None = None,
@@ -149,6 +157,16 @@ class SourceAdapter:
     async def discover(self, profile: SearchProfile, keywords: KeywordConfig) -> AsyncIterator[RawListing]: ...
     async def fetch_detail(self, url: str) -> RawListing | None: ...
     async def verify(self, url: str) -> tuple[bool, int | None]: ...   # (still_live, http_status)
+
+# hofradar.sources.adapters.generic_rss
+MAPPABLE_ENTRY_FIELDS: frozenset[str]
+    # The raw RawListing fields a source's options.entry_field_map may fill
+    # from a feed's own element names ({feedparser key: field}). This is how
+    # the generic feed adapter learns a vendor dialect - e.g. classmarkets'
+    # cm_postalcode/cm_locality - without learning the vendor. Raw string
+    # fields only: identity (external_id, url) and authority (contact_kind,
+    # listing_visible) fields are not mappable, and a non-string value is
+    # refused rather than coerced.
 ```
 
 ## `hofradar.report`
@@ -164,7 +182,7 @@ def render_html(data: ReportData) -> str
 class SourceYield:
     source_key: str
     observed: int    # distinct properties observed since `since`
-    in_radius: int    # of those, how many have distance_air_km <= YIELD_RADIUS_AIR_KM
+    in_radius: int    # of those, how many have distance_air_km <= radius_air_km
                        # (an unknown distance is never counted as in-radius)
 
 def source_yield(session, *, since: datetime, radius_air_km: float | None = None) -> list[SourceYield]
