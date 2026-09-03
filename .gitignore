@@ -60,6 +60,9 @@ data/images/*
 !data/images/.gitkeep
 data/exports/*
 !data/exports/.gitkeep
+# The static export. Built by .github/workflows/pages.yml, never committed.
+site/
+
 reports/weekly/*.md
 reports/weekly/*.html
 !.gitkeep

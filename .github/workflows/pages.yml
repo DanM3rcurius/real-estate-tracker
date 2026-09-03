@@ -1,0 +1,99 @@
+# Publishes a read-only static snapshot of the UI to GitHub Pages.
+#
+# This does NOT host the application. Pages serves files: there is no Python,
+# no database and - the part that decides everything else here - no password
+# gate. So the snapshot is built from data/seed/demo_listings.yaml, which is
+# invented, and never from a real database. See docs/DECISIONS.md 13.
+#
+# The build is hermetic: it seeds a throwaway SQLite file in the runner's
+# temporary directory and never reads a committed database.
+
+name: Pages
+
+on:
+  push:
+    branches: ["trunk"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one half-way: an interrupted
+# deploy can leave the site on a partial upload.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HOFRADAR_DATA_DIR: ${{ runner.temp }}/hofradar-data
+      # Unlike the test suite - which CLAUDE.md forbids running with this set -
+      # seeding and export must make no outbound call at all.
+      HOFRADAR_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,pdf,images]"
+
+      - name: Build the snapshot
+        run: |
+          mkdir -p "$HOFRADAR_DATA_DIR"
+          hofradar init-db
+          hofradar seed-demo
+          hofradar export-site --out site --base-path "/${GITHUB_REPOSITORY#*/}"
+
+      # No password gate can exist on Pages, so a build that somehow picked up
+      # a real database would publish it. Fail instead. This checks the
+      # database rather than site/api/properties.json, because that file is the
+      # filtered view - a real listing the budget gate rejected would not
+      # appear in it, but its dossier page would still have been published.
+      - name: Refuse to publish anything but the demo data
+        run: |
+          python - <<'PY'
+          import sys
+
+          from sqlalchemy import select
+
+          from hofradar.db.models import Property, PropertySource
+          from hofradar.db.session import session_scope
+
+          with session_scope() as session:
+              urls = {
+                  pid: url
+                  for pid, url in session.execute(
+                      select(Property.public_id, PropertySource.url).join(
+                          PropertySource, PropertySource.property_id == Property.id
+                      )
+                  )
+              }
+          bad = sorted(p for p, u in urls.items() if "example.invalid" not in (u or ""))
+          if bad:
+              sys.exit(f"refusing to publish non-demo listings: {bad}")
+          print(f"{len(urls)} properties in the snapshot, all synthetic")
+          PY
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
