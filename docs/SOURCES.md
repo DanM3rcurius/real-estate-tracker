@@ -29,7 +29,7 @@ can never make something look current.
 | `manual` | Paste a URL or a whole exposé into the web UI. Never blocked. The fastest path to value on day one. |
 | `csv_import` | Bulk-load anything you already have in a spreadsheet. |
 | `zvg_bayern` | The official public foreclosure register. High signal, public by design, and exactly the kind of listing a normal search misses. |
-| `generic_rss` | Regional brokers who publish a feed. Add their URLs to `options.feeds`. |
+| `generic_rss` | Regional brokers who publish a feed. `options.feeds` ships pre-populated with ovbimmo.de's four per-Landkreis Atom feeds - see below. Add individual broker URLs the same way. |
 | `generic_sitemap` | Small broker sites with a `sitemap.xml`. Polite, capped, robots-respecting. |
 | `ovbimmo` | Regional newspaper portal for Lkr. Rosenheim/Mühldorf/West-Traunstein — brokers plus the papers' own classified ads, including private Chiffre sellers. See below. |
 
@@ -317,6 +317,108 @@ own spelling) 301-redirect to `wasserburg-a-inn`. `docs/coverage.md` and
 am Inn"**, because that is the name the gazetteer and the normalizer
 produce. These are two different namespaces, each correct in its own place -
 do not "fix" one to match the other.
+
+## generic_rss: ovbimmo.de's per-Landkreis Atom feeds
+
+`options.feeds` on `generic_rss` ships pre-populated with four of ovbimmo.de's
+own `suchergebnisse.atom` search-result feeds - `de.rosenheim-kreis`,
+`de.traunstein`, `de.miesbach`, `de.ebersberg` - a URL shape taken from a real
+`<link rel="alternate" type="application/atom+xml">` on a captured ovbimmo
+search page. This is the "convert OVB's aggregation into config for adapters
+that already exist" idea, done with no new code: `GenericRssAdapter` already
+handled Atom via `feedparser` before this task.
+
+Verified live 2026-09-03, entries per request: Rosenheim 100, Traunstein 75,
+Miesbach 14, Ebersberg 14. A fifth candidate, `de.muehldorf-am-inn`, rendered
+an empty feed title and zero entries - the wrong area id for Lkr. Mühldorf -
+and was deliberately left out rather than shipped with a silently-broken URL.
+
+**This does not contradict `ovbimmo`'s own "does not cover Lkr. Miesbach or
+Ebersberg" note above.** That claim is about the *newspaper* (OVB
+Heimatzeitungen and its Amtsblatt arrangement); `de.miesbach`/`de.ebersberg`
+returning entries is the *portal* aggregating brokers who list there
+independent of which paper covers the area. See `docs/coverage.md` for the
+full breakdown, including the caveat that 14 entries is thin, Landkreis-wide
+rather than Gemeinde-attributed, and unverified as containing any farmstead.
+
+**Confirmed against a real capture, not just a live check.**
+`tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom` (100 entries,
+provenance comment at the top) is parsed correctly end-to-end by
+`GenericRssAdapter.discover()` in
+`tests/sources/test_generic_rss_ovbimmo_feeds.py`: `feedparser` handles the
+`classmarkets` `cm:`/`cms:` namespaces alongside the plain Atom elements the
+adapter actually reads (`<title>`, `<id>`, `<link>`, `<updated>`,
+`<summary>`) without choking on the two `<link>` elements per entry (one bare,
+one explicit `rel="alternate"`), and 100/100 entries come through as
+`RawListing`s. `_entry_image_urls` also reads `media:thumbnail`
+(`http://search.yahoo.com/mrss/`, a standard Media RSS element this feed
+happens to carry, not a classmarkets vendor extension) alongside the
+`enclosure`/`media:content` shapes it already read, so every entry's image
+survives too - pinned in the same test by asserting the real thumbnail URL
+from entry one.
+
+**`role`, `rate_limit_seconds` and `listing_ttl_days` are set to match
+`ovbimmo`, not this adapter's previous per-source defaults**, because every
+feed configured here today is that same host reached a second way: `role:
+local` (not `primary`) so a listing seen by both routes doesn't let the
+generic, less-structured route outrank the dedicated `ovbimmo` adapter as
+the property's primary source in `dedupe._primary_sort_key`;
+`rate_limit_seconds: 5.0` (not `2.0`) so the generic route doesn't poll
+ovbimmo.de faster than the entry that deliberately chose to go slow;
+`listing_ttl_days: 14` (not unset) so the same paid-advert-window inventory
+reads as EXPIRED rather than REMOVED regardless of which route saw it
+(`docs/DECISIONS.md` entry 15). See the reasoning recorded in `generic_rss`'s
+own `notes:` in `config/sources.yaml`, including what to do if a genuine
+broker-own-site feed (not an ovbimmo re-aggregation) is ever added alongside
+these four.
+
+**What the `cm:`/`cms:` classmarkets namespace does and does not give up to
+`feedparser` - recorded here as a precise follow-up, deliberately not
+implemented in this generic adapter** (reading a feed's own vendor namespace
+belongs in a dedicated adapter or a normalize-layer mapping, not in the
+adapter meant to work for any broker's feed). Checked directly against
+`tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom`:
+
+| Field | feedparser key | What comes through |
+|---|---|---|
+| `cm:locality` | `entry.cm_locality` | plain text, e.g. `"Stephanskirchen"` - reachable as-is |
+| `cm:postalCode` | `entry.cm_postalcode` | plain text, e.g. `"83071"` - reachable as-is |
+| `cm:rooms` | `entry.cm_rooms` | plain text, e.g. `"5"` - reachable as-is |
+| `cm:marketingType` | `entry.cm_marketingtype` | plain text, e.g. `"sale"` - reachable as-is |
+| `cm:price` | `entry.cm_price` | **element text lost.** `<cm:price cm:currency="EUR">659000</cm:price>` carries an attribute, so feedparser's generic unknown-namespace handling keeps only the attribute dict (`{"currency": "EUR"}`) and drops `"659000"` entirely - needs real work |
+| `cm:area` | `entry.cm_area` | **element text lost**, same cause: `<cm:area cm:unit="m²">131</cm:area>` yields `{"unit": "m²"}`, the `"131"` is gone - needs real work |
+
+The two broken fields share one cause: `feedparser` only special-cases
+namespaces it recognises (Dublin Core, Media RSS, etc.); for an unrecognised
+namespaced element that also carries attributes, it keeps the attributes and
+discards the text. Getting `cm:price`/`cm:area` would mean bypassing that -
+reading the raw entry XML directly (e.g. with `lxml`/`ElementTree` against
+the `classmarkets` namespace) instead of trusting `feedparser`'s generic
+path - real, scoped work for whoever picks this up, not a config change.
+
+**Net effect today: ovbimmo.de now arrives through two routes -
+`generic_rss`'s Atom feeds and the dedicated `ovbimmo` adapter's own search
+crawl - and *neither* yields a typed price, room count or town.**
+`generic_rss` doesn't read `cm:` at all, by the ruling above; `ovbimmo`'s own
+`fetch_detail` uses only the generic HTML fallback, which gets the detail
+page's `eps-item` price/rooms/area blocks as plain description text, not
+typed fields (see that adapter's note above). Both leave `locate()` to
+geocode from the title/description string alone for every one of these
+listings, even though the feed and the detail page both state the
+municipality in a field a purpose-built reader could use directly.
+
+`generic_sitemap`'s `options.sites` was deliberately left empty rather than
+also pointing at ovbimmo.de's advertised sitemap - see that source's `notes:`
+in `config/sources.yaml` for the reasoning (three independently-rate-limited
+sources hitting one host for URLs two of them already cover is not obviously
+an improvement).
+
+`gemeindeblatt_pdf`'s `options.bulletins` stays empty and the source stays
+`enabled: false`: this container's egress proxy still 403s every Bavarian
+municipality domain tested (`feldkirchen-westerham.de`, `bruckmuehl.de`,
+`weyarn.de`, `holzkirchen.de`, 2026-09-03), even though `ovbimmo.de` and
+`www.blfd.bayern.de` were opened. See that source's `notes:` for the
+per-Gemeinde checklist left for whoever next has network access.
 
 ## Adding a regional source
 

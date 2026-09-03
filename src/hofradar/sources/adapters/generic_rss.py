@@ -25,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 
 def _entry_image_urls(entry: Any) -> list[str]:
+    """Pull image URLs from the standard syndication shapes feedparser exposes:
+    plain RSS ``<enclosure>``, and Media RSS's ``media:content`` /
+    ``media:thumbnail`` (namespace ``http://search.yahoo.com/mrss/`` - a
+    widely-used syndication extension, not a feed vendor's own namespace).
+    Reading a feed's own vendor-specific elements (e.g. classmarkets' ``cms:``
+    namespace) does not belong here - that would make this adapter no longer
+    generic; see docs/SOURCES.md for that call and what it costs.
+    """
     urls: list[str] = []
     for enclosure in entry.get("enclosures") or []:
         href = enclosure.get("href") if isinstance(enclosure, dict) else None
@@ -32,6 +40,15 @@ def _entry_image_urls(entry: Any) -> list[str]:
             urls.append(href)
     for media in entry.get("media_content") or []:
         url = media.get("url") if isinstance(media, dict) else None
+        if url and url not in urls:
+            urls.append(url)
+    # feedparser exposes one media:thumbnail as a dict and several as a list
+    # of dicts - normalise both shapes the same way as the sources above.
+    thumbnails = entry.get("media_thumbnail") or []
+    if isinstance(thumbnails, dict):
+        thumbnails = [thumbnails]
+    for thumb in thumbnails:
+        url = thumb.get("url") if isinstance(thumb, dict) else None
         if url and url not in urls:
             urls.append(url)
     return urls
