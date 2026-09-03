@@ -140,3 +140,65 @@ def test_radius_slider_moves_the_derived_driving_limits():
     profile = profile_from_query({"air_km_max": "40"})
     assert profile.radius.effective_driving_soft == pytest.approx(50.0)
     assert profile.radius.effective_driving_hard == pytest.approx(58.0)
+
+
+# --------------------------------------------------------------------------- #
+# The panel collapses on mobile (reported: it buried the first result card).
+# --------------------------------------------------------------------------- #
+
+
+def controls_block(html: str) -> str:
+    """The full ``<form id="controls">...</form>`` markup, start to end."""
+    start = html.index('<form id="controls"')
+    end = html.index("</form>", start) + len("</form>")
+    return html[start:end]
+
+
+def test_panel_is_a_collapsed_by_default_details_element(client, seeded):
+    """No JS is required to collapse the panel: it starts closed by markup alone."""
+    form = controls_block(client.get("/").text)
+    assert '<details class="controls__collapse">' in form
+    # A bare tag - no "open" attribute - is what makes <details> start closed.
+    assert "<details open" not in form
+
+
+def test_collapsed_summary_still_shows_distance_and_budget(client, seeded):
+    """Base template's tagline: Entfernung and Gesamtbudget are the two that matter."""
+    form = controls_block(client.get("/").text)
+    summary_start = form.index("<summary")
+    summary_end = form.index("</summary>")
+    summary = form[summary_start:summary_end]
+
+    assert "Filter" in summary
+    assert "Entfernung" in summary
+    assert "Gesamtbudget" in summary
+    # The actual figures, not just the labels - an id app.js keeps live too.
+    assert 'id="out-air-collapsed"' in summary
+    assert 'id="out-budget-collapsed"' in summary
+
+
+def test_every_control_stays_inside_the_htmx_form(client, seeded):
+    """Wrapping the panel in <details> must not move a single input out of
+
+    #controls - hx-trigger serialises the form via FormData, so a field left
+    outside it would silently stop being sent to /api/results.
+    """
+    html = client.get("/").text
+    form = controls_block(html)
+
+    for name in (
+        "air_km_max",
+        "total_budget_max",
+        "min_land_sqm",
+        "status",
+        "q",
+        "sort",
+        "verified_only",
+        "outbuildings_only",
+        "include_rejected",
+    ):
+        assert f'name="{name}"' in form, f"{name!r} missing from #controls"
+
+    # The <details> wrapper lives inside the form, not the other way round.
+    assert form.index("<details") < form.index("</form>")
+    assert form.index('<form id="controls"') < form.index("<details")

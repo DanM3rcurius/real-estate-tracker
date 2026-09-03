@@ -109,6 +109,36 @@ small { color: var(--ink-soft); }
 .controls__headline { display: grid; gap: 16px; grid-template-columns: 1fr; }
 @media (min-width: 780px) { .controls__headline { grid-template-columns: 1fr 1fr; } }
 
+/* Mobile: the panel is long enough to bury the first result off-screen, so it
+   starts collapsed behind a native <details>/<summary> toggle. The two
+   headline figures stay readable in the summary either way. At 780px - the
+   width where the two sliders already sit side by side - the content is
+   forced open and the toggle hidden, so desktop is unchanged. */
+.controls__collapse summary { cursor: pointer; list-style: none; }
+.controls__collapse summary::-webkit-details-marker { display: none; }
+.controls__toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px 16px; flex-wrap: wrap;
+  font-weight: 600;
+}
+.controls__toggle-label { display: inline-flex; align-items: center; gap: 6px; }
+.controls__toggle-icon { display: inline-block; transition: transform .15s ease; }
+.controls__collapse[open] .controls__toggle-icon { transform: rotate(90deg); }
+.controls__toggle-values {
+  display: flex; gap: 8px 14px; flex-wrap: wrap;
+  font-weight: 400; font-size: .85rem; color: var(--ink-soft);
+}
+.controls__toggle-values output {
+  font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent);
+}
+.controls__body { margin-top: 12px; }
+
+@media (min-width: 780px) {
+  .controls__toggle { display: none; }
+  .controls__collapse:not([open]) > .controls__body { display: block; }
+  .controls__body { margin-top: 0; }
+}
+
 .slider__top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .slider__top label { font-weight: 600; }
 .slider__top output { font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 700; color: var(--accent); }

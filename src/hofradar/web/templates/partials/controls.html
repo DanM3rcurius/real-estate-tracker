@@ -1,4 +1,15 @@
-{# The product. Two sliders, and everything they imply, visible while dragging. #}
+{# The product. Two sliders, and everything they imply, visible while dragging.
+
+   The full control stack is tall enough to push the first result card off a
+   phone screen (reported from a real device), so on narrow viewports it
+   starts collapsed behind a native <details>/<summary> disclosure - no JS
+   needed for the toggle itself, keyboard and screen-reader semantics come
+   for free. The <summary> keeps echoing Entfernung and Gesamtbudget (the
+   only two values the base template's own tagline calls load-bearing) so the
+   user still knows what they are looking at while collapsed. At and above
+   the width where the two sliders already sit side by side, app.css forces
+   the panel open and hides the toggle, so desktop is pixel-identical to
+   before this change. #}
 <form id="controls" class="controls" role="search"
       hx-get="/api/results"
       hx-target="#results"
@@ -11,94 +22,120 @@
       data-negotiation-uplift="{{ profile.budget.negotiation_uplift }}"
       data-exceptional-uplift="{{ profile.budget.exceptional_uplift }}">
 
-  <div class="controls__headline">
+  <details class="controls__collapse">
+    <summary class="controls__toggle">
+      <span class="controls__toggle-label">
+        <span class="controls__toggle-icon" aria-hidden="true">&#9656;</span>
+        Filter
+      </span>
+      {# Echoes of #out-air / #out-budget below - same values, kept in sync by
+         app.js when JS is present; the server-rendered figure is already
+         correct without it, so the summary is never wrong on first paint. #}
+      <span class="controls__toggle-values">
+        <span class="controls__toggle-item">
+          Entfernung
+          <output id="out-air-collapsed" for="air_km_max">{{ profile.radius.air_km_max | de_km(0) }}</output>
+        </span>
+        <span class="controls__toggle-item">
+          Gesamtbudget
+          <output id="out-budget-collapsed" for="total_budget_max">{{ profile.budget.total_budget_max | de_eur }}</output>
+        </span>
+      </span>
+    </summary>
 
-    <section class="slider" aria-labelledby="lbl-air">
-      <div class="slider__top">
-        <label id="lbl-air" for="air_km_max">Entfernung</label>
-        <output id="out-air" for="air_km_max">{{ profile.radius.air_km_max | de_km(0) }}</output>
+    <div class="controls__body">
+
+      <div class="controls__headline">
+
+        <section class="slider" aria-labelledby="lbl-air">
+          <div class="slider__top">
+            <label id="lbl-air" for="air_km_max">Entfernung</label>
+            <output id="out-air" for="air_km_max">{{ profile.radius.air_km_max | de_km(0) }}</output>
+          </div>
+          <input type="range" id="air_km_max" name="air_km_max"
+                 min="{{ air_km_min }}" max="{{ air_km_max_slider }}" step="{{ air_km_step }}"
+                 value="{{ profile.radius.air_km_max }}"
+                 data-readout="out-air" data-unit="km">
+          <p class="slider__derived">
+            Luftlinie. Daraus abgeleitet:
+            <span class="pill">Fahrstrecke weich <b id="out-drive-soft">{{ profile.radius.effective_driving_soft | de_km }}</b></span>
+            <span class="pill">hart <b id="out-drive-hard">{{ profile.radius.effective_driving_hard | de_km }}</b></span>
+          </p>
+        </section>
+
+        <section class="slider" aria-labelledby="lbl-budget">
+          <div class="slider__top">
+            <label id="lbl-budget" for="total_budget_max">Gesamtbudget</label>
+            <output id="out-budget" for="total_budget_max">{{ profile.budget.total_budget_max | de_eur }}</output>
+          </div>
+          <input type="range" id="total_budget_max" name="total_budget_max"
+                 min="{{ budget_min }}" max="{{ budget_max_slider }}" step="{{ budget_step }}"
+                 value="{{ profile.budget.total_budget_max }}"
+                 data-readout="out-budget" data-unit="eur">
+          <p class="slider__derived">
+            Alles inklusive: Kauf, Nebenkosten, Sanierung. Daraus abgeleitet:
+            <span class="pill">Kaufpreisziel <b id="out-purchase-target">{{ profile.budget.effective_purchase_target_max | de_eur }}</b></span>
+            <span class="pill">Verhandlung <b id="out-purchase-negotiation">{{ profile.budget.effective_purchase_negotiation_max | de_eur }}</b></span>
+            <span class="pill">hart <b id="out-purchase-hard">{{ profile.budget.effective_purchase_hard_max | de_eur }}</b></span>
+          </p>
+        </section>
+
       </div>
-      <input type="range" id="air_km_max" name="air_km_max"
-             min="{{ air_km_min }}" max="{{ air_km_max_slider }}" step="{{ air_km_step }}"
-             value="{{ profile.radius.air_km_max }}"
-             data-readout="out-air" data-unit="km">
-      <p class="slider__derived">
-        Luftlinie. Daraus abgeleitet:
-        <span class="pill">Fahrstrecke weich <b id="out-drive-soft">{{ profile.radius.effective_driving_soft | de_km }}</b></span>
-        <span class="pill">hart <b id="out-drive-hard">{{ profile.radius.effective_driving_hard | de_km }}</b></span>
-      </p>
-    </section>
 
-    <section class="slider" aria-labelledby="lbl-budget">
-      <div class="slider__top">
-        <label id="lbl-budget" for="total_budget_max">Gesamtbudget</label>
-        <output id="out-budget" for="total_budget_max">{{ profile.budget.total_budget_max | de_eur }}</output>
+      <div class="controls__secondary">
+        <label class="field">
+          <span>Mindest-Grundfläche</span>
+          <input type="number" name="min_land_sqm" min="0" max="50000" step="500"
+                 value="{{ filters.min_land_sqm or 0 }}" inputmode="numeric">
+        </label>
+
+        <label class="field">
+          <span>Status</span>
+          <select name="status">
+            {% for value, label in status_options.items() %}
+            <option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Ort / PLZ</span>
+          <input type="search" name="q" value="{{ filters.town }}" placeholder="z. B. Miesbach">
+        </label>
+
+        <label class="field">
+          <span>Sortierung</span>
+          <select name="sort">
+            {% for value, label in sort_options.items() %}
+            <option value="{{ value }}"{% if filters.sort == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="switch">
+          <input type="checkbox" name="verified_only" value="1"{% if filters.verified_only %} checked{% endif %}>
+          <span>nur verifiziert</span>
+        </label>
+
+        <label class="switch">
+          <input type="checkbox" name="outbuildings_only" value="1"{% if filters.outbuildings_only %} checked{% endif %}>
+          <span>nur mit Nebengebäuden</span>
+        </label>
+
+        <label class="switch">
+          <input type="checkbox" name="include_rejected" value="1"{% if filters.include_rejected %} checked{% endif %}>
+          <span>auch abgelehnte zeigen</span>
+        </label>
+
+        <noscript><button type="submit" class="btn">Anwenden</button></noscript>
       </div>
-      <input type="range" id="total_budget_max" name="total_budget_max"
-             min="{{ budget_min }}" max="{{ budget_max_slider }}" step="{{ budget_step }}"
-             value="{{ profile.budget.total_budget_max }}"
-             data-readout="out-budget" data-unit="eur">
-      <p class="slider__derived">
-        Alles inklusive: Kauf, Nebenkosten, Sanierung. Daraus abgeleitet:
-        <span class="pill">Kaufpreisziel <b id="out-purchase-target">{{ profile.budget.effective_purchase_target_max | de_eur }}</b></span>
-        <span class="pill">Verhandlung <b id="out-purchase-negotiation">{{ profile.budget.effective_purchase_negotiation_max | de_eur }}</b></span>
-        <span class="pill">hart <b id="out-purchase-hard">{{ profile.budget.effective_purchase_hard_max | de_eur }}</b></span>
+
+      <p class="controls__links">
+        <a href="/map?{{ query_string }}">🗺 Auf der Karte</a>
+        <a href="/api/export.csv?{{ query_string }}">⬇️ CSV exportieren</a>
+        <a href="/api/properties.json?{{ query_string }}">{ } JSON</a>
       </p>
-    </section>
 
-  </div>
-
-  <div class="controls__secondary">
-    <label class="field">
-      <span>Mindest-Grundfläche</span>
-      <input type="number" name="min_land_sqm" min="0" max="50000" step="500"
-             value="{{ filters.min_land_sqm or 0 }}" inputmode="numeric">
-    </label>
-
-    <label class="field">
-      <span>Status</span>
-      <select name="status">
-        {% for value, label in status_options.items() %}
-        <option value="{{ value }}"{% if filters.status == value %} selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-
-    <label class="field">
-      <span>Ort / PLZ</span>
-      <input type="search" name="q" value="{{ filters.town }}" placeholder="z. B. Miesbach">
-    </label>
-
-    <label class="field">
-      <span>Sortierung</span>
-      <select name="sort">
-        {% for value, label in sort_options.items() %}
-        <option value="{{ value }}"{% if filters.sort == value %} selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-
-    <label class="switch">
-      <input type="checkbox" name="verified_only" value="1"{% if filters.verified_only %} checked{% endif %}>
-      <span>nur verifiziert</span>
-    </label>
-
-    <label class="switch">
-      <input type="checkbox" name="outbuildings_only" value="1"{% if filters.outbuildings_only %} checked{% endif %}>
-      <span>nur mit Nebengebäuden</span>
-    </label>
-
-    <label class="switch">
-      <input type="checkbox" name="include_rejected" value="1"{% if filters.include_rejected %} checked{% endif %}>
-      <span>auch abgelehnte zeigen</span>
-    </label>
-
-    <noscript><button type="submit" class="btn">Anwenden</button></noscript>
-  </div>
-
-  <p class="controls__links">
-    <a href="/map?{{ query_string }}">🗺 Auf der Karte</a>
-    <a href="/api/export.csv?{{ query_string }}">⬇️ CSV exportieren</a>
-    <a href="/api/properties.json?{{ query_string }}">{ } JSON</a>
-  </p>
+    </div>
+  </details>
 </form>
