@@ -29,7 +29,7 @@ can never make something look current.
 | `manual` | Paste a URL or a whole exposé into the web UI. Never blocked. The fastest path to value on day one. |
 | `csv_import` | Bulk-load anything you already have in a spreadsheet. |
 | `zvg_bayern` | The official public foreclosure register. High signal, public by design, and exactly the kind of listing a normal search misses. |
-| `generic_rss` | Regional brokers who publish a feed. Add their URLs to `options.feeds`. |
+| `generic_rss` | Regional brokers who publish a feed. `options.feeds` ships pre-populated with ovbimmo.de's four per-Landkreis Atom feeds - see below. Add individual broker URLs the same way. |
 | `generic_sitemap` | Small broker sites with a `sitemap.xml`. Polite, capped, robots-respecting. |
 | `ovbimmo` | Regional newspaper portal for Lkr. Rosenheim/Mühldorf/West-Traunstein — brokers plus the papers' own classified ads, including private Chiffre sellers. See below. |
 
@@ -237,6 +237,56 @@ own spelling) 301-redirect to `wasserburg-a-inn`. `docs/coverage.md` and
 am Inn"**, because that is the name the gazetteer and the normalizer
 produce. These are two different namespaces, each correct in its own place -
 do not "fix" one to match the other.
+
+## generic_rss: ovbimmo.de's per-Landkreis Atom feeds
+
+`options.feeds` on `generic_rss` ships pre-populated with four of ovbimmo.de's
+own `suchergebnisse.atom` search-result feeds - `de.rosenheim-kreis`,
+`de.traunstein`, `de.miesbach`, `de.ebersberg` - a URL shape taken from a real
+`<link rel="alternate" type="application/atom+xml">` on a captured ovbimmo
+search page. This is the "convert OVB's aggregation into config for adapters
+that already exist" idea, done with no new code: `GenericRssAdapter` already
+handled Atom via `feedparser` before this task.
+
+Verified live 2026-09-03, entries per request: Rosenheim 100, Traunstein 75,
+Miesbach 14, Ebersberg 14. A fifth candidate, `de.muehldorf-am-inn`, rendered
+an empty feed title and zero entries - the wrong area id for Lkr. Mühldorf -
+and was deliberately left out rather than shipped with a silently-broken URL.
+
+**This does not contradict `ovbimmo`'s own "does not cover Lkr. Miesbach or
+Ebersberg" note above.** That claim is about the *newspaper* (OVB
+Heimatzeitungen and its Amtsblatt arrangement); `de.miesbach`/`de.ebersberg`
+returning entries is the *portal* aggregating brokers who list there
+independent of which paper covers the area. See `docs/coverage.md` for the
+full breakdown, including the caveat that 14 entries is thin, Landkreis-wide
+rather than Gemeinde-attributed, and unverified as containing any farmstead.
+
+**Confirmed against a real capture, not just a live check.**
+`tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom` (100 entries,
+provenance comment at the top) is parsed correctly end-to-end by
+`GenericRssAdapter.discover()` in
+`tests/sources/test_generic_rss_ovbimmo_feeds.py`: `feedparser` handles the
+`classmarkets` `cm:`/`cms:` namespaces alongside the plain Atom elements the
+adapter actually reads (`<title>`, `<id>`, `<link>`, `<updated>`,
+`<summary>`) without choking on the two `<link>` elements per entry (one bare,
+one explicit `rel="alternate"`) or the entries-without-price/rooms/area-as-
+typed-fields limitation `_entry_to_listing` already has - price, rooms and
+area stay in `cm:` elements this adapter does not read; only `fetch_detail`'s
+generic HTML fallback ever gets a chance at those, and only if the detail
+page renders them as plain text.
+
+`generic_sitemap`'s `options.sites` was deliberately left empty rather than
+also pointing at ovbimmo.de's advertised sitemap - see that source's `notes:`
+in `config/sources.yaml` for the reasoning (three independently-rate-limited
+sources hitting one host for URLs two of them already cover is not obviously
+an improvement).
+
+`gemeindeblatt_pdf`'s `options.bulletins` stays empty and the source stays
+`enabled: false`: this container's egress proxy still 403s every Bavarian
+municipality domain tested (`feldkirchen-westerham.de`, `bruckmuehl.de`,
+`weyarn.de`, `holzkirchen.de`, 2026-09-03), even though `ovbimmo.de` and
+`www.blfd.bayern.de` were opened. See that source's `notes:` for the
+per-Gemeinde checklist left for whoever next has network access.
 
 ## Adding a regional source
 
