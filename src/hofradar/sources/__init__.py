@@ -26,6 +26,7 @@ from hofradar.sources.adapters.immoscout import ImmoscoutAdapter
 from hofradar.sources.adapters.immowelt import ImmoweltAdapter
 from hofradar.sources.adapters.kleinanzeigen import KleinanzeigenAdapter
 from hofradar.sources.adapters.manual import ManualAdapter
+from hofradar.sources.adapters.ovbimmo import OvbimmoAdapter
 from hofradar.sources.adapters.pdf_bulletin import PdfBulletinAdapter
 from hofradar.sources.adapters.web_search import WebSearchAdapter
 from hofradar.sources.adapters.zvg import ZvgAdapter
@@ -47,6 +48,7 @@ ADAPTERS: dict[str, type[SourceAdapter]] = {
     "manual": ManualAdapter,
     "csv": CsvAdapter,
     "denkmalboerse": DenkmalboerseAdapter,
+    "ovbimmo": OvbimmoAdapter,
     "generic_rss": GenericRssAdapter,
     "generic_sitemap": GenericSitemapAdapter,
     "zvg": ZvgAdapter,

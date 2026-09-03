@@ -136,6 +136,61 @@ sources:
     options:
       bulletins: []
 
+  - key: ovbimmo
+    name: "OVBimmo (OVB Heimatzeitungen)"
+    role: local
+    adapter: ovbimmo
+    base_url: "https://ovbimmo.de"
+    region: "Lkr. Rosenheim / Mühldorf / West-Traunstein"
+    reliability: 0.75
+    enabled: true
+    rate_limit_seconds: 5.0
+    listing_ttl_days: 14
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      https://ovbimmo.de/robots.txt: User-agent: * carries no blanket
+      Disallow. Only */2823228/, /_widget/* and /search-widget/* are
+      excluded - none of which this adapter touches. /immobilien/* is
+      explicitly Allow'd, and a sitemap is advertised; /kaufen/... is not
+      disallowed. https://www.rosenheim24.de/ueber-uns/agb/ (linked by
+      ovbimmo's own footer as its AGB; publisher OVB24 GmbH, Stand April
+      2024) has three parts: (I) AGB für Online-Werbung, which defers to
+      ovb24.de/agb/; (II) AGB für Shop-Produkte, covering purchase, delivery,
+      payment and Widerruf for PURCHASED products (E-Books, paid article
+      access) - its §6 "Nutzungsrecht bei digitalen Produkten" governs those
+      purchased products, not the public listing pages this adapter reads;
+      (III) Teilnahmebedingungen für Gewinnspiele. No clause anywhere in it
+      restricts automated retrieval, crawling or scraping. This is a claim
+      about the two pages actually read (that robots.txt, that AGB), never
+      about the whole site.
+    notes: >
+      A regional newspaper portal, not a national one - it carries the
+      brokers OVB aggregates plus the classified ads from its own papers,
+      including private sellers with Chiffre. Covers Lkr. Rosenheim but NOT
+      Lkr. Miesbach or Ebersberg (Ippen/Merkur territory) - see
+      docs/coverage.md. reliability 0.75 keeps it below the
+      small_local_source threshold, which is correct: it is a regional
+      paper, not a portal. listing_ttl_days: 14 because adverts run a fixed
+      paid window, so a disappearance within that window is EXPIRED, not
+      REMOVED - see docs/DECISIONS.md entry 15.
+      The detail page's dataLayer JSON and Objektdaten col-label/col-value
+      table are confirmed by a real capture but not parsed - fetch_detail
+      only reads the external id from the URL and the generic og:/body-text
+      fallback, so price/rooms/area stay in description as plain text
+      rather than typed fields. See docs/SOURCES.md. contact_kind is
+      deliberately left unset because this source carries both broker and
+      private inventory, and the one detail page captured so far is a
+      broker listing.
+    options:
+      municipalities:
+        - feldkirchen-westerham
+        - bruckmuehl
+        - bad-aibling
+        - kolbermoor
+        - rosenheim
+        - wasserburg-am-inn
+      property_types: ["haus", "grundstueck"]
+
   # ------------------------------------------------- off by default (ToS/bot)
   - key: kleinanzeigen
     name: "Kleinanzeigen.de"
