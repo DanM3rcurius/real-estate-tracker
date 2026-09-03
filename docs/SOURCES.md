@@ -88,11 +88,14 @@ same treatment as the three portal adapters above. Only once the result is
 recorded here (or in the registry entry's `terms_excerpt`) may
 `config/sources.yaml` set `enabled: true` for `denkmalboerse`.
 
-Also outstanding: `tests/fixtures/html/denkmalboerse_object_005816.html` is a
-hand-written *synthetic* fixture, not a real captured page - the same egress
-denial that blocks the terms check also blocks capturing it. It must be
-replaced with a real page (see Step 2 of the plan this note originated from)
-before this source ships enabled.
+`tests/fixtures/html/denkmalboerse_object_005816.html` is now a real page
+captured from `www.blfd.bayern.de` on 2026-09-03 (see the provenance comment
+at the top of the fixture and `tests/sources/adapters/test_denkmalboerse.py`).
+The terms/robots check above is still outstanding independently of that -
+capturing one detail page says nothing about `robots.txt` or the terms of
+use, and the search CGI's response shape (pagination / form-vs-results) is
+still unverified, which is why `discover()` still calls
+`mark_enumeration_incomplete`.
 
 ## Adding a regional source
 
