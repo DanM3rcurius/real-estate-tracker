@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from hofradar.db.enums import ListingStatus, SourceRole
 from hofradar.db.models import Property, PropertySource, Source
-from hofradar.lifecycle import ingest, mark_missing
+from hofradar.lifecycle import ImplausibleAbsence, ingest, mark_missing
 from hofradar.lifecycle.absence import EMPTY_RESULT_GUARD_MIN_ROWS
 from hofradar.sources import get_adapter
 
@@ -132,16 +132,19 @@ def test_a_complete_enumeration_still_removes_a_genuinely_gone_listing(
 def test_a_source_going_from_many_to_zero_is_treated_as_broken(
     db_session, make_source, make_listing
 ) -> None:
-    """Silent parser rot returns HTTP 200 and no results. Do not obey it."""
+    """Silent parser rot returns HTTP 200 and no results. Do not obey it.
+
+    Task 3 tightened this from a silent no-op to a raise: a swallowed []
+    still lets a broken adapter run week after week undetected, which is the
+    same fiction with a longer fuse.
+    """
     source, props = _seed(
         db_session, make_source, make_listing, count=EMPTY_RESULT_GUARD_MIN_ROWS
     )
 
-    changes = mark_missing(
-        db_session, set(), source=source, run_id=2, enumeration_complete=True
-    )
+    with pytest.raises(ImplausibleAbsence, match="saw nothing"):
+        mark_missing(db_session, set(), source=source, run_id=2, enumeration_complete=True)
 
-    assert changes == []
     assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
 
 

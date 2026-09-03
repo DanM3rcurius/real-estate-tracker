@@ -47,6 +47,8 @@ def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
     # when the source listed its whole inventory without error or truncation.
+    # Raises ImplausibleAbsence - and writes nothing - when the seen-set is
+    # empty against a real inventory, or would remove >= 30% of it in one run.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
                       unverified_stale_after_days: int = 180,
                       non_reporting_source_ids: set[int] | None = None,
@@ -55,6 +57,11 @@ def apply_stale_rules(session, *, stale_after_days: int = 45,
 def repair_phantom_removals(session, *, non_reporting_source_keys: set[str],
                             dry_run: bool = True) -> RepairReport
 def changes_since(session, since: datetime, *, kinds: list[str] | None = None) -> list[dict]
+
+class ImplausibleAbsence(RuntimeError)
+    # Raised by mark_missing when a run's absences are too broad to be
+    # believed (see above). The caller decides what to do - the pipeline logs
+    # it as a source failure and continues with the other sources.
 ```
 
 ## `hofradar.geo`

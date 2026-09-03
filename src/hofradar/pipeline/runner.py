@@ -62,7 +62,7 @@ async def run_pipeline(
     from hofradar.costmodel import estimate_costs  # noqa: F401  (used via scoring)
     from hofradar.dedupe import find_duplicate  # noqa: F401  (used via lifecycle)
     from hofradar.geo import locate, within_air_radius
-    from hofradar.lifecycle import apply_stale_rules, ingest, mark_missing
+    from hofradar.lifecycle import ImplausibleAbsence, apply_stale_rules, ingest, mark_missing
     from hofradar.normalize import normalize_listing
     from hofradar.report import build_report, render_html, render_markdown
     from hofradar.scoring import rescore_all
@@ -175,13 +175,25 @@ async def run_pipeline(
                 for source in sources:
                     if source.role in NON_VERIFYING_ROLES:
                         continue  # a discovery source's silence is not evidence
-                    changes = mark_missing(
-                        session,
-                        seen_by_source.get(source.id, set()),
-                        source=source,
-                        run_id=run_id,
-                        enumeration_complete=enumeration_complete.get(source.id, False),
-                    )
+                    try:
+                        changes = mark_missing(
+                            session,
+                            seen_by_source.get(source.id, set()),
+                            source=source,
+                            run_id=run_id,
+                            enumeration_complete=enumeration_complete.get(source.id, False),
+                        )
+                    except ImplausibleAbsence as exc:
+                        # One source's absences are not believed - recorded as
+                        # a source failure, same posture as a crawl exception
+                        # above, so the run continues for every other source.
+                        log.error("absence detection refused for %s: %s", source.key, exc)
+                        source.last_error = str(exc)
+                        _log_stage(
+                            session, run, RunStage.CHANGE_DETECTION,
+                            source=source.key, error=str(exc),
+                        )
+                        continue
                     removed += sum(1 for c in changes if c.kind == "removed")
                 # Sources that will never mention a listing again must not put
                 # their properties on the "we stopped hearing" clock - nobody
