@@ -1,0 +1,340 @@
+#cloud-config
+#
+# Hofradar on one Hetzner Cloud VPS (CX22 / CAX11 is plenty: 2 vCPU, 4 GB).
+# Paste this into "Cloud config" when creating the server, or:
+#   hcloud server create --name hofradar --type cx22 --image ubuntu-24.04 \
+#     --user-data-from-file deploy/hetzner/cloud-init.yaml
+#
+# EDIT BEFORE BOOT - the three lines marked REPLACE:
+#   1. ssh_authorized_keys        your public key, or you are locked out
+#   2. HOFRADAR_DOMAIN            a DNS A/AAAA record already pointing here
+#   3. ACME_EMAIL                 where Let's Encrypt mails expiry warnings
+#
+# Everything else has a working default. In particular the password gate is
+# never left half-installed: if you do not supply HOFRADAR_PASSWORD_HASH, first
+# boot generates a random password, hashes it, and leaves the plaintext in
+# /home/hofradar/INITIAL_PASSWORD.txt (mode 0600) for you to read once.
+#
+# First boot takes ~4 minutes (apt, docker, then building the image). Watch it:
+#   ssh hofradar@<ip> 'sudo cloud-init status --wait && sudo tail -f /var/log/hofradar-bootstrap.log'
+
+hostname: hofradar
+timezone: Europe/Berlin
+locale: en_US.UTF-8
+
+users:
+  - name: hofradar
+    # The docker group does not exist yet at this point in the boot - useradd
+    # would fail on it. bootstrap.sh adds the user to it after installing Docker.
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAREPLACE_WITH_YOUR_PUBLIC_KEY you@example.com  # REPLACE
+
+disable_root: true
+ssh_pwauth: false
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - ufw
+  - fail2ban
+  - unattended-upgrades
+  - sqlite3
+  - jq
+
+# 2 GB of swap. The image build and an occasional LLM review stage are the only
+# things that spike; a small VPS with no swap OOM-kills the build instead.
+swap:
+  filename: /swapfile
+  size: 2147483648
+  maxsize: 2147483648
+
+write_files:
+  # ---- the configuration you are most likely to change afterwards -----------
+  - path: /opt/hofradar/app.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      # Sourced into /opt/hofradar/app/.env on first boot, then never read again -
+      # edit /opt/hofradar/app/.env for later changes and run `hofradar-update`.
+      HOFRADAR_DOMAIN=hofradar.example.com                # REPLACE (empty = plain HTTP on :80)
+      ACME_EMAIL=you@example.com                          # REPLACE
+      HOFRADAR_REPO=https://github.com/DanM3rcurius/real-estate-tracker.git
+      HOFRADAR_BRANCH=trunk
+      # Leave empty to have a password generated on first boot (see the header).
+      HOFRADAR_PASSWORD_HASH=
+      # Optional. Without it the deterministic pipeline still runs end to end.
+      ANTHROPIC_API_KEY=
+      HOFRADAR_LLM_MODEL=claude-sonnet-5
+      HOFRADAR_SCHEDULE_CRON=0 6 * * 1
+
+  - path: /etc/ssh/sshd_config.d/99-hofradar.conf
+    permissions: "0644"
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      ChallengeResponseAuthentication no
+      X11Forwarding no
+      MaxAuthTries 3
+      AllowUsers hofradar
+
+  - path: /etc/fail2ban/jail.local
+    permissions: "0644"
+    content: |
+      [DEFAULT]
+      bantime = 1h
+      findtime = 10m
+      maxretry = 5
+      backend = systemd
+
+      [sshd]
+      enabled = true
+
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "5" },
+        "live-restore": true
+      }
+
+  - path: /etc/apt/apt.conf.d/51unattended-upgrades-hofradar
+    permissions: "0644"
+    content: |
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "04:30";
+      Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+  # ---- systemd: the compose project is a unit, so it survives reboots -------
+  - path: /etc/systemd/system/hofradar.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Hofradar (web UI + weekly scheduler + TLS proxy)
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/hofradar/app
+      User=hofradar
+      TimeoutStartSec=1800
+      ExecStart=/usr/bin/docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml up -d --build
+      ExecStop=/usr/bin/docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml down
+      ExecReload=/usr/bin/docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml up -d --build
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/hofradar-backup.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Online backup of the Hofradar SQLite database
+      After=hofradar.service
+
+      [Service]
+      Type=oneshot
+      User=hofradar
+      ExecStart=/usr/local/bin/hofradar-backup
+
+  - path: /etc/systemd/system/hofradar-backup.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Nightly Hofradar backup
+
+      [Timer]
+      OnCalendar=*-*-* 03:20:00
+      RandomizedDelaySec=20m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+  # ---- operator scripts ----------------------------------------------------
+  # The database remembering what it has seen IS the product (docs/DECISIONS.md),
+  # so back it up with SQLite's online backup API rather than copying a file that
+  # a crawl may be writing to. 14 days of dailies is ~nothing at this size.
+  - path: /usr/local/bin/hofradar-backup
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      cd /opt/hofradar/app
+      stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+      out="/var/backups/hofradar/hofradar-${stamp}.sqlite3"
+      compose=(docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml)
+      # The container writes into its own volume (it owns /data), then we copy it
+      # out - so the archive on the host belongs to the host user that rotates it.
+      "${compose[@]}" exec -T hofradar python -c "
+      import sqlite3
+      src = sqlite3.connect('/data/hofradar.sqlite3')
+      dst = sqlite3.connect('/data/.backup-tmp.sqlite3')
+      src.backup(dst)
+      dst.close(); src.close()
+      "
+      "${compose[@]}" cp hofradar:/data/.backup-tmp.sqlite3 "$out"
+      "${compose[@]}" exec -T hofradar rm -f /data/.backup-tmp.sqlite3
+      gzip -f "$out"
+      find /var/backups/hofradar -name 'hofradar-*.sqlite3.gz' -mtime +14 -delete
+      echo "backup ok: /var/backups/hofradar/hofradar-${stamp}.sqlite3.gz"
+
+  - path: /usr/local/bin/hofradar-update
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Pull the branch and rebuild. Takes a backup first, because v0.1 has no
+      # migration framework on purpose (docs/DECISIONS.md ss10).
+      set -euo pipefail
+      cd /opt/hofradar/app
+      /usr/local/bin/hofradar-backup || echo "warning: backup failed, continuing anyway" >&2
+      git pull --ff-only
+      sudo systemctl reload hofradar
+      docker image prune -f
+      docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml ps
+
+  - path: /usr/local/bin/hofradar-set-password
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Prompts, hashes, writes HOFRADAR_PASSWORD_HASH into .env, restarts.
+      set -euo pipefail
+      cd /opt/hofradar/app
+      read -rsp "Passwort: " pw; echo
+      read -rsp "Wiederholen: " pw2; echo
+      [ -n "$pw" ] || { echo "no password given" >&2; exit 1; }
+      [ "$pw" = "$pw2" ] || { echo "passwords do not match" >&2; exit 1; }
+      hash="$(HOFRADAR_NEW_PASSWORD="$pw" docker compose \
+        -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml \
+        run --rm --no-deps -T -e HOFRADAR_NEW_PASSWORD hofradar \
+        python -c "import os; from hofradar.web.auth import hash_password; print(hash_password(os.environ['HOFRADAR_NEW_PASSWORD']))" \
+        | grep -o 'pbkdf2_sha256\$[^[:space:]]*' | tail -n1)"
+      [ -n "$hash" ] || { echo "no hash produced" >&2; exit 1; }
+      tmp="$(mktemp)"
+      grep -v '^HOFRADAR_PASSWORD_HASH=' .env > "$tmp" || true
+      printf 'HOFRADAR_PASSWORD_HASH=%s\n' "$hash" >> "$tmp"
+      install -m 0600 -o hofradar -g hofradar "$tmp" .env && rm -f "$tmp"
+      rm -f /home/hofradar/INITIAL_PASSWORD.txt
+      sudo systemctl reload hofradar
+      echo "password updated"
+
+  - path: /opt/hofradar/bootstrap.sh
+    permissions: "0700"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      # Everything that needs ordering and conditionals, kept out of runcmd so it
+      # is re-runnable by hand if first boot goes sideways.
+      set -euo pipefail
+      exec > >(tee -a /var/log/hofradar-bootstrap.log) 2>&1
+      echo "=== hofradar bootstrap $(date -Is) ==="
+
+      set -a; . /opt/hofradar/app.env; set +a
+
+      # ---- docker from Docker's own repo (Ubuntu's is too old for !override) --
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+      https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        > /etc/apt/sources.list.d/docker.list
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      systemctl enable --now docker
+      usermod -aG docker hofradar
+
+      # ---- firewall ----------------------------------------------------------
+      # Note: Docker writes its own iptables rules and bypasses ufw for published
+      # ports. That is exactly why the app is published on 127.0.0.1 only (see
+      # deploy/hetzner/docker-compose.prod.yml); 80/443 are meant to be public.
+      ufw --force reset >/dev/null
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw limit 22/tcp comment 'ssh'
+      ufw allow 80/tcp comment 'http (acme + redirect)'
+      ufw allow 443 comment 'https'
+      ufw --force enable
+      systemctl enable --now fail2ban
+
+      # ---- source ------------------------------------------------------------
+      if [ ! -d /opt/hofradar/app/.git ]; then
+        git clone --branch "${HOFRADAR_BRANCH:-trunk}" "$HOFRADAR_REPO" /opt/hofradar/app
+      fi
+      install -d -o hofradar -g hofradar /var/backups/hofradar
+      # The image runs as uid 10001; the bind-mounted reports dir must be writable by it.
+      install -d -o 10001 -g 10001 /opt/hofradar/app/reports
+      chown -R hofradar:hofradar /opt/hofradar
+
+      # ---- .env --------------------------------------------------------------
+      # Invariant 8: the gate is never half-installed. No hash supplied means we
+      # mint one here rather than exposing an open UI on a public IP.
+      secret_key="$(openssl rand -hex 32)"
+      pw_note=""
+      if [ -z "${HOFRADAR_PASSWORD_HASH:-}" ]; then
+        generated="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
+        pw_note="$generated"
+      fi
+
+      umask 077
+      cat > /opt/hofradar/app/.env <<ENV
+      HOFRADAR_DATA_DIR=/data
+      HOFRADAR_DOMAIN=${HOFRADAR_DOMAIN:-}
+      ACME_EMAIL=${ACME_EMAIL:-}
+      HOFRADAR_SECRET_KEY=${secret_key}
+      HOFRADAR_PASSWORD_HASH=${HOFRADAR_PASSWORD_HASH:-}
+      ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      HOFRADAR_LLM_MODEL=${HOFRADAR_LLM_MODEL:-claude-sonnet-5}
+      HOFRADAR_SCHEDULE_CRON=${HOFRADAR_SCHEDULE_CRON:-0 6 * * 1}
+      ENV
+      chown hofradar:hofradar /opt/hofradar/app/.env
+      chmod 600 /opt/hofradar/app/.env
+
+      cd /opt/hofradar/app
+      compose=(docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml)
+      "${compose[@]}" build
+
+      # Hashing needs the built image, hence after the build and before the boot.
+      if [ -n "$pw_note" ]; then
+        hash="$(HOFRADAR_NEW_PASSWORD="$pw_note" "${compose[@]}" \
+          run --rm --no-deps -T -e HOFRADAR_NEW_PASSWORD hofradar \
+          python -c "import os; from hofradar.web.auth import hash_password; print(hash_password(os.environ['HOFRADAR_NEW_PASSWORD']))" \
+          | grep -o 'pbkdf2_sha256\$[^[:space:]]*' | tail -n1)"
+        if [ -n "$hash" ]; then
+          sed -i "s|^HOFRADAR_PASSWORD_HASH=.*|HOFRADAR_PASSWORD_HASH=${hash}|" /opt/hofradar/app/.env
+          printf 'Hofradar login password (generated on first boot):\n\n    %s\n\nChange it with: sudo hofradar-set-password\nThen delete this file.\n' \
+            "$pw_note" > /home/hofradar/INITIAL_PASSWORD.txt
+          chown hofradar:hofradar /home/hofradar/INITIAL_PASSWORD.txt
+          chmod 600 /home/hofradar/INITIAL_PASSWORD.txt
+        else
+          echo "FATAL: could not hash a password; refusing to start an ungated public UI" >&2
+          exit 1
+        fi
+      fi
+
+      systemctl daemon-reload
+      systemctl enable --now hofradar.service
+      systemctl enable --now hofradar-backup.timer
+
+      echo "=== bootstrap done $(date -Is) ==="
+      "${compose[@]}" ps
+
+runcmd:
+  - [ systemctl, restart, ssh ]
+  - [ bash, /opt/hofradar/bootstrap.sh ]
+
+final_message: "Hofradar bootstrapped in $UPTIME s. Log: /var/log/hofradar-bootstrap.log"

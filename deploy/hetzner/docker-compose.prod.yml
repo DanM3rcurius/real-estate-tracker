@@ -1,0 +1,54 @@
+# Production overlay for a single Hetzner VPS. Always used together with the
+# base file, never on its own:
+#
+#   docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml up -d
+#
+# What it changes:
+#   - the app no longer publishes 8000 on every interface, only on loopback
+#   - Caddy in front of it holds the certificate and terminates TLS
+#   - a host directory is mounted for the nightly SQLite backup to land in
+#
+# Requires Docker Compose >= 2.24 for the `!override` tag; the cloud-init
+# installs docker-ce from Docker's own repository, which is well past that.
+services:
+  hofradar:
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    environment:
+      HOFRADAR_SECRET_KEY: ${HOFRADAR_SECRET_KEY:-}
+      HOFRADAR_LLM_MODEL: ${HOFRADAR_LLM_MODEL:-claude-sonnet-5}
+    logging: &journal
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  scheduler:
+    environment:
+      HOFRADAR_DATA_DIR: /data
+      HOFRADAR_SCHEDULE_CRON: ${HOFRADAR_SCHEDULE_CRON:-0 6 * * 1}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HOFRADAR_LLM_MODEL: ${HOFRADAR_LLM_MODEL:-claude-sonnet-5}
+    logging: *journal
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/hetzner/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      HOFRADAR_DOMAIN: ${HOFRADAR_DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    depends_on:
+      - hofradar
+    restart: unless-stopped
+    logging: *journal
+
+volumes:
+  caddy-data:
+  caddy-config:
