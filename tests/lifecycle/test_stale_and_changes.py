@@ -65,7 +65,7 @@ def test_changes_since_returns_report_ready_dicts(db_session, make_source, make_
 
     prop, _ = ingest(db_session, make_listing(price=790_000, **facts), source=source, run_id=1)
     ingest(db_session, make_listing(price=749_000, **facts), source=source, run_id=2)
-    mark_missing(db_session, set(), source=source, run_id=3)
+    mark_missing(db_session, set(), source=source, run_id=3, enumeration_complete=True)
 
     entries = changes_since(db_session, since)
     kinds = [e["kind"] for e in entries]

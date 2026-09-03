@@ -85,6 +85,10 @@ def scan_page_for_hits(text: str, terms: list[str]) -> list[tuple[str, str]]:
 class PdfBulletinAdapter(SourceAdapter):
     """Walks ``options.bulletins`` (a list of index page URLs) for PDF issues."""
 
+    #: A bulletin archive accumulates and never retracts. An advert missing from
+    #: this week's issue is last week's advert, not a withdrawn one.
+    enumerates = False
+
     async def discover(
         self, profile: SearchProfile, keywords: KeywordConfig
     ) -> AsyncIterator[RawListing]:

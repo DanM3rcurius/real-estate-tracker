@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from hofradar.config import KeywordConfig, SearchProfile, load_config
 from hofradar.db.enums import RunStage, SourceRole
-from hofradar.db.models import Property, SearchRun, Source
+from hofradar.db.models import Property, PropertySource, SearchRun, Source
 from hofradar.db.session import session_scope
 
 log = logging.getLogger(__name__)
@@ -92,6 +92,9 @@ async def run_pipeline(
 
             # -- 2. crawl + normalize + geo + ingest ----------------------- #
             seen_by_source: dict[int, set[int]] = defaultdict(set)
+            #: Did this source list its whole inventory, without error and
+            #: without truncation? Absence detection is skipped unless it did.
+            enumeration_complete: dict[int, bool] = {}
             listings_seen = 0
             new_count = 0
             updated_count = 0
@@ -103,6 +106,14 @@ async def run_pipeline(
                     async for raw in adapter.discover(profile, keywords):
                         listings_seen += 1
                         listing = normalize_listing(raw, keywords)
+
+                        # Record that the source still carries this URL BEFORE
+                        # any filter can skip it. A listing we choose not to
+                        # ingest is not a listing the source stopped offering,
+                        # and conflating the two removes live properties.
+                        known_id = _known_property_id(session, source.id, listing.url)
+                        if known_id is not None:
+                            seen_by_source[source.id].add(known_id)
 
                         # Cheap deterministic reject before any geocoding call.
                         if listing.exclusion_flags and not listing.building_features:
@@ -131,8 +142,13 @@ async def run_pipeline(
                     source.last_run_at = datetime.now(UTC)
                     source.consecutive_failures = 0
                     source.last_error = None
+                    enumeration_complete[source.id] = adapter.can_prove_absence
                 except Exception as exc:  # one bad source must not kill the run
                     log.exception("source %s failed", source.key)
+                    # The crawl died part-way, so what we have is a partial
+                    # view. Absence detection must not run on it - otherwise a
+                    # transient 403 silently deletes this source's history.
+                    enumeration_complete[source.id] = False
                     source.consecutive_failures += 1
                     source.last_error = f"{type(exc).__name__}: {exc}"
                     _log_stage(
@@ -164,6 +180,7 @@ async def run_pipeline(
                         seen_by_source.get(source.id, set()),
                         source=source,
                         run_id=run_id,
+                        enumeration_complete=enumeration_complete.get(source.id, False),
                     )
                     removed += sum(1 for c in changes if c.kind == "removed")
                 apply_stale_rules(
@@ -201,6 +218,19 @@ async def run_pipeline(
         session.flush()
         session.expunge(run)
         return run
+
+
+def _known_property_id(session: Session, source_id: int, url: str) -> int | None:
+    """The property this source already has on record under ``url``, if any.
+
+    Used to mark a listing as still-offered before the pipeline's own filters
+    get a chance to skip it.
+    """
+    return session.scalar(
+        select(PropertySource.property_id).where(
+            PropertySource.source_id == source_id, PropertySource.url == url
+        )
+    )
 
 
 async def _llm_review(session: Session, profile: SearchProfile, *, run_id: int | None) -> int:

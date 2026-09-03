@@ -80,7 +80,7 @@ def test_a_discovery_sources_silence_removes_nothing(db_session, make_source, ma
         source=aggregator,
     )
 
-    assert mark_missing(db_session, set(), source=aggregator, run_id=2) == []
+    assert mark_missing(db_session, set(), source=aggregator, run_id=2, enumeration_complete=True) == []
     assert prop.listing_status == ListingStatus.DISCOVERED
     assert prop.removed_at is None
 
@@ -97,7 +97,7 @@ def test_a_discovery_source_reopens_a_removed_property_without_verifying_it(
         make_listing(source_key=primary.key, url="https://portal.example/1", **shared),
         source=primary,
     )
-    mark_missing(db_session, set(), source=primary, run_id=2)
+    mark_missing(db_session, set(), source=primary, run_id=2, enumeration_complete=True)
     assert prop.listing_status == ListingStatus.REMOVED
 
     _, change = ingest(

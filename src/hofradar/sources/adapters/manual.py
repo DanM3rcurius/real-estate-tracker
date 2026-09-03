@@ -63,6 +63,10 @@ def _from_plain_text(source_key: str, url: str, text: str, *, http_status: int |
 class ManualAdapter(SourceAdapter):
     """Paste-ingest. ``discover()`` yields nothing - ingestion is user-triggered."""
 
+    #: A paste box has no inventory: it produces a listing only when a human
+    #: hands one over, so its silence is evidence of nothing.
+    enumerates = False
+
     async def discover(
         self, profile: SearchProfile, keywords: KeywordConfig
     ) -> AsyncIterator[RawListing]:

@@ -278,6 +278,19 @@ class SourceAdapter:
     here so adapter code never has to branch on which one it got.
     """
 
+    #: Does ``discover()`` yield a COMPLETE inventory of what this source
+    #: currently offers?
+    #:
+    #: This is not the same question as "may this source prove things"
+    #: (:attr:`can_verify`), and conflating the two is how absence detection
+    #: goes wrong. Only a complete enumeration licenses the inference "this
+    #: listing was not in the results, therefore it is gone".
+    #:
+    #: False for a source that structurally cannot enumerate: a paste box, a
+    #: one-shot CSV import, a bulletin archive, or a feed that publishes only
+    #: the latest N items. Such a source's silence means nothing at all.
+    enumerates: bool = True
+
     def __init__(self, source: Source | SourceConfig, *, client: PoliteClient | None = None) -> None:
         self.key: str = source.key
         self.name: str = source.name
@@ -291,6 +304,15 @@ class SourceAdapter:
         self.options: dict[str, Any] = _adapter_options(source)
         self._client = client
         self._owns_client = client is None
+        #: Set False by an adapter whose enumeration was cut short this run -
+        #: a page cap was hit, a paginator gave up, a partial result was
+        #: returned. Reset at the start of every discover().
+        self.enumeration_complete: bool = True
+        # An operator can override the class default per source, for a feed
+        # they know to be exhaustive (or one they know is not).
+        override = self.options.get("enumerates")
+        if isinstance(override, bool):
+            self.enumerates = override
 
     # -- shared HTTP -------------------------------------------------------- #
 
@@ -313,6 +335,22 @@ class SourceAdapter:
 
     async def __aexit__(self, *exc_info: object) -> None:
         await self.aclose()
+
+    # -- enumeration ---------------------------------------------------------- #
+
+    def begin_enumeration(self) -> None:
+        """Adapters call this at the top of discover() to reset the flag."""
+        self.enumeration_complete = True
+
+    def mark_enumeration_incomplete(self, reason: str) -> None:
+        """Adapters call this when they know they did not see everything."""
+        self.enumeration_complete = False
+        logger.info("%s: enumeration incomplete - %s", self.key, reason)
+
+    @property
+    def can_prove_absence(self) -> bool:
+        """May this run's results be read as 'everything else is gone'?"""
+        return bool(self.enumerates and self.enumeration_complete and self.can_verify)
 
     # -- role gate ------------------------------------------------------------ #
 

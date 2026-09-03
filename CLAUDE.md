@@ -20,6 +20,12 @@ before changing a package's public surface.
 4. **Source role gates authority.** A `discovery` source may not set
    `verification_status=verified`, `last_verified` or `source_date`, and its
    silence may not mark a listing removed.
+4b. **Absence needs a complete enumeration, not just permission.** Being
+   allowed to verify is not the same as having listed everything. A source
+   only removes a listing when `SourceAdapter.can_prove_absence` is true -
+   it enumerates, this run finished without error, and nothing was truncated.
+   A paste box, a CSV import, an RSS feed, a capped crawl and a source that
+   threw a 403 all prove nothing by their silence. (GitHub issue #2.)
 5. **Scores never live on `Property`.** They go in `scores`, keyed by
    `profile_hash`, because the sliders move.
 6. **The LLM may not write a number.** Advisory fields only.

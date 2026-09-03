@@ -56,6 +56,10 @@ def _entry_to_listing(source_key: str, entry: Any) -> RawListing | None:
 class GenericRssAdapter(SourceAdapter):
     """Feeds are configured per broker in ``options.feeds`` (a list of URLs)."""
 
+    #: A feed carries the latest N items. Item N+1 falling off the end is the
+    #: feed being a feed, not the listing being gone.
+    enumerates = False
+
     async def discover(
         self, profile: SearchProfile, keywords: KeywordConfig
     ) -> AsyncIterator[RawListing]:

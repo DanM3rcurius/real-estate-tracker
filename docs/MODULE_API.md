@@ -44,7 +44,9 @@ def merge_properties(session, keep: Property, drop: Property) -> Property
 def ingest(session, listing: NormalizedListing, *, run_id: int | None = None,
            source: Source, geo: GeoResult | None = None) -> tuple[Property, ChangeResult]
 def mark_missing(session, seen_property_ids: set[int], *, source: Source,
-                 run_id: int | None = None) -> list[ChangeResult]
+                 run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
+    # enumeration_complete has no default on purpose: absence is only evidence
+    # when the source listed its whole inventory without error or truncation.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
                       run_id: int | None = None) -> list[ChangeResult]
 def changes_since(session, since: datetime, *, kinds: list[str] | None = None) -> list[dict]
@@ -95,6 +97,11 @@ ADAPTERS: dict[str, type[SourceAdapter]]
 def get_adapter(source: Source | SourceConfig) -> SourceAdapter
 class SourceAdapter:
     key: str
+    enumerates: bool                 # does discover() yield a COMPLETE inventory?
+    enumeration_complete: bool       # did this run's enumeration finish intact?
+    can_prove_absence: bool          # enumerates and complete and can_verify
+    def begin_enumeration(self) -> None: ...
+    def mark_enumeration_incomplete(self, reason: str) -> None: ...
     async def discover(self, profile: SearchProfile, keywords: KeywordConfig) -> AsyncIterator[RawListing]: ...
     async def fetch_detail(self, url: str) -> RawListing | None: ...
     async def verify(self, url: str) -> tuple[bool, int | None]: ...   # (still_live, http_status)

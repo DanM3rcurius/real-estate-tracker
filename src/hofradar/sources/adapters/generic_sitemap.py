@@ -54,12 +54,14 @@ class GenericSitemapAdapter(SourceAdapter):
             return
 
         default_pattern = self.options.get("pattern")
+        self.begin_enumeration()
         max_pages = int(self.options.get("max_pages", DEFAULT_MAX_PAGES))
         budget = max_pages
         any_readable = False
 
         for entry in sites:
             if budget <= 0:
+                self.mark_enumeration_incomplete(f"max_pages={max_pages} reached")
                 break
             sitemap_url, pattern_str = _site_config(entry)
             if not sitemap_url:
@@ -76,6 +78,7 @@ class GenericSitemapAdapter(SourceAdapter):
 
             for url in urls:
                 if budget <= 0:
+                    self.mark_enumeration_incomplete(f"max_pages={max_pages} reached")
                     break
                 if pattern is not None and not pattern.search(url):
                     continue

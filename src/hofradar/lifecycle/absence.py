@@ -7,6 +7,11 @@ the aggregator reindexed, not that the farm sold. So:
 * :func:`mark_missing` only listens to sources that are allowed to prove
   things. A discovery source's silence is discarded outright - it never clears
   a visibility flag and never removes a property;
+* and being *allowed* to prove things is not enough. The caller must also state
+  that this source performed a **complete enumeration** on this run. Permission
+  and completeness are different facts, and reading absence out of an
+  incomplete result set is how a paste box, a one-shot CSV import, a truncated
+  crawl or a source that simply threw a 403 end up deleting real history;
 * a property is only moved to REMOVED once **no verifying source** still shows
   it. One broker page pulling the listing while another still carries it is not
   a removal;
@@ -17,6 +22,7 @@ the aggregator reindexed, not that the farm sold. So:
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -26,6 +32,13 @@ from hofradar.contracts import ChangeResult
 from hofradar.db.enums import ChangeKind, ListingStatus
 from hofradar.db.models import Property, PropertySource, Source, StatusHistory, utcnow
 from hofradar.lifecycle import _rules
+
+log = logging.getLogger(__name__)
+
+#: A source holding at least this many listings that returns none at all is
+#: treated as broken rather than emptied. Below it, a genuine sell-out is
+#: plausible enough to believe.
+EMPTY_RESULT_GUARD_MIN_ROWS = 3
 
 #: Default patience before an unseen ACTIVE property is called STALE.
 DEFAULT_STALE_AFTER_DAYS = 45
@@ -37,8 +50,15 @@ def mark_missing(
     *,
     source: Source,
     run_id: int | None = None,
+    enumeration_complete: bool,
 ) -> list[ChangeResult]:
     """Record that ``source`` no longer carries the properties it used to.
+
+    ``enumeration_complete`` must be True only when this source listed its
+    entire current inventory on this run, without error and without
+    truncation. It is keyword-only and has no default on purpose: every caller
+    has to answer the question consciously, because getting it wrong deletes
+    history silently.
 
     Returns one :class:`ChangeResult` per property that actually transitioned
     to REMOVED. Properties that merely lost one of several sources are updated
@@ -46,6 +66,14 @@ def mark_missing(
     """
     if not _rules.can_verify(source):
         # A discovery source's silence proves nothing whatsoever.
+        return []
+
+    if not enumeration_complete:
+        # We did not see everything this source has, so we know nothing about
+        # what it no longer has.
+        log.info(
+            "%s: skipping absence detection - enumeration was not complete", source.key
+        )
         return []
 
     now = utcnow()
@@ -56,6 +84,23 @@ def mark_missing(
             PropertySource.last_listing_visible.is_(True),
         )
     ).scalars().all()
+
+    # Last line of defence against silent parser rot. A site redesign makes
+    # selectors match nothing: HTTP 200, no exception, zero results - and the
+    # enumeration looks complete. A broker legitimately selling their last one
+    # or two listings is plausible; a source with a real portfolio going to
+    # zero in one step is far more likely to be broken. The costs are
+    # asymmetric (a missed removal is a stale row; a wrong removal is lost
+    # history), so above the threshold we make the operator look instead.
+    if not seen and len(rows) >= EMPTY_RESULT_GUARD_MIN_ROWS:
+        log.warning(
+            "%s: enumeration returned nothing while %d listings were on record - "
+            "refusing to read that as %d removals. Check the adapter.",
+            source.key,
+            len(rows),
+            len(rows),
+        )
+        return []
 
     changes: list[ChangeResult] = []
     for ps in rows:

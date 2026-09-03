@@ -59,6 +59,9 @@ def build_queries(
 class WebSearchAdapter(SourceAdapter):
     """DISCOVERY role: may find a property, never confirm it. See module docstring."""
 
+    #: Search results are a sample, never an inventory.
+    enumerates = False
+
     async def discover(
         self, profile: SearchProfile, keywords: KeywordConfig
     ) -> AsyncIterator[RawListing]:

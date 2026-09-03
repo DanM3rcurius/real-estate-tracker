@@ -154,6 +154,10 @@ def parse_csv_text(text: str, *, source_key: str) -> list[RawListing]:
 class CsvAdapter(SourceAdapter):
     """Reads ``options.path`` (or ``options.paths``, a list) and emits one RawListing per row."""
 
+    #: A one-shot file import is not a live inventory. Rows absent from today's
+    #: CSV are rows the operator did not export, not listings that sold.
+    enumerates = False
+
     async def discover(
         self, profile: SearchProfile, keywords: KeywordConfig
     ) -> AsyncIterator[RawListing]:

@@ -31,7 +31,7 @@ def test_a_listing_that_disappears_is_removed_then_reactivated(
     assert prop.listing_status == ListingStatus.ACTIVE
 
     # run 2: the source no longer returns it at all.
-    removals = mark_missing(db_session, set(), source=source, run_id=2)
+    removals = mark_missing(db_session, set(), source=source, run_id=2, enumeration_complete=True)
     assert [c.kind for c in removals] == [ChangeKind.REMOVED]
     assert prop.listing_status == ListingStatus.REMOVED
     assert prop.removed_at is not None
@@ -56,7 +56,7 @@ def test_reactivation_with_a_price_cut_reports_price_change_and_journals_both(
     prop, _ = ingest(
         db_session, make_listing(price=790_000, **_facts(source)), source=source, run_id=1
     )
-    mark_missing(db_session, set(), source=source, run_id=2)
+    mark_missing(db_session, set(), source=source, run_id=2, enumeration_complete=True)
     assert prop.listing_status == ListingStatus.REMOVED
 
     same, change = ingest(
@@ -122,12 +122,12 @@ def test_one_source_dropping_it_is_not_a_removal(db_session, make_source, make_l
         source=b,
     )
 
-    changes = mark_missing(db_session, set(), source=a, run_id=2)
+    changes = mark_missing(db_session, set(), source=a, run_id=2, enumeration_complete=True)
 
     assert changes == []
     assert prop.listing_status == ListingStatus.ACTIVE
 
-    changes = mark_missing(db_session, set(), source=b, run_id=3)
+    changes = mark_missing(db_session, set(), source=b, run_id=3, enumeration_complete=True)
     assert [c.kind for c in changes] == [ChangeKind.REMOVED]
     assert prop.listing_status == ListingStatus.REMOVED
 
@@ -138,7 +138,7 @@ def test_properties_still_seen_this_run_are_untouched(db_session, make_source, m
         db_session, make_listing(price=790_000, **_facts(source)), source=source, run_id=1
     )
 
-    assert mark_missing(db_session, {prop.id}, source=source, run_id=2) == []
+    assert mark_missing(db_session, {prop.id}, source=source, run_id=2, enumeration_complete=True) == []
     assert prop.listing_status == ListingStatus.ACTIVE
 
 
