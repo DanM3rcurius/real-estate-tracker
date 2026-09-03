@@ -9,9 +9,19 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
+from hofradar.config import SearchProfile
 from hofradar.db import models  # noqa: F401  (registers ORM mappers with Base)
 from hofradar.db.session import Base, get_engine
 from hofradar.geo.ratelimit import reset_all
+
+
+def make_profile(**radius_overrides: float) -> SearchProfile:
+    """A ``SearchProfile`` anchored at the project's Westham origin.
+
+    ``Center`` already defaults to Westham, so this only needs to carry
+    whatever ``radius`` field a test wants to vary (typically ``air_km_max``).
+    """
+    return SearchProfile(radius=radius_overrides)
 
 
 @pytest.fixture()
