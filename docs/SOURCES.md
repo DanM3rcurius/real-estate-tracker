@@ -73,14 +73,13 @@ Terms check status: **DONE (2026-09-03)**. A human on a networked machine ran:
 
 ```bash
 curl -s https://www.blfd.bayern.de/robots.txt
+curl -s https://www.blfd.bayern.de/blfd/impressum/index.html
 ```
 
-and got back **`HTTP/1.1 404 Not Found` (Server: CERN httpd)** - no
+The first got back **`HTTP/1.1 404 Not Found` (Server: CERN httpd)** - no
 `robots.txt` exists on the host, so there are no crawl directives to honour or
-violate.
-
-The Impressum at `/blfd/impressum/index.html` carries a "Nutzungsbedingungen"
-section. Its operative sentence:
+violate. The second returned the Impressum, which carries a
+"Nutzungsbedingungen" section. Its operative sentence:
 
 > "Als Privatperson dürfen Sie urheberrechtlich geschütztes Material zum
 > privaten und sonstigen eigenen Gebrauch im Rahmen des § 53
@@ -91,17 +90,29 @@ section. Its operative sentence:
 
 Private and own use is explicitly permitted under § 53 UrhG. Republication -
 reproducing these pages or parts of them in other electronic or printed
-publications - requires BLfD's consent. **No clause anywhere restricts
-automated retrieval, crawling or machine access.** A separate
-"Haftungsausschluss" section disclaims any warranty of the accuracy,
-completeness or currency of the published information (consistent with this
-source's `reliability: 0.8`, below `zvg_bayern`'s 0.95).
+publications - requires BLfD's consent. **Neither the robots.txt (which does
+not exist) nor the Impressum's Nutzungsbedingungen restricts automated
+retrieval, crawling or machine access** - that is a claim about the two pages
+actually read, not about the whole site; a separate Datenschutz or
+Nutzungsordnung page was not fetched and could carry something different. A
+separate "Haftungsausschluss" section disclaims any warranty of the accuracy,
+completeness or currency of the published information.
 
-Hofradar is a private, password-gated research tool for one household and
-does not publish - its weekly digest and web UI stay inside the household, so
-this sits within the permitted use. That boundary (permitted: private use;
-not permitted: republication) is recorded in the registry entry's `notes:`
-as well, so it stays visible next to the config that could violate it.
+This private-use reading holds **only while the web UI's password gate is
+configured** (`HOFRADAR_PASSWORD` / `HOFRADAR_PASSWORD_HASH` - see
+`src/hofradar/web/app.py`, invariant 8). The gate is opt-in: with no password
+set, the auth middleware is not installed at all and the UI is open to
+anyone who can reach it. Running it that way, while Denkmalbörse listings
+flow through it, serves BLfD material to the public with no household
+boundary left standing - which is republication in substance, breaching the
+very clause this reading depends on. Deploying without the password gate
+configured is outside the permitted use BLfD grants; it is not this
+document's or the registry's call to make on an operator's behalf, so it is
+stated here as a hard condition, not a default assumption. That boundary
+(permitted: private use behind the password gate; not permitted:
+republication, or an unauthenticated deployment that amounts to the same
+thing) is recorded in the registry entry's `notes:` as well, so it stays
+visible next to the config that could violate it.
 
 Evidence gathered from a networked machine on 2026-09-03, which does **not**
 by itself close the terms check above:
@@ -117,8 +128,7 @@ by itself close the terms check above:
 `tests/fixtures/html/denkmalboerse_object_005816.html` is now a real page
 captured from `www.blfd.bayern.de` on 2026-09-03 (see the provenance comment
 at the top of the fixture and `tests/sources/adapters/test_denkmalboerse.py`).
-Capturing one detail page says nothing about `robots.txt` or the terms of use,
-and the search CGI's response shape (pagination / form-vs-results) is still
+The search CGI's response shape (pagination / form-vs-results) is still
 unverified, which is why `discover()` still calls `mark_enumeration_incomplete`.
 
 ## Adding a regional source
