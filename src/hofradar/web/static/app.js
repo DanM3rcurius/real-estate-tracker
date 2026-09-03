@@ -38,9 +38,9 @@
     var set = function (id, text) {
       var node = document.getElementById(id);
       if (node) node.textContent = text;
-      // Mirror into the collapsed-panel summary, if this id has one - keeps
+      // Mirror into the collapsed-panel label, if this id has one - keeps
       // the always-visible Entfernung/Gesamtbudget readout live while the
-      // full slider is hidden behind the mobile <details> toggle.
+      // full slider is hidden behind the mobile checkbox toggle.
       var echo = document.getElementById(id + "-collapsed");
       if (echo) echo.textContent = text;
     };
