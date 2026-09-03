@@ -244,7 +244,28 @@ Both are cheap to prevent and expensive to discover late.
 **Consequence.** New sources carry a yield expectation before they are built.
 The Denkmalbörse's is 5 in-radius objects across its first four runs; below
 that, the dependent scoring and cost work does not start. The Denkmalbörse
-itself ships in `config/sources.yaml` with `enabled: false` and no
-`terms_checked_at` / `terms_excerpt` — its terms check is still outstanding
-(see `docs/SOURCES.md`), and this decision's own gate is what keeps it off
-until that is resolved for real, rather than with a placeholder.
+shipped `enabled: false` until its terms were actually read; it was enabled on
+2026-09-03 once `robots.txt` (absent, HTTP 404) and the Impressum's
+Nutzungsbedingungen had been fetched and recorded verbatim in `terms_excerpt`
+(see `docs/SOURCES.md`). The gate did its job: the source stayed off until a
+finding replaced the placeholder.
+---
+
+## 15. An expired advert and a removed listing are different facts
+
+**Decision.** `ListingStatus.EXPIRED` is a distinct status, set when a source
+that sells a fixed advertising window (`listing_ttl_days`) stops carrying a
+listing that has been up for at least that long. `EXPIRED` is not in
+`GONE_STATUSES`.
+
+**Why.** A regional newspaper's ad package runs two weeks. Reading its silence
+as REMOVED marks every listing gone on a fortnightly timer, drops live
+farmsteads out of the ranking through `REJECT_LISTING_GONE`, and turns the
+change feed into a REMOVED/REACTIVATED metronome that fills a ten-entry digest
+with churn. Decision 4 says a source's *role* decides what it may prove; this
+adds that a source's *retention policy* decides what its silence means.
+
+**Alternative rejected.** Classifying such sources as `discovery` so their
+silence proves nothing. That would also forfeit their ability to verify a
+listing is live and to set freshness — both of which a newspaper legitimately
+can do. The retention policy is the narrower and truer fix.

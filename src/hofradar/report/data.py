@@ -55,6 +55,7 @@ STATUS_LABELS = {
     ListingStatus.PRICE_CHANGED: "Preis geändert",
     ListingStatus.STALE: "veraltet",
     ListingStatus.REMOVED: "entfernt",
+    ListingStatus.EXPIRED: "Anzeige abgelaufen",
     ListingStatus.SOLD: "verkauft",
     ListingStatus.FORECLOSURE: "Zwangsversteigerung",
     ListingStatus.OFF_MARKET_SIGNAL: "Off-Market-Signal",

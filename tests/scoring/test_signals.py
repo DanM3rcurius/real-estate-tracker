@@ -241,6 +241,17 @@ class TestConfidence:
         attach_source(session, prop, primary)
         assert confidence_score(prop, now)[1]["components"]["availability"] == 0.0
 
+    def test_an_expired_listing_keeps_its_availability(self, session, now: datetime) -> None:
+        """EXPIRED is a billing-cycle fact, not proof the farmstead is gone -
+        it must not be in GONE_STATUSES, or a live listing's confidence would
+        be zeroed out by an ad package simply running out."""
+        primary = make_source(session, key="portal", role=SourceRole.PRIMARY)
+        prop = make_property(
+            session, listing_status=ListingStatus.EXPIRED, last_verified=ago(now, 1)
+        )
+        attach_source(session, prop, primary)
+        assert confidence_score(prop, now)[1]["components"]["availability"] == 100.0
+
     def test_a_merge_flagged_for_review_caps_duplicate_certainty(
         self, session, now: datetime
     ) -> None:

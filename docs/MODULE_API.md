@@ -13,6 +13,11 @@ Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConf
 the record of somebody having actually read the source's robots.txt and terms.
 A model validator rejects `enabled=True` unless both are set; see
 `docs/DECISIONS.md` entry 14.
+`SourceConfig` also carries `listing_ttl_days: int | None` (and the matching
+`Source.listing_ttl_days` ORM column) — set for a source that sells a fixed
+advertising window (a newspaper's fortnight), so `hofradar.lifecycle.mark_missing`
+reads its silence past that window as `ListingStatus.EXPIRED`, not `REMOVED`;
+see `docs/DECISIONS.md` entry 15.
 ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
 
 ---
@@ -54,10 +59,14 @@ def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
     # when the source listed its whole inventory without error or truncation.
-    # Raises ImplausibleAbsence - and writes nothing - when the seen-set is
-    # empty against a real inventory (unconditionally, even a single visible
-    # listing), or would remove >= 2 listings AND >= 30% of a source with at
-    # least 3 visible listings in one run.
+    # A listing missing past source.listing_ttl_days is set EXPIRED, not
+    # REMOVED, and is pulled out of both guards below before they run - see
+    # docs/DECISIONS.md entry 15. Raises ImplausibleAbsence - and writes
+    # nothing - when what remains (the non-expired absences) is too broad to
+    # be believed: the seen-set is empty against a real inventory
+    # (unconditionally, even a single visible listing), or would remove >= 2
+    # listings AND >= 30% of a source with at least 3 visible listings in one
+    # run.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
                       unverified_stale_after_days: int = 180,
                       non_reporting_source_ids: set[int] | None = None,
@@ -96,6 +105,13 @@ def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
 ```
 
 ## `hofradar.scoring`
+
+`GONE_STATUSES` (an internal constant, defined identically in
+`hofradar.scoring.engine` and `hofradar.scoring.signals`) is
+`{ListingStatus.REMOVED, ListingStatus.SOLD}`. `ListingStatus.EXPIRED` is
+deliberately absent from both — an expired advert must not fire
+`REJECT_LISTING_GONE` or zero a property's availability term; see
+`docs/DECISIONS.md` entry 15.
 
 ```python
 def score_property(prop: Property, profile: SearchProfile, *, cost: CostResult | None = None,
