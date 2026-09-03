@@ -128,8 +128,57 @@ by itself close the terms check above:
 `tests/fixtures/html/denkmalboerse_object_005816.html` is now a real page
 captured from `www.blfd.bayern.de` on 2026-09-03 (see the provenance comment
 at the top of the fixture and `tests/sources/adapters/test_denkmalboerse.py`).
-The search CGI's response shape (pagination / form-vs-results) is still
-unverified, which is why `discover()` still calls `mark_enumeration_incomplete`.
+
+**The search CGI's response shape is now verified.** A real capture of
+`/cgi-bin/fts_search_verkauf.pl` on 2026-09-03
+(`tests/fixtures/html/denkmalboerse_search_cgi.html`, 300 KB, HTTP 200) shows
+one response holds the entire catalogue: **237 rows, 237 unique object ids,
+no pagination** ("Weiter" appears once on the page, in unrelated site
+navigation, never as a paginator). Each row is a `<tr>` with the object's
+title/link, its `PLZ Ort` address, and a final `<td>` naming its
+Regierungsbezirk. Distribution across the seven: Oberbayern 43, Unterfranken
+45, Mittelfranken 38, Oberfranken 34, Schwaben 28, Niederbayern 27, Oberpfalz
+22.
+
+Because the shape is now known, `discover()` row-scans this table (rather than
+scanning every anchor on the page) and, per invariant 4b, leaves
+`enumeration_complete` true only when the walk actually succeeded: a non-200
+response, a parse that yields zero object rows (indistinguishable from a
+template change), or any detail fetch that failed all call
+`mark_enumeration_incomplete` with a specific reason instead of the old
+unconditional call. A healthy walk over the real fixture now genuinely leaves
+`can_prove_absence` true.
+
+**Regierungsbezirk is now the primary pre-filter, checked before the
+gazetteer.** On the real capture the gazetteer pre-filter alone would have
+skipped zero fetches - of the 43 Oberbayern rows, none are known-and-outside
+the profile's radius, and 37 are gazetteer-unknown towns (Ingolstadt,
+München, Dorfen, Eichstätt, Laufen, ...) that fall through and get fetched
+regardless. The Regierungsbezirk column, by contrast, skips the other 194
+rows with certainty, before any gazetteer lookup runs. `discover()` now reads
+that column and skips the detail fetch for any row whose Bezirk is
+recognised as one of Bavaria's seven and is not in the configured in-scope
+set (`options.regierungsbezirke`, defaulting to `["Oberbayern"]`) - an empty,
+missing, or unrecognised Bezirk value still falls through and fetches, the
+same rule the gazetteer pre-filter already follows for an unknown town. The
+gazetteer stays in place as a second, narrower gate for the in-Bezirk towns
+it does recognise.
+
+**Decision 14's yield gate is met, on a real snapshot.** Decision 14 requires
+5 in-radius objects across the Denkmalbörse's first four runs. Scoring the 43
+Oberbayern rows from the 2026-09-03 capture through this project's own
+gazetteer and `haversine_km`, against the real search profile (origin
+47.907, 11.84; `air_km_max` 80.0 km), yields **6 in-radius objects**:
+Fürstenfeldbruck (18.3 km), Kirchseeon (20.6 km), Vaterstetten (23.1 km),
+Rohrdorf (27.8 km), Kiefersfelden (42.2 km), and Mühldorf am Inn (63.4 km).
+That alone clears the gate. It is a **lower bound**, not the true figure: 37
+of the 43 Oberbayern towns are unknown to the bundled offline gazetteer (it
+only covers the Landkreise immediately around the search origin), so a real
+geocoder would very likely place more of them inside the radius. Method:
+Regierungsbezirk = Oberbayern subset of the real capture, town names looked
+up in `hofradar.geo.gazetteer`, distance via `hofradar.geo.distance.haversine_km`
+against the profile center - the same offline path `town_in_radius` uses, not
+a live Nominatim run.
 
 ## Adding a regional source
 

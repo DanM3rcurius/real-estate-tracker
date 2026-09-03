@@ -16,11 +16,20 @@ BLfD disclaims the accuracy of what owners submit, which is modelled as a
 *reliability* below 1.0 in the registry - never as a lower role. Accuracy and
 provenance are different questions.
 
-This adapter is not yet enabled: ``www.blfd.bayern.de`` is unreachable from
-the environment this project was built in, so the terms/robots check
-invariant 7 requires has not been run. See docs/SOURCES.md for the exact
-commands and the checklist to run before ``config/sources.yaml`` may set
-``enabled: true`` for this source.
+A real capture of the search CGI (2026-09-03, see
+``tests/fixtures/html/denkmalboerse_search_cgi.html``) settled two questions
+that used to be unverified. First, the shape: one response holds the entire
+catalogue as a ``<table>`` of ``<tr>`` rows, no pagination - so ``discover()``
+row-scans rather than anchor-scans, and a genuinely complete walk of it can
+leave ``enumeration_complete`` true (see ``mark_enumeration_incomplete``
+below). Second, the last ``<td>`` of every row carries the object's
+Regierungsbezirk. On that capture the bundled gazetteer (Upper-Bavaria-only,
+and a real GET only ever reaches it through a town name it already knows) does
+not skip a single fetch, while the Regierungsbezirk alone - checked before the
+gazetteer, on every row - skips the 194 objects outside the configured scope
+with certainty. So it runs first, as a wider and more reliable gate; the
+gazetteer stays as a second, narrower one for the towns it does recognise
+within scope. See ``docs/SOURCES.md`` for the counts.
 """
 
 from __future__ import annotations
@@ -31,7 +40,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
-from selectolax.parser import HTMLParser
+from selectolax.parser import HTMLParser, Node
 
 from hofradar.contracts import RawListing
 from hofradar.geo import town_in_radius
@@ -60,6 +69,29 @@ OBJECT_HREF_RE = re.compile(r"/information-service/denkmalboerse/objekte/(\d{6})
 #: verb phrases is not worth the regex complexity it would add.
 TITLE_TOWN_RE = re.compile(r"\bin\s+([^,]+?)(?=\s[-–—]\s|,|$)", re.IGNORECASE)
 
+#: Every Regierungsbezirk a row's last column can legitimately name. Used to
+#: tell a genuinely out-of-scope Bezirk apart from a value the pre-filter does
+#: not recognise (empty, mangled, a template change) - the latter must fall
+#: through and fetch, exactly like a gazetteer-unknown town does, rather than
+#: being silently discarded on a label this adapter has never seen.
+BAVARIAN_REGIERUNGSBEZIRKE: frozenset[str] = frozenset(
+    {
+        "Oberbayern",
+        "Niederbayern",
+        "Oberpfalz",
+        "Oberfranken",
+        "Mittelfranken",
+        "Unterfranken",
+        "Schwaben",
+    }
+)
+
+#: Regierungsbezirke in scope absent an ``options.regierungsbezirke`` override.
+#: This project's search profile is centred on Upper Bavaria (see
+#: config/search.yaml), so that is the only district worth a detail fetch by
+#: default.
+DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE: tuple[str, ...] = ("Oberbayern",)
+
 
 def _town_from_title(title: str | None) -> str | None:
     if not title:
@@ -68,12 +100,52 @@ def _town_from_title(title: str | None) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def _object_anchor(row: Node) -> Node | None:
+    """The row's one anchor whose href is an object detail link, if any.
+
+    A row is not assumed to have exactly one ``<a>``: the price cell has none,
+    the info cell has exactly the object link. Scanning rather than indexing
+    keeps this working if BLfD ever adds another link (a PDF exposé, a map) to
+    the row.
+    """
+    for candidate in row.css("a"):
+        href = candidate.attributes.get("href") or ""
+        if OBJECT_HREF_RE.search(href):
+            return candidate
+    return None
+
+
+def _town_from_row(row: Node, title: str | None) -> str | None:
+    """The row's "PLZ Ort" address line, falling back to the title heuristics.
+
+    The address paragraph (e.g. "84453 Mühldorf am Inn") needs no dash/comma
+    splitting and matches the gazetteer far more often than a parsed title
+    does - a title's "Mühldorf a. Inn" does not match the gazetteer's
+    "Muehldorf am Inn", but the row's own address line does. The title is only
+    a fallback for a row that is ever missing its address paragraph.
+    """
+    address = row.css_first("p")
+    address_text = address.text(strip=True) if address is not None else None
+    return address_text or _town_from_title(title)
+
+
+def _regierungsbezirk_from_row(row: Node) -> str | None:
+    """The row's last ``<td>`` - the Regierungsbezirk column BLfD appends."""
+    cells = row.css("td")
+    if not cells:
+        return None
+    text = cells[-1].text(strip=True)
+    return text or None
+
+
 class DenkmalboerseAdapter(SourceAdapter):
     """Fetches the search CGI's result list and each object's static detail page.
 
-    Parsing stays at the string level throughout - see ``fetch_detail``.
-    Turning "auf Anfrage" into a typed price, or a description into keyword
-    hits, is ``hofradar.normalize``'s job, not this adapter's.
+    Parsing stays at the string level throughout - see ``fetch_detail``. The
+    two pre-filters in ``discover()`` read a Bezirk label and a town name for
+    routing decisions only; turning "auf Anfrage" into a typed price, or a
+    description into keyword hits, is ``hofradar.normalize``'s job, not this
+    adapter's.
     """
 
     key = "denkmalboerse"
@@ -85,25 +157,39 @@ class DenkmalboerseAdapter(SourceAdapter):
             raise SourceDiscoveryError(f"{self.key}: no base_url configured")
 
         self.begin_enumeration()
-        # This adapter has never seen a real response from the search CGI (see
-        # the OUTSTANDING note in docs/SOURCES.md): whether a bare GET returns
-        # every current object, only one page of a paginated list, or a search
-        # *form* instead of results is unverified. Per invariant 4b, being
-        # allowed to verify (role=primary) is not the same as having listed
-        # everything, so this run's silence may never be read as "removed"
-        # until a real capture confirms what a bare GET actually returns.
-        self.mark_enumeration_incomplete(
-            "search CGI response shape (pagination / form-vs-results) has "
-            "never been captured against a real response"
+        index_url = urljoin(self.base_url, SEARCH_PATH)
+
+        try:
+            response = await self.client.get(index_url)
+        except Exception as exc:  # noqa: BLE001 - reported below, not left opaque
+            self.mark_enumeration_incomplete(f"search CGI request failed: {exc}")
+            raise SourceDiscoveryError(
+                f"{self.key}: could not reach the search CGI: {exc}"
+            ) from exc
+        if response.status_code >= 400:
+            self.mark_enumeration_incomplete(
+                f"search CGI returned HTTP {response.status_code}"
+            )
+            raise SourceDiscoveryError(
+                f"{self.key}: search CGI returned HTTP {response.status_code}"
+            )
+
+        tree = HTMLParser(response.text)
+        rows = tree.css("tbody tr")
+
+        in_scope = frozenset(
+            self.options.get("regierungsbezirke") or DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE
         )
 
-        index_url = urljoin(self.base_url, SEARCH_PATH)
-        response = await self.client.get(index_url)
-        tree = HTMLParser(response.text)
-
         seen: set[str] = set()
-        for node in tree.css("a"):
-            href = node.attributes.get("href") or ""
+        object_count = 0
+        any_detail_failed = False
+
+        for row in rows:
+            anchor = _object_anchor(row)
+            if anchor is None:
+                continue
+            href = anchor.attributes.get("href") or ""
             match = OBJECT_HREF_RE.search(href)
             if match is None:
                 continue
@@ -111,13 +197,31 @@ class DenkmalboerseAdapter(SourceAdapter):
             if object_id in seen:
                 continue
             seen.add(object_id)
+            object_count += 1
 
-            title = node.text(strip=True)
-            # The pre-filter may only save a fetch. False means the gazetteer is
-            # sure this is outside the radius; None means it has never heard of
-            # the place, which is precisely where a hamlet with a farmstead
-            # lives - so None still falls through to a fetch.
-            if town_in_radius(_town_from_title(title), profile) is False:
+            # The primary pre-filter: on the 2026-09-03 capture this alone
+            # skips 194 of 237 rows with certainty, dwarfing what the
+            # gazetteer saves on the same response (see docs/SOURCES.md). Only
+            # a value this adapter actually recognises as a Regierungsbezirk
+            # may reject a row - anything else (missing, mangled, a template
+            # change) falls through, same as the gazetteer's None.
+            bezirk = _regierungsbezirk_from_row(row)
+            if bezirk in BAVARIAN_REGIERUNGSBEZIRKE and bezirk not in in_scope:
+                logger.debug(
+                    "%s: skipping %s - Regierungsbezirk %r out of scope",
+                    self.key,
+                    object_id,
+                    bezirk,
+                )
+                continue
+
+            title = anchor.text(strip=True)
+            # The second, narrower pre-filter. It may only ever save a fetch:
+            # False means the gazetteer is sure this is outside the radius;
+            # None means it has never heard of the place, which is precisely
+            # where a hamlet with a farmstead lives - so None still falls
+            # through to a fetch.
+            if town_in_radius(_town_from_row(row, title), profile) is False:
                 logger.debug(
                     "%s: skipping %s (%s) - outside radius", self.key, object_id, title
                 )
@@ -125,8 +229,26 @@ class DenkmalboerseAdapter(SourceAdapter):
 
             detail_url = urljoin(self.base_url, match.group(0))
             listing = await self.fetch_detail(detail_url)
-            if listing is not None:
-                yield listing
+            if listing is None:
+                any_detail_failed = True
+                continue
+            yield listing
+
+        # Invariant 4b: absence needs a complete enumeration, not just
+        # permission. A zero-row parse is indistinguishable from a template
+        # change that broke every selector above, and a detail page that
+        # failed to fetch means this run did not actually see everything the
+        # index promised - either way, this run's silence must not be read as
+        # "everything else was removed".
+        if object_count == 0:
+            self.mark_enumeration_incomplete(
+                "parsed zero object rows from the search CGI response - "
+                "possibly a template change"
+            )
+        elif any_detail_failed:
+            self.mark_enumeration_incomplete(
+                "one or more detail fetches failed during this run"
+            )
 
     async def fetch_detail(self, url: str) -> RawListing | None:
         try:

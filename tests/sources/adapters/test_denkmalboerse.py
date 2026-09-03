@@ -4,14 +4,22 @@ Everything asserted here is about *which request would have been made* and
 which stringy fields came back. Turning "auf Anfrage" into a PriceType is
 hofradar.normalize's job, and testing it here would duplicate that contract.
 
-The fixture this file reads (``tests/fixtures/html/denkmalboerse_object_005816.html``)
-is a real page captured from ``www.blfd.bayern.de`` on 2026-09-03 (see the
-provenance comment at the top of the fixture). Its assertions reflect what
-``_htmlutil`` genuinely pulls out of that markup, not what a hand-written
-fixture implied it would.
+Two fixtures this file reads are real captures, not hand-written HTML:
+
+- ``tests/fixtures/html/denkmalboerse_object_005816.html`` - one object's
+  detail page, captured from ``www.blfd.bayern.de`` on 2026-09-03.
+- ``tests/fixtures/html/denkmalboerse_search_cgi.html`` - the search CGI's
+  full response, captured the same day: 237 rows across all seven Bavarian
+  Regierungsbezirke, no pagination.
+
+Assertions against the search-CGI fixture use real object ids and real town
+names looked up from that capture, not stand-ins - see the comment on each
+test for how the specific id was chosen.
 """
 
 from __future__ import annotations
+
+import re
 
 import httpx
 import pytest
@@ -20,10 +28,19 @@ import respx
 from hofradar.config import RadiusConfig
 from hofradar.sources import get_adapter
 from hofradar.sources.adapters.denkmalboerse import _town_from_title
+from hofradar.sources.exceptions import SourceDiscoveryError
 
 BASE = "https://www.blfd.bayern.de"
 DETAIL = f"{BASE}/information-service/denkmalboerse/objekte/005816/index.html"
 FIXTURE_NAME = "denkmalboerse_object_005816.html"
+INDEX = f"{BASE}/cgi-bin/fts_search_verkauf.pl"
+SEARCH_FIXTURE_NAME = "denkmalboerse_search_cgi.html"
+#: Matches any object detail URL under BASE - used as a respx catch-all so a
+#: real 43- or 237-row fixture can be walked without registering one route per
+#: object id.
+DETAIL_URL_RE = re.compile(
+    rf"{re.escape(BASE)}/information-service/denkmalboerse/objekte/\d{{6}}/index\.html"
+)
 
 
 @pytest.mark.asyncio
@@ -95,66 +112,172 @@ async def test_verify_reports_a_removed_object_as_gone(make_source_config) -> No
 
 @pytest.mark.asyncio
 async def test_discover_skips_the_detail_fetch_for_an_out_of_radius_town(
-    make_source_config, search_profile, sample_keywords
+    make_source_config, search_profile, sample_keywords, read_fixture
 ) -> None:
+    # Object 007505, "Stadthaus in Mühldorf a. Inn", is a real Oberbayern row
+    # whose address line ("84453 Mühldorf am Inn") the gazetteer resolves to
+    # "Muehldorf am Inn", 63.4km from the profile origin - inside the
+    # default 80km radius, so narrow it to 60km to push this one object out,
+    # the same technique the pre-real-fixture version of this test used to
+    # push "Neumarkt-Sankt Veit" (71km) out.
     adapter = get_adapter(
         make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
     )
-    # "Nordhalben" is absent from this project's Upper-Bavaria-only gazetteer,
-    # which would exercise the None branch instead of False and prove
-    # nothing. "Neumarkt-Sankt Veit" is a real gazetteer entry (Landkreis
-    # Muehldorf), ~71 km from the Westham origin - known and outside a 60 km
-    # radius, the case this test is actually meant to cover.
     profile = search_profile.model_copy(update={"radius": RadiusConfig(air_km_max=60)})
-    index = f"{BASE}/cgi-bin/fts_search_verkauf.pl"
+    out_of_radius_detail = f"{BASE}/information-service/denkmalboerse/objekte/007505/index.html"
 
     with respx.mock:
-        respx.get(index).mock(
-            return_value=httpx.Response(
-                200,
-                text=(
-                    '<a href="/information-service/denkmalboerse/objekte/005759/index.html">'
-                    "Pfarrhof in Neumarkt-Sankt Veit</a>"
-                ),
-            )
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
         )
-        detail = respx.get(
-            f"{BASE}/information-service/denkmalboerse/objekte/005759/index.html"
-        ).mock(return_value=httpx.Response(200, text="<html></html>"))
+        detail = respx.get(out_of_radius_detail).mock(return_value=httpx.Response(200, text="<html></html>"))
+        # Every other row that survives the Bezirk and radius gates at 60km -
+        # a respx catch-all so this test does not need to enumerate them.
+        respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
 
-        listings = [item async for item in adapter.discover(profile, sample_keywords)]
+        [item async for item in adapter.discover(profile, sample_keywords)]
 
-    assert listings == []
-    assert not detail.called, "Neumarkt-Sankt Veit is 71km out; the page must not be fetched"
+    assert not detail.called, "Mühldorf am Inn is 63.4km out at a 60km radius; must not be fetched"
 
 
 @pytest.mark.asyncio
 async def test_discover_fetches_an_unknown_town_rather_than_discarding_it(
     make_source_config, search_profile, sample_keywords, read_fixture
 ) -> None:
+    # Object 009199, "Attraktives Ackerbürgerhaus in Ingolstadt", is a real
+    # Oberbayern row ("85049 Ingolstadt") the bundled gazetteer has never
+    # heard of - one of the 37-of-43 unknown-town rows docs/SOURCES.md
+    # records. It must still reach fetch_detail.
     adapter = get_adapter(
         make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
     )
-    index = f"{BASE}/cgi-bin/fts_search_verkauf.pl"
+    unknown_town_detail = f"{BASE}/information-service/denkmalboerse/objekte/009199/index.html"
 
     with respx.mock:
-        respx.get(index).mock(
-            return_value=httpx.Response(
-                200,
-                text=(
-                    '<a href="/information-service/denkmalboerse/objekte/007148/index.html">'
-                    "Historische Hofstelle in Hinterdupfing</a>"
-                ),
-            )
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
         )
-        detail = respx.get(
-            f"{BASE}/information-service/denkmalboerse/objekte/007148/index.html"
-        ).mock(return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME)))
+        detail = respx.get(unknown_town_detail).mock(
+            return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME))
+        )
+        # The other 42 in-scope (Oberbayern) rows also fall through at this
+        # profile's default radius (none of them are known-and-outside).
+        others = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
 
         listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
 
     assert detail.called, "an unknown town must fall through to the full path"
-    assert len(listings) == 1
+    assert any(item.external_id == "009199" for item in listings)
+    assert others.call_count == 42
+
+
+@pytest.mark.asyncio
+async def test_discover_skips_detail_fetches_for_out_of_scope_regierungsbezirk(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """The real capture carries 237 rows across all seven Regierungsbezirke;
+    only 43 are Oberbayern, the in-scope default. The Bezirk column - checked
+    before the gazetteer - must skip the other 194 with certainty, which is
+    the entire reason it runs first (see the adapter's module docstring).
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        details = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert details.call_count == 43, "only the 43 Oberbayern rows should reach fetch_detail"
+    assert len(listings) == 43
+
+
+@pytest.mark.asyncio
+async def test_discover_regierungsbezirk_option_overrides_the_default_scope(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """options.regierungsbezirke replaces the Oberbayern default outright -
+    an operator who wants a different or wider footprint is not stuck with it.
+    """
+    adapter = get_adapter(
+        make_source_config(
+            key="denkmalboerse",
+            adapter="denkmalboerse",
+            base_url=BASE,
+            options={"regierungsbezirke": ["Mittelfranken"]},
+        )
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        details = respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert details.call_count == 38, "the real capture carries 38 Mittelfranken rows"
+    assert len(listings) == 38
+
+
+@pytest.mark.asyncio
+async def test_discover_fetches_a_row_with_an_unrecognised_regierungsbezirk(
+    make_source_config, search_profile, sample_keywords
+) -> None:
+    """A pre-filter may only ever save a fetch, never reject a property. A
+    Bezirk column this adapter cannot recognise as one of Bavaria's seven -
+    empty, or an unexpected value a future template change might introduce -
+    must fall through and fetch, exactly like a gazetteer-unknown town does.
+    Hand-written rather than drawn from the real fixture: no real row carries
+    either value, which is the point being tested.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+    empty_bezirk_detail = f"{BASE}/information-service/denkmalboerse/objekte/000001/index.html"
+    unexpected_bezirk_detail = f"{BASE}/information-service/denkmalboerse/objekte/000002/index.html"
+    index_html = """
+        <table><tbody>
+        <tr>
+          <td>Kaufpreis: VB</td>
+          <td><a href="/information-service/denkmalboerse/objekte/000001/index.html">
+            Hof in Nirgendwo</a><p>00000 Nirgendwo</p></td>
+          <td></td>
+        </tr>
+        <tr>
+          <td>Kaufpreis: VB</td>
+          <td><a href="/information-service/denkmalboerse/objekte/000002/index.html">
+            Hof in Nirgendwo</a><p>00000 Nirgendwo</p></td>
+          <td>Baden-Württemberg</td>
+        </tr>
+        </tbody></table>
+    """
+
+    with respx.mock:
+        respx.get(INDEX).mock(return_value=httpx.Response(200, text=index_html))
+        empty_bezirk = respx.get(empty_bezirk_detail).mock(
+            return_value=httpx.Response(200, text="<html></html>")
+        )
+        unexpected_bezirk = respx.get(unexpected_bezirk_detail).mock(
+            return_value=httpx.Response(200, text="<html></html>")
+        )
+
+        [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert empty_bezirk.called, "an empty Regierungsbezirk must fall through and fetch"
+    assert unexpected_bezirk.called, "an unrecognised Regierungsbezirk must fall through and fetch"
 
 
 @pytest.mark.parametrize(
@@ -181,25 +304,97 @@ def test_town_from_title_separates_the_town_from_a_district_suffix(
 
 
 @pytest.mark.asyncio
-async def test_discover_never_claims_a_complete_enumeration(
-    make_source_config, search_profile, sample_keywords
+async def test_discover_leaves_enumeration_complete_after_a_healthy_walk(
+    make_source_config, search_profile, sample_keywords, read_fixture
 ) -> None:
-    """Invariant 4b: enumerates=True (the class default) plus role=primary
-    would make can_prove_absence True unless discover() says otherwise - and
-    a bare GET against the search CGI has never been checked against a real
-    response for pagination or a search-form-instead-of-results reply (see
-    the OUTSTANDING note in docs/SOURCES.md). So this run's silence must
-    never be readable as "everything else was removed", regardless of what
-    the mocked response here looks like.
+    """Invariant 4b: a genuinely complete walk - every row parsed, every
+    detail fetch that was attempted succeeded - is the one case where this
+    run's silence about anything else may be read as "everything else is
+    gone". Exercised over the real 237-row capture, not a stand-in.
     """
     adapter = get_adapter(
         make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
     )
-    index = f"{BASE}/cgi-bin/fts_search_verkauf.pl"
 
     with respx.mock:
-        respx.get(index).mock(return_value=httpx.Response(200, text="<html></html>"))
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert adapter.enumeration_complete is True
+    assert adapter.can_prove_absence is True
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_enumeration_incomplete_when_no_object_rows_parse(
+    make_source_config, search_profile, sample_keywords
+) -> None:
+    """A template change that broke every selector above would look exactly
+    like a zero-row parse from here - it must never be silently read as "the
+    catalogue is genuinely empty this run".
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(return_value=httpx.Response(200, text="<html></html>"))
         [item async for item in adapter.discover(search_profile, sample_keywords)]
 
     assert adapter.enumeration_complete is False
     assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_enumeration_incomplete_on_a_non_200_index_response(
+    make_source_config, search_profile, sample_keywords
+) -> None:
+    """Nothing was enumerated at all - this must be as loud as a zero-row
+    parse, not silently swallowed into "no results this run".
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(INDEX).mock(return_value=httpx.Response(503))
+
+        with pytest.raises(SourceDiscoveryError):
+            [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert adapter.enumeration_complete is False
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_enumeration_incomplete_when_a_detail_fetch_fails(
+    make_source_config, search_profile, sample_keywords, read_fixture
+) -> None:
+    """One bad detail page must not abort the run (fetch_detail already
+    swallows it and returns None), but it does mean this run did not actually
+    see everything the index promised - silence about the rest is no longer
+    trustworthy.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+    # Object 007505 ("Mühldorf am Inn") is Oberbayern and inside the default
+    # 80km radius, so it would normally be fetched - here it 404s instead.
+    failing_detail = f"{BASE}/information-service/denkmalboerse/objekte/007505/index.html"
+
+    with respx.mock:
+        respx.get(INDEX).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE_NAME))
+        )
+        respx.get(failing_detail).mock(return_value=httpx.Response(404))
+        respx.route(url__regex=DETAIL_URL_RE.pattern).mock(
+            return_value=httpx.Response(200, text="<html><body>Objekt</body></html>")
+        )
+
+        [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert adapter.enumeration_complete is False
