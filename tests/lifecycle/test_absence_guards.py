@@ -54,10 +54,15 @@ def _seed(session, make_source, make_listing, *, count: int):
 def test_empty_seen_set_raises_instead_of_removing_everything(
     session, make_source, make_listing
 ) -> None:
-    source, _ = _seed(session, make_source, make_listing, count=3)
+    source, props = _seed(session, make_source, make_listing, count=3)
 
     with pytest.raises(ImplausibleAbsence, match="saw nothing"):
         mark_missing(session, set(), source=source, enumeration_complete=True)
+
+    # "so nothing is written" (ImplausibleAbsence's own docstring) - not just
+    # that the exception fired, but that the raise happened before any row
+    # was touched.
+    assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
 
 
 def test_removing_more_than_the_threshold_raises(session, make_source, make_listing) -> None:
@@ -67,6 +72,8 @@ def test_removing_more_than_the_threshold_raises(session, make_source, make_list
     seen = {p.id for p in props[:5]}
     with pytest.raises(ImplausibleAbsence, match="50"):
         mark_missing(session, seen, source=source, enumeration_complete=True)
+
+    assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
 
 
 def test_a_normal_single_removal_still_works(session, make_source, make_listing) -> None:

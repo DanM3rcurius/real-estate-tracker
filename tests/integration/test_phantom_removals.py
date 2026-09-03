@@ -117,11 +117,19 @@ def test_an_incomplete_enumeration_removes_nothing(db_session, make_source, make
 def test_a_complete_enumeration_still_removes_a_genuinely_gone_listing(
     db_session, make_source, make_listing
 ) -> None:
-    """The guard against the lazy fix: real removals must keep working."""
-    source, props = _seed(db_session, make_source, make_listing)
+    """The guard against the lazy fix: real removals must keep working.
+
+    Seeded with two listings, not one: the empty-seen-set guard is now
+    unconditional (Task 3, review round 1, Important 1), so "the source saw
+    nothing" is always refused, even from a two-listing source. A genuine
+    single removal has to be represented honestly - one listing still seen,
+    the other genuinely gone - not as an empty result.
+    """
+    source, props = _seed(db_session, make_source, make_listing, count=2)
+    seen = {props[1].id}
 
     changes = mark_missing(
-        db_session, set(), source=source, run_id=2, enumeration_complete=True
+        db_session, seen, source=source, run_id=2, enumeration_complete=True
     )
 
     assert len(changes) == 1

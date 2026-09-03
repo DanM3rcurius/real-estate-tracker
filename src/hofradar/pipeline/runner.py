@@ -187,7 +187,11 @@ async def run_pipeline(
                         # One source's absences are not believed - recorded as
                         # a source failure, same posture as a crawl exception
                         # above, so the run continues for every other source.
+                        # consecutive_failures escalates it: a source stuck in
+                        # permanent refusal must not stay invisible just
+                        # because the run itself still finishes "ok".
                         log.error("absence detection refused for %s: %s", source.key, exc)
+                        source.consecutive_failures += 1
                         source.last_error = str(exc)
                         _log_stage(
                             session, run, RunStage.CHANGE_DETECTION,

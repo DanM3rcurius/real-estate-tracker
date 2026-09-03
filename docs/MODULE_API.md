@@ -48,7 +48,9 @@ def mark_missing(session, seen_property_ids: set[int], *, source: Source,
     # enumeration_complete has no default on purpose: absence is only evidence
     # when the source listed its whole inventory without error or truncation.
     # Raises ImplausibleAbsence - and writes nothing - when the seen-set is
-    # empty against a real inventory, or would remove >= 30% of it in one run.
+    # empty against a real inventory (unconditionally, even a single visible
+    # listing), or would remove >= 2 listings AND >= 30% of a source with at
+    # least 3 visible listings in one run.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
                       unverified_stale_after_days: int = 180,
                       non_reporting_source_ids: set[int] | None = None,
