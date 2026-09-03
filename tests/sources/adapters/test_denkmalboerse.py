@@ -57,14 +57,16 @@ async def test_fetch_detail_requests_the_static_object_page(
     # (the real page is not well-formed HTML there).
     assert listing.price_raw == "auf Anfrage"
     assert listing.year_raw == "2. Hälfte 18. Jahrhundert"
-    # "Grundstücksfläche:" matches the label map exactly, but "Wohnfläche
+    # "Grundstücksfläche:" matches the label map exactly. "Wohnfläche
     # (Bauernhaus):" and "Nutzfläche (Wirtschaftsteil):" carry a parenthetical
-    # suffix the label map does not know, so they are NOT picked up as
-    # living_raw / usable_raw - a real gap the synthetic fixture never showed
-    # because its labels were plain "Wohnfläche:" / "Baujahr:" with no suffix.
+    # suffix BLfD's owner exposés routinely add for a Hofstelle's living vs.
+    # working part - _htmlutil.extract_labeled_fields strips that suffix for
+    # matching purposes when the base label is already a known key, so both
+    # still resolve to living_raw / usable_raw. See test_htmlutil.py for the
+    # focused coverage of that normalisation and its guard rail.
     assert listing.land_raw == "ca. 435 m²"
-    assert listing.living_raw is None
-    assert listing.usable_raw is None
+    assert listing.living_raw == "ca. 110 m²"
+    assert listing.usable_raw == "ca. 112 m²"
     # The contact block (immo-inhalt, "Eigentümer des Anwesens", the mailto
     # target's visible text) is plain body text, so it survives into the
     # description like everything else on the page - there is no separate
