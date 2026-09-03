@@ -61,6 +61,39 @@ access, or simply pasting the handful of listings you actually care about into
 the paste box — which is one click and produces a fully-tracked property with
 full history.
 
+## Pending a terms check: Denkmalbörse (BLfD)
+
+`hofradar.sources.adapters.denkmalboerse.DenkmalboerseAdapter` is written and
+tested against a fixture (see the note on that fixture below), but the source
+is **not** in `config/sources.yaml` yet and must stay `enabled: false` when it
+is added, because invariant 7's terms/robots check has not been run: the
+build environment's egress proxy denies the `www.blfd.bayern.de` host outright
+(an organisation policy decision, not a transient failure), so it cannot be
+checked from here.
+
+Terms check status: **OUTSTANDING**. Before this source may be enabled,
+someone with real network access must run these four commands and record
+what came back:
+
+```bash
+curl -s https://www.blfd.bayern.de/robots.txt
+curl -sI https://www.blfd.bayern.de/information-service/denkmalboerse/objekte/005816/index.html
+curl -s https://www.blfd.bayern.de/information-service/denkmalboerse/ | grep -i -A5 'nutzungsbedingung\|impressum\|haftung'
+curl -s 'https://www.blfd.bayern.de/cgi-bin/fts_search_verkauf.pl' | head -100
+```
+
+If `robots.txt` disallows `/information-service/`, or the terms restrict
+automated retrieval, the adapter stays written but permanently disabled -
+same treatment as the three portal adapters above. Only once the result is
+recorded here (or in the registry entry's `terms_excerpt`) may
+`config/sources.yaml` set `enabled: true` for `denkmalboerse`.
+
+Also outstanding: `tests/fixtures/html/denkmalboerse_object_005816.html` is a
+hand-written *synthetic* fixture, not a real captured page - the same egress
+denial that blocks the terms check also blocks capturing it. It must be
+replaced with a real page (see Step 2 of the plan this note originated from)
+before this source ships enabled.
+
 ## Adding a regional source
 
 Most of the value is here. Regional brokers around Rosenheim, Miesbach,
