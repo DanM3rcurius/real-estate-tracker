@@ -40,11 +40,46 @@ a fact.
 
 `config/search.yaml`'s `coverage.municipalities` list (which
 `hofradar.report.yield_stats.coverage_by_municipality` reads) mirrors the
-"Gemeinde" column above exactly, spelling included. If a source ever stores a
-town name spelled differently than this list (a different umlaut folding, a
-spelled-out "am" instead of "a.", a missing hyphen), that municipality will
-read as a false "dark" — see `docs/MODULE_API.md` and the module docstring for
-the exact-match caveat this creates.
+"Gemeinde" column above, with one deliberate exception: this table keeps the
+plan's original abbreviated spelling **"Wasserburg a. Inn"** verbatim, but
+`config/search.yaml` spells it **"Wasserburg am Inn"** — the canonical form
+`hofradar.geo.gazetteer` and `hofradar.normalize.location.parse_location`
+actually produce and store on `Property.town`/`Observation.town`. Because
+`coverage_by_municipality`'s `Property.town.in_(expected)` match is exact, the
+abbreviated form as written in this table would never match a single real
+observation and Wasserburg would read as falsely dark on day one, in the one
+Lkr.-Rosenheim town that is definitely covered. If this table is ever
+"corrected" back to match `search.yaml` verbatim, use the *canonical* spelling
+("Wasserburg am Inn"), not the abbreviated one — the abbreviated form here is
+a leftover from the plan text, not a second valid spelling to preserve.
+
+For every other row, mismatch risk is still real. If a source ever stores a
+town name spelled differently than the config list (a different umlaut
+folding, a missing hyphen, a spelled-out form the gazetteer does not use),
+that municipality will read as a false "dark" — see `docs/MODULE_API.md` and
+the module docstring for the exact-match caveat this creates. Because the
+match is exact rather than fuzzy, this can only ever produce a false *dark*,
+never a false *covered*: a spelling mismatch makes a covered town look
+uncovered, it cannot make an uncovered one look covered. That asymmetry is why
+declining to fuzzy-match was the right call — the failure mode this task
+exists to prevent (a truly dark municipality reading as fine) stays
+structurally unreachable.
+
+A second, larger source of the same false-dark risk: nothing here maps an
+**Ortsteil** (a village/hamlet that is part of a larger Gemeinde, not its own
+municipality) to the Gemeinde it belongs to. A listing whose location string
+resolves to the Ortsteil rather than the Gemeinde will never match this list,
+however faithfully the Gemeinde spelling above is kept. The project's own
+search centre makes this vivid: it is `"Westham, Feldkirchen-Westerham"` —
+**Westham** is an Ortsteil of Feldkirchen-Westerham, not a Gemeinde in its own
+right, and a listing that stores just "Westham" (as the origin naturally
+would) will not match `Feldkirchen-Westerham` in `expected`. The same applies
+to Vagen and Höhenrain (also Feldkirchen-Westerham) and to Götting (an
+Ortsteil of Bruckmühl). No Ortsteil→Gemeinde mapping exists in this codebase
+today; a reader chasing a "dark" Feldkirchen-Westerham or Bruckmühl should
+check for this before concluding the publisher gap is real. This errs on the
+loud side — a phantom gap gets investigated, not a real one missed — so it is
+noted here rather than fixed.
 
 Left deliberately unfilled, for the same reason: `options.bulletins` index
 URLs for the Gemeindeblatt/Amtsblatt adapter, broker RSS/JSON feeds, and
