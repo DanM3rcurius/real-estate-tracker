@@ -5,6 +5,9 @@ Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
 GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
+`CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
+`hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
+hard-reject a property on total cost; an "inferred" one only flags it.
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig).
 ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
 
@@ -75,6 +78,7 @@ def driving_band(km: float | None, profile: SearchProfile) -> str  # within_soft
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
 def infer_renovation_tier(prop: Property) -> str
+def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
 ```
 
 ## `hofradar.scoring`

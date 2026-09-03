@@ -12,10 +12,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from hofradar.config import SearchProfile
 from hofradar.db.enums import ListingStatus, PriceType, SourceRole, VerificationStatus
 from hofradar.db.models import Property, PropertySource, Source
 
 _PUBLIC_IDS = count(1)
+
+
+def make_profile(**budget_overrides: Any) -> SearchProfile:
+    """A default ``SearchProfile`` with the given ``BudgetConfig`` fields
+    overridden, e.g. ``make_profile(total_budget_hard_max=800_000)``."""
+    return SearchProfile.model_validate({"budget": budget_overrides})
 
 
 def make_source(

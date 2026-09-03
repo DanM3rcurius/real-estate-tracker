@@ -153,6 +153,26 @@ def _tier_from_age(year_built: int | None) -> RenovationTier:
     return RenovationTier.LIGHT
 
 
+#: What the renovation tier rests on. ``observed`` means the listing said
+#: something about the condition; ``inferred`` means we fell through to the age
+#: rule, which is a deliberately pessimistic default rather than a measurement.
+EVIDENCE_OBSERVED = "observed"
+EVIDENCE_INFERRED = "inferred"
+
+
+def renovation_evidence(prop: Property) -> str:
+    """Did anybody actually state this building's condition?
+
+    Kept separate from :func:`infer_renovation_tier` so the tier stays a single
+    value with one meaning. Callers that must not act on a guess ask this.
+    """
+    if _tier_from_condition(prop) is not RenovationTier.UNKNOWN:
+        return EVIDENCE_OBSERVED
+    if _tier_from_tags(property_tags(prop)) is not RenovationTier.UNKNOWN:
+        return EVIDENCE_OBSERVED
+    return EVIDENCE_INFERRED
+
+
 def infer_renovation_tier(prop: Property) -> RenovationTier:
     """Infer the renovation tier from condition, year of construction and tags.
 
