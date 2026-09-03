@@ -12,12 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 #: Bundled copies of the YAML files, installed with the package.
 PACKAGED_CONFIG_DIR = Path(__file__).parent / "_config_defaults"
@@ -326,7 +327,21 @@ class SourceConfig(BaseModel):
     rate_limit_seconds: float = 2.0
     respect_robots: bool = True
     notes: str | None = None
+    #: The day somebody actually read this source's robots.txt and terms, and
+    #: what they found. A source nobody has checked may be written and tested,
+    #: but it may not be switched on - see docs/DECISIONS.md entry 14.
+    terms_checked_at: date | None = None
+    terms_excerpt: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _enabled_requires_terms_check(self) -> SourceConfig:
+        if self.enabled and not (self.terms_checked_at and self.terms_excerpt):
+            raise ValueError(
+                f"source {self.key!r} is enabled but has no recorded terms check: "
+                "set terms_checked_at and terms_excerpt, or leave it disabled"
+            )
+        return self
 
 
 class AppConfig(BaseModel):

@@ -6,6 +6,10 @@ Other packages import ONLY through these. Nothing else is public.
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
 GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig).
+`SourceConfig` carries `terms_checked_at: date | None` and `terms_excerpt: str | None` —
+the record of somebody having actually read the source's robots.txt and terms.
+A model validator rejects `enabled=True` unless both are set; see
+`docs/DECISIONS.md` entry 14.
 ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
 
 ---
