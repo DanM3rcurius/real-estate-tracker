@@ -25,10 +25,14 @@ search:
     total_budget_max: 1200000
     total_budget_exceptional_max: null   # default 1.125x
     total_budget_hard_max: null          # default 1.25x
-    # Purchase bands derive from the total budget unless set explicitly.
-    purchase_target_max: 750000
-    purchase_negotiation_max: 850000
-    purchase_hard_max: 900000
+    # Purchase bands are DERIVED from total_budget_max so that dragging the
+    # money slider moves the whole model coherently. Leave these null unless
+    # you deliberately want to decouple them - pinning them here means the
+    # budget slider moves only the total-cost gates, not the price bands.
+    # With the defaults the derivation reproduces 750k / 850k / 900k exactly.
+    purchase_target_max: null
+    purchase_negotiation_max: null
+    purchase_hard_max: null
     purchase_share_of_total: 0.625
     # Bavarian side costs.
     grunderwerbsteuer_pct: 0.035

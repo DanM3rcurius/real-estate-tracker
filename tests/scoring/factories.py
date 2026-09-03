@@ -33,7 +33,8 @@ def make_source(
 
 
 def make_property(session: Session | None = None, **kwargs: Any) -> Property:
-    """A plausible mid-range farmstead; every field overridable."""
+    """A plausible farmstead that sits comfortably inside the default budget,
+    so that a test can isolate one signal without tripping a money gate."""
     defaults: dict[str, Any] = {
         "public_id": f"HR{next(_PUBLIC_IDS):05d}",
         "canonical_title": "Hofstelle mit Scheune und Stall",
@@ -43,10 +44,10 @@ def make_property(session: Session | None = None, **kwargs: Any) -> Property:
         "geo_precision": "exact",
         "distance_air_km": 25.0,
         "distance_driving_km": 32.0,
-        "price": 600_000.0,
+        "price": 380_000.0,
         "price_type": PriceType.ASKING,
         "land_sqm": 6_000.0,
-        "living_sqm": 200.0,
+        "living_sqm": 150.0,
         "year_built": 1890,
         "condition": None,
         "property_type": "Hofstelle",

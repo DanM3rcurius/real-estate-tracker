@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Karte – {{ app_title }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<script src="/static/vendor/leaflet/leaflet.js" defer></script>
+{% endblock %}
+{% block content %}
+<section class="page map-page">
+  <h1>Karte</h1>
+  <p class="hint">
+    Gefüllte Marker sind exakt verortet. Hohle Marker kennen nur Ort oder PLZ –
+    dort steht der Punkt im Ortszentrum, nicht auf dem Hof.
+  </p>
+
+  {% include "partials/notices.html" with context %}
+
+  <div id="map"
+       class="map"
+       data-center-lat="{{ center.lat }}"
+       data-center-lon="{{ center.lon }}"
+       data-center-name="{{ center.name }}"
+       data-radius-km="{{ radius_km }}"
+       data-points='{{ points | tojson }}'>
+    <noscript><p class="empty">Ohne JavaScript zeigt diese Seite die Liste unten.</p></noscript>
+  </div>
+  <p class="map__fallback" id="map-fallback" hidden>
+    Die Karte konnte nicht geladen werden (keine Kacheln erreichbar). Die Liste unten enthält dieselben Objekte.
+  </p>
+
+  <h2>{{ points | length | de_number }} Objekte auf der Karte</h2>
+  <ul class="list list--map">
+    {% for point in points %}
+    <li>
+      <a href="/property/{{ point.public_id }}">{{ point.title }}</a>
+      – {{ point.town or 'Ort unbekannt' }},
+      {{ point.price | de_eur }},
+      Luftlinie {{ point.distance_air_km | de_km }},
+      Fahrstrecke {{ point.distance_driving_km | de_driving_km }}
+      {% if not point.precise %}<span class="chip chip--unclear">Standort nur {{ point.geo_precision }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if without_coordinates %}
+  <h2>Ohne Koordinaten ({{ without_coordinates | length | de_number }})</h2>
+  <ul class="list">
+    {% for row in without_coordinates %}
+    <li><a href="/property/{{ row.prop.public_id }}">{{ row.prop.canonical_title }}</a>
+      – {{ row.prop.town or 'Ort unbekannt' }} <span class="chip chip--unclear">nicht geokodiert</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

@@ -7,8 +7,10 @@ facts into a second, independent set of ``Score`` rows. Nothing about the
 property is rewritten, no history is lost, and switching back to the old profile
 finds the old scores still there.
 
-``rescore_all`` is therefore on the hot path of the web UI and does exactly two
-queries for the whole database plus one flush - no per-property lazy loads.
+``rescore_all`` is therefore on the hot path of the web UI: it answers a slider
+move with three bulk queries for the whole database (properties with their
+sources eagerly loaded, cost estimates, scores) and one commit. There is no
+per-property lazy load and no N+1.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ REJECT_TOTAL_COST = "TOTAL_COST_OVER_HARD_MAX"
 REJECT_EXCEPTIONAL_WITHOUT_DEVELOPMENT = "EXCEPTIONAL_BUDGET_WITHOUT_DEVELOPMENT"
 REJECT_OBSERVATION_ONLY = "OBSERVATION_ONLY"
 REJECT_LISTING_GONE = "LISTING_REMOVED_OR_SOLD"
+REJECT_EXCLUDED_TYPE = "EXCLUDED_PROPERTY_TYPE"
 
 FLAG_DRIVING_UNVERIFIED = "DRIVING_UNVERIFIED"
 FLAG_SHORTLIST_BLOCKED = "SHORTLIST_BLOCKED"
@@ -58,6 +61,13 @@ UNROUTED_CONFIDENCE_CEILING = 65.0
 
 GONE_STATUSES: frozenset[str] = frozenset({ListingStatus.REMOVED, ListingStatus.SOLD})
 
+#: An exclusion term ("Reihenhaus", "Neubau", "Eigentumswohnung") is a hard
+#: reject, but only when nothing about the property contradicts it. A farm
+#: advertising a planned "Neubau" of a Stadel is still a farm, so a listing
+#: that carries real farmstead substance survives its exclusion terms and is
+#: merely flagged for a human to look at.
+FLAG_EXCLUSION_OVERRIDDEN = "EXCLUSION_OVERRIDDEN_BY_SUBSTANCE"
+
 #: ``filters`` keys accepted by :func:`ranked_properties`.
 SUPPORTED_FILTERS: frozenset[str] = frozenset(
     {"town", "min_land", "max_price", "status", "user_state", "flags"}
@@ -67,6 +77,24 @@ SUPPORTED_FILTERS: frozenset[str] = frozenset(
 # --------------------------------------------------------------------------- #
 # Scoring one property
 # --------------------------------------------------------------------------- #
+
+
+def _has_farmstead_substance(prop: Property) -> bool:
+    """Does anything about this property contradict its exclusion terms?
+
+    Outbuildings are the strongest evidence - a Reihenhaus does not come with a
+    Tenne. A recognised farmstead type name is the other.
+    """
+    if getattr(prop, "outbuildings", None):
+        return True
+    property_type = (getattr(prop, "property_type", None) or "").strip().lower()
+    return bool(property_type) and property_type not in _EXCLUDED_TYPE_SLUGS
+
+
+#: Types that are themselves an exclusion, so they cannot vouch for a property.
+_EXCLUDED_TYPE_SLUGS: frozenset[str] = frozenset(
+    {"eigentumswohnung", "doppelhaushaelfte", "reihenhaus", "neubau", "wohnung"}
+)
 
 
 def _apply_gates(
@@ -117,6 +145,12 @@ def _apply_gates(
 
     if getattr(prop, "listing_status", None) in GONE_STATUSES and gates.reject_removed:
         result.reject_reasons.append(REJECT_LISTING_GONE)
+
+    if getattr(prop, "exclusion_flags", None) and gates.reject_excluded:
+        if _has_farmstead_substance(prop):
+            result.flags.append(FLAG_EXCLUSION_OVERRIDDEN)
+        else:
+            result.reject_reasons.append(REJECT_EXCLUDED_TYPE)
 
     result.rejected = bool(result.reject_reasons)
     if result.confidence_score < gates.min_confidence_for_shortlist:
@@ -214,7 +248,9 @@ def _is_dirty(prop: Property, score: Score | None, cost_row: CostEstimate | None
     return scored_at < changed_at
 
 
-def _write_cost(session: Session, prop: Property, cost: CostResult, row: CostEstimate | None) -> None:
+def _write_cost(
+    session: Session, prop: Property, cost: CostResult, row: CostEstimate | None
+) -> None:
     values = {
         "purchase_price": cost.purchase_price,
         "acquisition_costs": cost.acquisition_costs,
@@ -277,12 +313,16 @@ def rescore_all(session: Session, profile: SearchProfile, *, only_dirty: bool = 
             select(Property).options(
                 selectinload(Property.property_sources).selectinload(PropertySource.source),
                 selectinload(Property.images),
-                selectinload(Property.cost_estimate),
             )
         )
         .unique()
         .all()
     )
+    # Cached rows are fetched as their own queries rather than through the
+    # relationships: a Property already in the identity map keeps whatever its
+    # relationship held when it was first loaded, which would make a second
+    # call in the same session believe it still has no CostEstimate.
+    costs = {row.property_id: row for row in session.scalars(select(CostEstimate))}
     scores = {
         row.property_id: row
         for row in session.scalars(select(Score).where(Score.profile_hash == profile_hash))
@@ -290,13 +330,14 @@ def rescore_all(session: Session, profile: SearchProfile, *, only_dirty: bool = 
 
     written = 0
     for prop in properties:
-        cost_row = prop.cost_estimate
+        cost_row = costs.get(prop.id)
         score_row = scores.get(prop.id)
         if only_dirty and not _is_dirty(prop, score_row, cost_row):
             continue
         cost = estimate_costs(prop, profile)
+        result = score_property(prop, profile, cost=cost)
         _write_cost(session, prop, cost, cost_row)
-        _write_score(session, prop, profile_hash, score_property(prop, profile, cost=cost), score_row)
+        _write_score(session, prop, profile_hash, result, score_row)
         written += 1
 
     session.commit()

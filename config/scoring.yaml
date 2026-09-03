@@ -13,6 +13,7 @@ scoring:
     renovation_to_price_risk_ratio: 1.5
     exceptional_development_min: 8
     reject_removed: true
+    reject_excluded: true
     reject_unrouted: false
     shortlist_size: 10
     llm_review_size: 100

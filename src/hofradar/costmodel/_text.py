@@ -8,9 +8,12 @@ term". Twelve duplicated lines are cheaper than a cross-package dependency.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 #: German folding. Applied after casefolding, so only lowercase forms are needed.
+#: Underscores are deliberately NOT folded away - enum values such as
+#: ``PriceType.ON_REQUEST`` ("on_request") are folded before comparison.
 _UMLAUT_MAP = str.maketrans(
     {
         "ä": "ae",
@@ -19,7 +22,6 @@ _UMLAUT_MAP = str.maketrans(
         "ß": "ss",
         "-": " ",
         "/": " ",
-        "_": " ",
     }
 )
 

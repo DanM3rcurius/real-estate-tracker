@@ -197,8 +197,8 @@ def deal_score(
         flags.append(EXCEPTIONAL_BUDGET_FLAG)
     if sanierungsrisiko:
         flags.append(SANIERUNGSRISIKO_FLAG)
-        #: A renovation that dwarfs the purchase is a capital risk in its own
-        #: right, whatever the headline total happens to be.
+        # A renovation that dwarfs the purchase is a capital risk in its own
+        # right, whatever the headline total happens to be.
         if risk in (CapitalRisk.LOW, CapitalRisk.MODERATE):
             risk = CapitalRisk.HIGH
 

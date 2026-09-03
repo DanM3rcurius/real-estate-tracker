@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Report – {{ app_title }}{% endblock %}
+{% block content %}
+<section class="page report-page">
+  <h1>Wochenreport</h1>
+  {% include "partials/notices.html" with context %}
+
+  {% if just_generated %}
+  <p class="notice notice--ok" role="status">Report erzeugt und gespeichert.</p>
+  {% endif %}
+  {% if is_preview %}
+  <p class="notice notice--warn">
+    <span aria-hidden="true">⚠️</span> Vorschau – noch kein Report gespeichert.
+  </p>
+  {% endif %}
+
+  <form method="post" action="/report">
+    <button class="btn" type="submit">Report für Profil {{ profile.profile_hash }} erzeugen</button>
+  </form>
+
+  {% if markdown %}
+  <p>
+    <button class="btn btn--ghost" type="button" id="copy-markdown" data-target="report-markdown">
+      📋 Markdown kopieren
+    </button>
+    <span id="copy-feedback" role="status"></span>
+  </p>
+  {% endif %}
+
+  {% if report_html %}
+  <div class="report-body">{{ report_html | safe }}</div>
+  {% elif not degraded %}
+  <p class="empty">Noch kein Report vorhanden.</p>
+  {% endif %}
+
+  {% if markdown %}
+  <details class="report-markdown">
+    <summary>Markdown ansehen</summary>
+    <textarea id="report-markdown" readonly rows="20">{{ markdown }}</textarea>
+  </details>
+  {% endif %}
+
+  {% if records %}
+  <h2>Archiv</h2>
+  <ul class="list">
+    {% for item in records %}
+    <li>
+      <a href="/report/{{ item.id }}">{{ item.week_label }}</a>
+      <small>{{ item.generated_at | de_datetime }} · Profil <code>{{ item.profile_hash }}</code></small>
+      {% if record and item.id == record.id %}<span class="chip">angezeigt</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

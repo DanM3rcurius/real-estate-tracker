@@ -505,7 +505,13 @@ def _decide_change(
     verdict_reasons: list[str],
 ) -> ChangeResult:
     """Pick the single kind that describes this run's news about the property."""
-    reactivated = before.known and before.status in _rules.DORMANT_STATUSES
+    # Dormant *and* no longer dormant. A property that is still gone this run
+    # has not been reactivated, however many times we re-check it.
+    reactivated = (
+        before.known
+        and before.status in _rules.DORMANT_STATUSES
+        and new_status not in _rules.DORMANT_STATUSES
+    )
 
     if is_new:
         # Record why the new row was *not* merged into a look-alike, so a human

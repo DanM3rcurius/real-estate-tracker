@@ -112,6 +112,7 @@ def cmd_rescore(args: argparse.Namespace) -> int:
 
 def cmd_import(args: argparse.Namespace) -> int:
     from hofradar.config import SourceConfig
+    from hofradar.geo import locate
     from hofradar.lifecycle import ingest
     from hofradar.normalize import normalize_listing
     from hofradar.sources import get_adapter, sync_sources_to_db
@@ -135,7 +136,11 @@ def cmd_import(args: argparse.Namespace) -> int:
             )
             async for raw in adapter.discover(cfg.profile, cfg.keywords):
                 listing = normalize_listing(raw, cfg.keywords)
-                ingest(session, listing, source=source, geo=None)
+                # Route imported rows too - an unrouted property is capped
+                # below the shortlist threshold by design, so skipping this
+                # would quietly bury everything a CSV brings in.
+                geo = await locate(session, listing, cfg.profile)
+                ingest(session, listing, source=source, geo=geo)
                 count += 1
         return count
 

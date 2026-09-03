@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% import "partials/macros.html" as ui %}
+{% block title %}{{ prop.canonical_title }} – {{ app_title }}{% endblock %}
+{% block content %}
+<article class="page dossier">
+
+  <header class="dossier__head">
+    <p class="crumb"><a href="/">← Radar</a></p>
+    <h1>{{ prop.canonical_title }}</h1>
+    <p class="dossier__place">
+      {{ prop.town or 'Ort unbekannt' }}{% if prop.postcode %} ({{ prop.postcode }}){% endif %}
+      {% if prop.district %} · {{ prop.district }}{% endif %}
+      · <code>{{ prop.public_id }}</code>
+      {{ ui.status_chip(prop) }}
+    </p>
+    {{ ui.chips(chips) }}
+    <p class="dossier__sentence">{{ timeline_sentence }}</p>
+    {% if best_url %}
+    <p><a class="btn" href="{{ best_url }}" rel="noopener noreferrer nofollow" target="_blank">Inserat öffnen</a></p>
+    {% endif %}
+  </header>
+
+  <section class="dossier__section">
+    <h2>Fakten und Belege</h2>
+    <p class="hint">Jede Zeile zeigt, woher der Wert stammt. Ohne Beleg ist der Wert eine Behauptung.</p>
+    <div class="tablewrap">
+      <table class="table table--facts">
+        <thead>
+          <tr><th scope="col">Feld</th><th scope="col">Wert</th><th scope="col">Beleg</th></tr>
+        </thead>
+        <tbody>
+          {% for fact in facts %}
+          <tr{% if not fact.evidence %} class="row--unsourced"{% endif %}>
+            <th scope="row">{{ fact.label }}</th>
+            <td>{{ fact.value }}</td>
+            <td>
+              {% if fact.evidence %}
+                <span class="evidence__source">{{ fact.evidence.get('source') or 'unbenannte Quelle' }}</span>
+                {% if fact.evidence.get('confidence') is not none %}
+                <span class="evidence__conf">Konfidenz {{ (fact.evidence.get('confidence') * 100) | de_score }}</span>
+                {% endif %}
+                {% if fact.evidence.get('quote') %}
+                <blockquote class="evidence__quote">„{{ fact.evidence.get('quote') }}“</blockquote>
+                {% endif %}
+                {% if fact.evidence.get('url') %}
+                <a href="{{ fact.evidence.get('url') }}" rel="noopener noreferrer nofollow" target="_blank">Quelle</a>
+                {% endif %}
+                {% if fact.evidence.get('observed_at') %}
+                <small>{{ fact.evidence.get('observed_at') | de_date }}</small>
+                {% endif %}
+              {% else %}
+                <span class="evidence__missing">⚠️ ohne Beleg</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="dossier__section">
+    <h2>Bewertung</h2>
+    {% if not score_is_current %}
+    <p class="notice notice--warn">
+      <span aria-hidden="true">⚠️</span>
+      Für das aktive Profil <code>{{ profile.profile_hash }}</code> liegt noch keine Bewertung vor
+      {% if score %}– gezeigt wird der Stand aus Profil <code>{{ score.profile_hash }}</code>{% endif %}.
+    </p>
+    {% endif %}
+    {{ ui.score_badges(score) }}
+    {% if score %}
+    <p>
+      Kapitalrisiko: <b>{{ score.capital_risk or 'unbekannt' }}</b>
+      {% if score.flags %}· Merkmale: {{ score.flags | join(', ') }}{% endif %}
+    </p>
+    {% if score.rejected %}
+    <div class="card__rejected">
+      <b>Abgelehnt:</b>
+      <ul>{% for reason in score.reject_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% endif %}
+    {% if breakdown_rows %}
+    <div class="tablewrap">
+      <table class="table">
+        <thead><tr><th scope="col">Position</th><th scope="col">Punkte</th></tr></thead>
+        <tbody>
+          {% for row in breakdown_rows %}
+          <tr><th scope="row">{{ row.path }}</th><td>{{ row.value }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">Keine Punkteaufschlüsselung vorhanden.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Kostenmodell</h2>
+    {% if cost %}
+    <p class="dossier__band">{{ ui.cost_band(cost) }}</p>
+    <div class="tablewrap">
+      <table class="table">
+        <thead><tr><th scope="col">Position</th><th scope="col">Betrag</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Kaufpreis</th><td>{{ cost.purchase_price | de_eur }}</td></tr>
+          <tr><th scope="row">Erwerbsnebenkosten</th><td>{{ cost.acquisition_costs | de_eur }}</td></tr>
+          <tr><th scope="row">Sanierung (niedrig / mittel / hoch)</th>
+              <td>{{ cost.renovation_low | de_eur }} / {{ cost.renovation_mid | de_eur }} / {{ cost.renovation_high | de_eur }}</td></tr>
+          <tr><th scope="row">Sofortmaßnahmen</th><td>{{ cost.immediate_capex | de_eur }}</td></tr>
+          {% for row in cost_rows %}
+          <tr><th scope="row">{{ row.path }}</th><td>{{ row.value }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <h3>Annahmen</h3>
+    {% if cost.assumptions %}
+    <ul class="list">{% for item in cost.assumptions %}<li>{{ item }}</li>{% endfor %}</ul>
+    {% else %}
+    <p class="empty">Keine Annahmen hinterlegt.</p>
+    {% endif %}
+    {% else %}
+    <p class="empty">Für dieses Objekt wurde noch kein Kostenmodell gerechnet.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Preisverlauf</h2>
+    {% if sparkline.has_data %}
+    <svg class="sparkline sparkline--{{ sparkline.trend }}" viewBox="0 0 {{ sparkline.width }} {{ sparkline.height }}"
+         width="100%" height="{{ sparkline.height }}" role="img"
+         aria-label="Preisverlauf von {{ sparkline.first | de_eur }} auf {{ sparkline.last | de_eur }}">
+      <polyline points="{{ sparkline.points }}" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linejoin="round" stroke-linecap="round"></polyline>
+      {% for x, y in sparkline.dots %}
+      <circle cx="{{ x }}" cy="{{ y }}" r="2.5" fill="currentColor"></circle>
+      {% endfor %}
+    </svg>
+    <p><small>{{ sparkline.first | de_eur }} → {{ sparkline.last | de_eur }}
+      (Spanne {{ sparkline.low | de_eur }} – {{ sparkline.high | de_eur }})</small></p>
+    {% else %}
+    <p class="empty">Nur ein bekannter Preisstand – noch keine Kurve.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Verlauf</h2>
+    {% if timeline %}
+    <ol class="timeline">
+      {% for event in timeline %}
+      <li class="timeline__item timeline__item--{{ event.kind }}">
+        <span class="timeline__icon" aria-hidden="true">{{ event.icon }}</span>
+        <span class="timeline__when">{{ event.at | de_date }}</span>
+        <span class="timeline__what"><b>{{ event.title }}</b> {{ event.text }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">Noch keine Historie erfasst.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Quellen</h2>
+    {% if sources %}
+    <ul class="list list--sources">
+      {% for src in sources %}
+      <li>
+        <span class="chip chip--role chip--role-{{ src.role }}">{{ src.role }}</span>
+        {% if src.is_primary_source %}<span class="chip chip--primary">Primärquelle</span>{% endif %}
+        {% if src.is_best %}<span class="chip">beste Quelle</span>{% endif %}
+        <a href="{{ src.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ src.url }}</a>
+        <small>erstmals {{ src.first_seen | de_date }}, zuletzt {{ src.last_seen | de_date }}</small>
+        {% if src.contact_name %}<small>Kontakt: {{ src.contact_name }} ({{ src.contact_kind or 'unbekannt' }})</small>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Keine Quelle verknüpft.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Dokumente</h2>
+    {% if documents %}
+    <ul class="list">
+      {% for doc in documents %}
+      <li>
+        <b>{{ doc.title or doc.kind }}</b>
+        {% if doc.issue %}, {{ doc.issue }}{% endif %}
+        {% if doc.page_number %}, Seite {{ doc.page_number }}{% endif %}
+        {% if doc.document_date %} <small>({{ doc.document_date | de_date }})</small>{% endif %}
+        {% if doc.matched_text %}<blockquote class="evidence__quote">„{{ doc.matched_text }}“</blockquote>{% endif %}
+        <a href="{{ doc.document_url }}" rel="noopener noreferrer nofollow" target="_blank">Dokument</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Keine Dokumente hinterlegt.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Bilder</h2>
+    {% if images %}
+    <div class="gallery">
+      {% for image in images %}
+      <figure>
+        <img src="{{ image.url }}" alt="Bild zu {{ prop.canonical_title }}" loading="lazy">
+        {% if image.visual_features %}<figcaption>{{ image.visual_features }}</figcaption>{% endif %}
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">Keine Bilder erfasst.</p>
+    {% endif %}
+  </section>
+
+  <section class="dossier__section">
+    <h2>Triage</h2>
+    {% include "partials/triage.html" %}
+  </section>
+
+</article>
+{% endblock %}

@@ -145,8 +145,27 @@ async def add_submit(
             keywords = KeywordConfig()
 
         listing = lazy.call("hofradar.normalize:normalize_listing", raw, keywords)
+
+        # Geocode and route before ingesting. Without this the property has no
+        # road distance, the scorer caps its confidence below the shortlist
+        # threshold, and a hand-pasted listing could never reach the top ten -
+        # which would defeat the point of the paste box.
+        geo = None
+        try:
+            locate = lazy.load("hofradar.geo:locate")
+            geo = await locate(session, listing, profile)
+        except lazy.ModuleUnavailable as exc:
+            degraded.append(lazy.Degraded(exc.user_message))
+        except Exception as exc:  # noqa: BLE001 - a geocoder outage is not our bug
+            degraded.append(
+                lazy.Degraded(
+                    "Standort konnte nicht bestimmt werden - das Objekt wird ohne "
+                    f"Entfernung gespeichert. ({type(exc).__name__})"
+                )
+            )
+
         prop, change = lazy.call(
-            "hofradar.lifecycle:ingest", session, listing, source=source
+            "hofradar.lifecycle:ingest", session, listing, source=source, geo=geo
         )
         session.commit()
         result = {

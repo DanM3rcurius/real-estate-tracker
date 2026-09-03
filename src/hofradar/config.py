@@ -175,6 +175,9 @@ class GateConfig(BaseModel):
     exceptional_development_min: float = 8
     #: A listing proven gone is never shortlisted.
     reject_removed: bool = True
+    #: A listing matching the profile's `exclude` vocabulary is rejected unless
+    #: it carries genuine farmstead substance that contradicts the match.
+    reject_excluded: bool = True
     #: A property with no road route measured yet is held back, not silently passed.
     reject_unrouted: bool = False
     shortlist_size: int = 10

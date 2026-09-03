@@ -1,0 +1,24 @@
+{# Human judgement. Posted with HTMX; survives every re-run and profile change. #}
+<form class="triage" id="triage"
+      hx-post="/property/{{ prop.public_id }}/triage"
+      hx-target="#triage"
+      hx-swap="outerHTML">
+  <fieldset>
+    <legend>Einschätzung</legend>
+    <div class="triage__states">
+      {% for value, label in user_states.items() %}
+      <label class="switch">
+        <input type="radio" name="user_state" value="{{ value }}"
+               {% if (prop.user_state or 'none') == value %}checked{% endif %}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <label class="field">
+      <span>Notiz</span>
+      <textarea name="user_note" rows="3" placeholder="Was ist hier zu tun?">{{ prop.user_note or '' }}</textarea>
+    </label>
+    <button class="btn" type="submit">Speichern</button>
+    {% if saved %}<span class="notice notice--ok" role="status">Gespeichert: {{ prop.user_state or 'kein Status' }}</span>{% endif %}
+  </fieldset>
+</form>

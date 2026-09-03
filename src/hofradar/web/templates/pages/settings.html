@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen – {{ app_title }}{% endblock %}
+{% block content %}
+<section class="page settings-page">
+  <h1>Suchprofile</h1>
+  <p class="hint">
+    Der Profil-Hash ist der Schlüssel des Bewertungs-Caches. Ändert er sich,
+    stellt das System die Frage neu – die Fakten und die Historie bleiben unberührt.
+  </p>
+
+  {% if message %}
+  <p class="notice {% if saved %}notice--ok{% else %}notice--warn{% endif %}" role="status">{{ message }}</p>
+  {% endif %}
+
+  <p class="statusline"><span class="statusline__hash">Aktives Profil: {{ profile.name }} · {{ profile.profile_hash }}</span></p>
+
+  <form method="post" action="/settings" class="settings-form">
+    <input type="hidden" name="base" value="{{ profile.name }}">
+
+    <label class="field">
+      <span>Profilname</span>
+      <input type="text" name="name" value="{{ profile.name }}" required>
+    </label>
+
+    {% for key, title, fields in form_sections %}
+    <fieldset class="settings-group">
+      <legend>{{ title }}</legend>
+      <div class="grid">
+        {% for path, label, kind, step in fields %}
+        <label class="field">
+          <span>{{ label }}</span>
+          {% if kind == 'number' %}
+          <input type="number" step="{{ step }}" name="{{ path }}"
+                 value="{{ get_path(path) if get_path(path) is not none else '' }}">
+          {% else %}
+          <input type="text" name="{{ path }}" value="{{ get_path(path) if get_path(path) is not none else '' }}">
+          {% endif %}
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% endfor %}
+
+    <fieldset class="settings-group">
+      <legend>Schalter</legend>
+      {% for path, label in boolean_fields %}
+      <label class="switch">
+        <input type="checkbox" name="{{ path }}" value="1"{% if get_path(path) %} checked{% endif %}>
+        <span>{{ label }}</span>
+      </label>
+      {% endfor %}
+    </fieldset>
+
+    <fieldset class="settings-group">
+      <legend>Listen</legend>
+      <div class="grid">
+        {% for path, label in list_fields %}
+        <label class="field">
+          <span>{{ label }}</span>
+          <textarea name="{{ path }}" rows="8">{{ (get_path(path) or []) | join('\n') }}</textarea>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <label class="switch">
+      <input type="checkbox" name="is_default" value="1">
+      <span>als Standardprofil setzen</span>
+    </label>
+
+    <button class="btn" type="submit">Profil speichern</button>
+  </form>
+
+  <h2>Gespeicherte Profile</h2>
+  {% if not records %}
+  <p class="empty">Noch kein Profil gespeichert. Das Formular oben startet mit den Werten aus <code>config/search.yaml</code>.</p>
+  {% else %}
+  <div class="tablewrap">
+    <table class="table">
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">Hash</th><th scope="col">Standard</th><th scope="col">Aktionen</th></tr>
+      </thead>
+      <tbody>
+        {% for item in records %}
+        <tr>
+          <th scope="row"><a href="/settings?edit={{ item.name }}">{{ item.name }}</a></th>
+          <td><code>{{ item.profile_hash }}</code></td>
+          <td>{% if item.is_default %}✅{% else %}–{% endif %}</td>
+          <td class="rowactions">
+            <form method="post" action="/settings/{{ item.id }}/default"><button class="btn btn--small btn--ghost">Standard</button></form>
+            <form method="post" action="/settings/{{ item.id }}/duplicate"><button class="btn btn--small btn--ghost">Duplizieren</button></form>
+            <form method="post" action="/settings/{{ item.id }}/delete"><button class="btn btn--small btn--danger">Löschen</button></form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

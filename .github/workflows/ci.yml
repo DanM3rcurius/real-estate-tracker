@@ -8,10 +8,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      # Tests must never touch the network; the geo layer resolves from the
-      # bundled gazetteer instead.
-      HOFRADAR_OFFLINE: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +24,18 @@ jobs:
       - name: Lint
         run: ruff check src tests
 
+      # The suite mocks every outbound call with respx and asserts on the
+      # request that would have been made, so it must NOT run with
+      # HOFRADAR_OFFLINE set - that short-circuits the very code paths under
+      # test. Tests that want the gazetteer set the variable themselves.
       - name: Test
         run: pytest -q
 
       - name: Smoke - boot the app
+        env:
+          HOFRADAR_OFFLINE: "1"
         run: |
           hofradar init-db
           hofradar config
+          hofradar run --dry-run
           python -c "from hofradar.web.app import app; print('web app imports OK')"

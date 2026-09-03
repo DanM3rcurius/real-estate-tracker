@@ -140,3 +140,18 @@ def test_properties_still_seen_this_run_are_untouched(db_session, make_source, m
 
     assert mark_missing(db_session, {prop.id}, source=source, run_id=2) == []
     assert prop.listing_status == ListingStatus.ACTIVE
+
+
+def test_a_still_missing_property_is_not_reported_as_reactivated(
+    db_session, make_source, make_listing
+):
+    """Re-checking a removed listing week after week must stay quiet."""
+    source = make_source("bauernhoefe", role=SourceRole.PRIMARY)
+    gone = make_listing(price=790_000, listing_visible=False, http_status=410, **_facts(source))
+
+    ingest(db_session, make_listing(price=790_000, **_facts(source)), source=source, run_id=1)
+    _, removed = ingest(db_session, gone, source=source, run_id=2)
+    _, again = ingest(db_session, gone, source=source, run_id=3)
+
+    assert removed.kind == ChangeKind.REMOVED
+    assert again.kind == ChangeKind.UNCHANGED

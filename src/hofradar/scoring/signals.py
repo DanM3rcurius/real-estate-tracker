@@ -70,8 +70,10 @@ STALE_FLAG = "STALE_LISTING"
 
 #: At least this many price cuts to count as "the seller is moving".
 PRICE_REDUCTIONS_MIN = 2
-#: A listing with fewer images than this, or a shorter description, was written
-#: by somebody who is not trying to reach the whole market.
+#: A listing with no more images than this *and* a shorter description than
+#: this was written by somebody who is not trying to reach the whole market.
+#: Both conditions are required: we do not always download images, so a thin
+#: image list on its own is our gap, not the seller's.
 POOR_PRESENTATION_MAX_IMAGES = 2
 POOR_PRESENTATION_MAX_DESCRIPTION = 400
 #: A local source below this reliability is a village paper, not a portal.
@@ -195,8 +197,8 @@ def hidden_score(
         signals["long_online"] = LONG_ONLINE_POINTS
     is_stale = online_days is not None and online_days >= STALE_ONLINE_DAYS
     if is_stale:
-        #: Deliberately recorded as a separate, negative line item rather than
-        #: netted off silently: the UI has to be able to say both things.
+        # Deliberately recorded as a separate, negative line item rather than
+        # netted off silently: the UI has to be able to say both things.
         signals["stale_penalty"] = STALE_PENALTY
         flags.append(STALE_FLAG)
 
@@ -207,7 +209,7 @@ def hidden_score(
     description = getattr(prop, "description", None) or ""
     if (
         len(images) <= POOR_PRESENTATION_MAX_IMAGES
-        or len(description) < POOR_PRESENTATION_MAX_DESCRIPTION
+        and len(description) < POOR_PRESENTATION_MAX_DESCRIPTION
     ):
         signals["poor_presentation"] = POOR_PRESENTATION_POINTS
 
@@ -306,12 +308,25 @@ def freshness_score(prop: Property, now: datetime | None = None) -> tuple[float,
 
 
 def _availability_points(prop: Property, now: datetime) -> float:
+    """Was this listing proved to be live, and how long ago?
+
+    Unlike :func:`freshness_score`, this accepts the property-level
+    ``verification_status`` as evidence in its own right - the lifecycle module
+    only sets VERIFIED after fetching a primary source, and a property may carry
+    that fact before its ``PropertySource`` rows have been rebuilt. What is not
+    accepted, here as everywhere, is a discovery source: without either the
+    verified flag or a verifying source, nothing has been proved.
+    """
     if getattr(prop, "listing_status", None) in GONE_STATUSES:
         return 0.0
-    if not verifying_sources(prop):
-        return AVAILABILITY_NEVER_POINTS
     days = days_since(getattr(prop, "last_verified", None), now)
     if days is None:
+        return AVAILABILITY_NEVER_POINTS
+    verified = fold(getattr(prop, "verification_status", None)) in (
+        VerificationStatus.VERIFIED,
+        VerificationStatus.CONFLICTING,
+    )
+    if not verified and not verifying_sources(prop):
         return AVAILABILITY_NEVER_POINTS
     return band(days, AVAILABILITY_BANDS, AVAILABILITY_STALE_POINTS)
 

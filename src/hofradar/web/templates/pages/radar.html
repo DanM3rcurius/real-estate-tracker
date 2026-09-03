@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Radar – {{ app_title }}{% endblock %}
+{% block content %}
+<div class="radar">
+  <div class="radar__panel">
+    {% include "partials/controls.html" %}
+    <div class="thinking" id="thinking" aria-live="polite">
+      <span class="thinking__dot"></span> Das System denkt neu nach …
+    </div>
+  </div>
+
+  <section class="radar__results" id="results" aria-live="polite">
+    {% include "partials/results.html" %}
+  </section>
+</div>
+{% endblock %}

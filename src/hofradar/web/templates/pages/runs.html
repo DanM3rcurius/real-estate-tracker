@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Läufe – {{ app_title }}{% endblock %}
+{% block content %}
+<section class="page runs-page">
+  <h1>Suchläufe</h1>
+
+  <div id="run-status">{% include "partials/run_status.html" %}</div>
+
+  {% if not pipeline_available %}
+  <p class="notice notice--warn">
+    <span aria-hidden="true">⚠️</span>
+    Das Pipeline-Modul ist noch nicht verfügbar. Der Knopf meldet das, statt einen Fehler zu werfen.
+  </p>
+  {% endif %}
+
+  <p>
+    <button class="btn" hx-post="/api/run?air_km_max={{ profile.radius.air_km_max }}&total_budget_max={{ profile.budget.total_budget_max }}"
+            hx-target="#run-status" hx-swap="innerHTML">▶ Jetzt suchen</button>
+  </p>
+
+  {% if not runs %}
+  <p class="empty">Noch kein Lauf aufgezeichnet.</p>
+  {% else %}
+  {% for run in runs %}
+  <article class="run">
+    <header class="run__head">
+      <b>Lauf {{ run.id }}</b>
+      <span class="chip chip--status">{{ run.status }}</span>
+      <span class="chip">{{ run.trigger }}</span>
+      {% if run.stage %}<span class="chip">Stufe: {{ run.stage }}</span>{% endif %}
+      <small>{{ run.started_at | de_datetime }}{% if run.finished_at %} → {{ run.finished_at | de_datetime }}{% endif %}</small>
+    </header>
+    <div class="tablewrap">
+      <table class="table table--compact">
+        <tbody>
+          <tr><th scope="row">Quellen</th><td>{{ run.sources_run | de_number }}</td>
+              <th scope="row">Inserate gesehen</th><td>{{ run.listings_seen | de_number }}</td></tr>
+          <tr><th scope="row">Neu</th><td>{{ run.properties_new | de_number }}</td>
+              <th scope="row">Aktualisiert</th><td>{{ run.properties_updated | de_number }}</td></tr>
+          <tr><th scope="row">Preisänderungen</th><td>{{ run.price_changes | de_number }}</td>
+              <th scope="row">Entfernt</th><td>{{ run.removed | de_number }}</td></tr>
+          <tr><th scope="row">Duplikate zusammengeführt</th><td>{{ run.duplicates_merged | de_number }}</td>
+              <th scope="row">Profil</th><td><code>{{ run.profile_hash or '–' }}</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% if run.error %}<p class="notice notice--warn">{{ run.error }}</p>{% endif %}
+    {% if run.log %}
+    <details>
+      <summary>Protokoll ({{ run.log | length }} Einträge)</summary>
+      <ol class="log">{% for entry in run.log %}<li>{{ entry }}</li>{% endfor %}</ol>
+    </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -15,8 +15,8 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from hofradar.db import models  # noqa: F401  (imported to register the mappers)
 from hofradar.db.session import Base
-from hofradar.db import models  # noqa: F401  (registers the mappers)
 
 
 @pytest.fixture()

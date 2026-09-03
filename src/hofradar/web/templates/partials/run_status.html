@@ -1,0 +1,6 @@
+{% include "partials/notices.html" with context %}
+{% if started %}
+<p class="notice notice--ok" role="status">
+  Suchlauf gestartet. Die Seite <a href="/runs">Läufe</a> zeigt den Fortschritt nach dem Neuladen.
+</p>
+{% endif %}

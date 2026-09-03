@@ -21,6 +21,8 @@ if TYPE_CHECKING:  # pragma: no cover
 #: 400_000 / 750_000 must land *inside* the band it defines.
 BAND_EPSILON = 1e-9
 
+#: Underscores are deliberately NOT folded away - enum values such as
+#: ``PriceType.ON_REQUEST`` ("on_request") are folded before comparison.
 _UMLAUT_MAP = str.maketrans(
     {
         "ä": "ae",
@@ -29,7 +31,6 @@ _UMLAUT_MAP = str.maketrans(
         "ß": "ss",
         "-": " ",
         "/": " ",
-        "_": " ",
         "\n": " ",
     }
 )

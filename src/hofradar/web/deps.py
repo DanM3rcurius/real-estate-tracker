@@ -222,11 +222,10 @@ def profile_from_query(
         budget.pop(key, None)
     data["budget"] = budget
 
-    land = dict(data.get("land") or {})
-    min_land = to_float(get("min_land_sqm"), None)
-    if min_land is not None:
-        land["preferred_min_sqm"] = clamp(min_land, LAND_MIN, LAND_MAX)
-    data["land"] = land
+    # ``min_land_sqm`` is deliberately NOT folded into the profile: it is a
+    # display filter, and letting it move the profile hash would make the hash
+    # jump between a plain page load and the first HTMX request (which always
+    # submits the field, even at zero).
 
     try:
         return SearchProfile(**data)

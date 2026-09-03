@@ -1,0 +1,33 @@
+{# The HTMX swap target. Identical markup on a full page load and after a slider move. #}
+{% with degraded = results.degraded %}
+  {% include "partials/notices.html" %}
+{% endwith %}
+
+<p class="statusline" id="statusline">
+  <span class="statusline__hash" title="Hash des aktiven Suchprofils">Profil {{ results.profile_hash }}</span>
+  <span>·</span>
+  <span>{% if results.rescored is none %}Bewertung nicht verfügbar{% else %}{{ results.rescored | de_number }} Objekte neu bewertet{% endif %}</span>
+  <span>·</span>
+  <span>{{ results.total_matched | de_number }} von {{ results.total_in_db | de_number }} im Filter</span>
+  {% if results.hidden_rejected %}
+  <span>·</span>
+  <span>{{ results.hidden_rejected | de_number }} abgelehnte ausgeblendet</span>
+  {% endif %}
+</p>
+
+{% if not results.rows %}
+<p class="empty">
+  {% if results.total_in_db == 0 %}
+    Noch keine Objekte in der Datenbank. Über <a href="/add">Hinzufügen</a> ein Inserat einfügen
+    oder unter <a href="/runs">Läufe</a> eine Suche starten.
+  {% else %}
+    Kein Objekt passt zu diesen Reglern. Entfernung oder Gesamtbudget erhöhen.
+  {% endif %}
+</p>
+{% endif %}
+
+<div class="cards">
+  {% for row in results.rows %}
+    {% include "partials/result_card.html" %}
+  {% endfor %}
+</div>

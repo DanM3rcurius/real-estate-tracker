@@ -100,7 +100,7 @@ def render_markdown(data: ReportData) -> str:
         add(f"| {label} | {de_number(getattr(data.counts, attribute))} |")
     add("")
 
-    add(f"## Shortlist (max. {max(len(data.entries), 0)} von {data.counts.tracked_total})")
+    add(f"## Shortlist ({len(data.entries)} von {data.counts.tracked_total} erfassten Objekten)")
     add("")
     if not data.entries:
         add("_Diese Woche nichts, das einen Anruf rechtfertigt._")

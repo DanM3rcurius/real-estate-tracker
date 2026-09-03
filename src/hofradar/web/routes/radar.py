@@ -40,6 +40,7 @@ def result_context(request: Request, results: ResultSet) -> dict[str, Any]:
         "profile": results.profile,
         "filters": results.filters,
         "rows": results.rows,
+        "degraded": results.degraded,
         "query_string": results.filters.query_string(results.profile),
     }
 

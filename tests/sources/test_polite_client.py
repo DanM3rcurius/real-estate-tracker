@@ -78,9 +78,11 @@ async def test_429_with_retry_after_is_honoured(monkeypatch):
 @pytest.mark.asyncio
 async def test_5xx_is_retried_with_backoff(monkeypatch):
     sleeps: list[float] = []
-    monkeypatch.setattr(
-        "hofradar.sources.base.asyncio.sleep", lambda d: sleeps.append(d) or _noop()
-    )
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("hofradar.sources.base.asyncio.sleep", fake_sleep)
 
     with respx.mock:
         route = respx.get("https://example.test/flaky").mock(
@@ -95,10 +97,6 @@ async def test_5xx_is_retried_with_backoff(monkeypatch):
     assert response.status_code == 200
     assert route.call_count == 2
     assert len(sleeps) == 1
-
-
-async def _noop() -> None:
-    return None
 
 
 @pytest.mark.asyncio

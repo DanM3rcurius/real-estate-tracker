@@ -1,0 +1,62 @@
+{% import "partials/macros.html" as ui %}
+<article class="card{% if row.score and row.score.rejected %} card--rejected{% endif %}">
+  <header class="card__head">
+    <span class="card__rank">{{ row.rank }}</span>
+    <h3 class="card__title">
+      <a href="/property/{{ row.prop.public_id }}">{{ row.prop.canonical_title }}</a>
+    </h3>
+    {{ ui.status_chip(row.prop) }}
+  </header>
+
+  <p class="card__place">
+    {{ row.prop.town or 'Ort unbekannt' }}{% if row.prop.postcode %} ({{ row.prop.postcode }}){% endif %}
+    {% if row.prop.property_type %}· {{ row.prop.property_type }}{% endif %}
+  </p>
+
+  {{ ui.chips(row.chips) }}
+
+  <div class="card__facts">
+    <span class="facts__pair">
+      <span class="facts__label">Preis</span>
+      <span class="facts__value">{{ row.prop.price | de_eur }}<small> {{ row.prop.price_type }}</small></span>
+    </span>
+    {{ ui.distances(row.prop) }}
+    <span class="facts__pair">
+      <span class="facts__label">Grund</span>
+      <span class="facts__value">{{ row.prop.land_sqm | de_sqm }}</span>
+    </span>
+    <span class="facts__pair">
+      <span class="facts__label">Wohnfläche</span>
+      <span class="facts__value">{{ row.prop.living_sqm | de_sqm }}</span>
+    </span>
+    {% if row.price_delta_pct is not none %}
+    <span class="facts__pair">
+      <span class="facts__label">Preisverlauf</span>
+      <span class="facts__value">{{ row.price_delta_pct | de_pct }}</span>
+    </span>
+    {% endif %}
+  </div>
+
+  {{ ui.score_badges(row.score) }}
+
+  <p class="card__cost"><span class="facts__label">Gesamtinvestition</span> {{ ui.cost_band(row.cost) }}</p>
+
+  {% if row.score and row.score.rejected %}
+  <div class="card__rejected">
+    <b>Abgelehnt:</b>
+    {% if row.score.reject_reasons %}
+      <ul>{% for reason in row.score.reject_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+    {% else %}
+      <span>kein Grund hinterlegt</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <footer class="card__foot">
+    <a class="btn btn--small" href="/property/{{ row.prop.public_id }}">Dossier</a>
+    {% if row.best_url %}
+    <a class="btn btn--small btn--ghost" href="{{ row.best_url }}" rel="noopener noreferrer nofollow" target="_blank">Quelle</a>
+    {% endif %}
+    {% if row.prop.user_state %}<span class="chip chip--user">{{ row.prop.user_state }}</span>{% endif %}
+  </footer>
+</article>
