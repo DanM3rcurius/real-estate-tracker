@@ -77,3 +77,30 @@ def source_yield(
         .order_by(Source.key)
     ).all()
     return [SourceYield(source_key=key, observed=obs, in_radius=near) for key, obs, near in rows]
+
+
+@dataclass(slots=True)
+class MunicipalityCoverage:
+    town: str
+    observed: int
+
+
+def coverage_by_municipality(
+    session: Session, *, since: datetime, expected: list[str]
+) -> list[MunicipalityCoverage]:
+    """Observations per expected municipality, including the ones with none.
+
+    The zeros are the entire point, which is why ``expected`` is a required
+    argument rather than something derived from the data: a municipality that
+    produced nothing cannot appear in a query over what was produced. Naming
+    the towns we believe are in range is what makes their silence legible.
+    """
+    counts = dict(
+        session.execute(
+            select(Property.town, func.count(func.distinct(Property.id)))
+            .join(Observation, Observation.property_id == Property.id)
+            .where(Observation.scraped_at >= since, Property.town.in_(expected))
+            .group_by(Property.town)
+        ).all()
+    )
+    return [MunicipalityCoverage(town=town, observed=counts.get(town, 0)) for town in expected]

@@ -178,6 +178,19 @@ class LandConfig(BaseModel):
     strong_min_sqm: float = 5000
 
 
+class CoverageConfig(BaseModel):
+    """Municipalities the plan believes fall inside the search radius.
+
+    Not a slider - this does not touch scoring or ``profile_hash`` - but it
+    lives on the profile anyway because it must load through the same config
+    machinery the radius and budget do, so the report can never read a stale
+    or mistyped copy of the list. See ``docs/coverage.md`` for how this list
+    was built (a reconstruction, not a verified survey) and its caveats.
+    """
+
+    municipalities: list[str] = Field(default_factory=list)
+
+
 class ScoreWeights(BaseModel):
     """Final ranking weights. Must sum to ~1.0; normalised on load if not."""
 
@@ -256,6 +269,7 @@ class SearchProfile(BaseModel):
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
     gates: GateConfig = Field(default_factory=GateConfig)
     renovation: RenovationRates = Field(default_factory=RenovationRates)
+    coverage: CoverageConfig = Field(default_factory=CoverageConfig)
 
     property_types: list[str] = Field(default_factory=list)
     preferred_features: list[str] = Field(default_factory=list)

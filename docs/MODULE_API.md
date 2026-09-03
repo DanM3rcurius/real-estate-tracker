@@ -8,7 +8,10 @@ GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
 `CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
 `hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
 hard-reject a property on total cost; an "inferred" one only flags it.
-Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig).
+Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig,
+CoverageConfig). `SearchProfile.coverage.municipalities` is not a scoring slider - it
+is excluded from `scoring_payload()` / `profile_hash` - but loads through the same
+config machinery so the report can never drift from `config/search.yaml`.
 `SourceConfig` carries `terms_checked_at: date | None` and `terms_excerpt: str | None` —
 the record of somebody having actually read the source's robots.txt and terms.
 A model validator rejects `enabled=True` unless both are set; see
@@ -167,10 +170,26 @@ def source_yield(session, *, since: datetime, radius_air_km: float | None = None
     # falls back to YIELD_RADIUS_AIR_KM. build_report always passes the
     # configured profile.radius.air_km_max, so the table matches the radius
     # printed in the report header rather than an unrelated hardcoded value.
+
+@dataclass
+class MunicipalityCoverage:
+    town: str
+    observed: int    # distinct properties observed since `since`, 0 = dark municipality
+
+def coverage_by_municipality(session, *, since: datetime, expected: list[str]) -> list[MunicipalityCoverage]
+    # `expected` is required, never derived from the data: a town that produced
+    # nothing cannot appear in a query over what was produced. Every name in
+    # `expected` appears in the result, in that order, even at zero. The list
+    # comes from config/search.yaml's `coverage.municipalities` (SearchProfile.coverage,
+    # see hofradar.config.CoverageConfig) - see docs/coverage.md for how it was
+    # built and its caveats.
 ```
 
 `ReportData.source_yields` carries a `source_yield(..., since=now - 28 days)`
 snapshot into both renderers - see docs/DECISIONS.md entry 14.
+`ReportData.municipality_coverage` carries the matching `coverage_by_municipality(...)`
+snapshot into both renderers, rendered as "Dunkle Gemeinden" (towns with zero
+observations over the same window) - see docs/coverage.md.
 
 ## `hofradar.pipeline`
 
