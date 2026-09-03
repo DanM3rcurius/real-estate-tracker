@@ -5,9 +5,10 @@ which stringy fields came back. Turning "auf Anfrage" into a PriceType is
 hofradar.normalize's job, and testing it here would duplicate that contract.
 
 The fixture this file reads (``tests/fixtures/html/denkmalboerse_object_005816.html``)
-is SYNTHETIC: hand-written because ``www.blfd.bayern.de`` could not be reached
-from the environment this test suite was written in, and it MUST be replaced
-with a real captured page before this source is enabled.
+is a real page captured from ``www.blfd.bayern.de`` on 2026-09-03 (see the
+provenance comment at the top of the fixture). Its assertions reflect what
+``_htmlutil`` genuinely pulls out of that markup, not what a hand-written
+fixture implied it would.
 """
 
 from __future__ import annotations
@@ -44,12 +45,34 @@ async def test_fetch_detail_requests_the_static_object_page(
     assert listing.source_key == "denkmalboerse"
     assert listing.url == DETAIL
     assert listing.external_id == "005816"
+    assert listing.http_status == 200
     # Contact is published in the exposé itself - not Chiffre, not via the Amt.
     assert listing.contact_kind == "private"
-    # The only fixture-dependent claim in this file: it holds because the
-    # synthetic fixture happens to carry an og:title _htmlutil prefers, not
-    # because BLfD's real markup has been validated against this adapter.
-    assert "Altenstadt" in (listing.title or "")
+    # This page carries no og:title - only <title> and a matching <h1>. Title
+    # extraction now depends on _htmlutil's <title> fallback, exercised here
+    # for the first time against real BLfD markup.
+    assert listing.title == "Kleinbauernhof in Altenstadt bei Schongau"
+    # extract_labeled_fields picks up the plain "Kaufpreis:"/"Baujahr:" lines
+    # from the Kurzinfo box even though the surrounding <p> tags are nested
+    # (the real page is not well-formed HTML there).
+    assert listing.price_raw == "auf Anfrage"
+    assert listing.year_raw == "2. Hälfte 18. Jahrhundert"
+    # "Grundstücksfläche:" matches the label map exactly. "Wohnfläche
+    # (Bauernhaus):" and "Nutzfläche (Wirtschaftsteil):" carry a parenthetical
+    # suffix BLfD's owner exposés routinely add for a Hofstelle's living vs.
+    # working part - _htmlutil.extract_labeled_fields strips that suffix for
+    # matching purposes when the base label is already a known key, so both
+    # still resolve to living_raw / usable_raw. See test_htmlutil.py for the
+    # focused coverage of that normalisation and its guard rail.
+    assert listing.land_raw == "ca. 435 m²"
+    assert listing.living_raw == "ca. 110 m²"
+    assert listing.usable_raw == "ca. 112 m²"
+    # The contact block (immo-inhalt, "Eigentümer des Anwesens", the mailto
+    # target's visible text) is plain body text, so it survives into the
+    # description like everything else on the page - there is no separate
+    # contact field to check.
+    assert "Eigentümer des Anwesens" in (listing.description or "")
+    assert "hofstelle-bayern@web.de" in (listing.description or "")
 
 
 @pytest.mark.asyncio

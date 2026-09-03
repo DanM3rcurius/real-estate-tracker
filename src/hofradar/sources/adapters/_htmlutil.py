@@ -11,6 +11,7 @@ a broker's detail page both tend to have one).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urljoin
@@ -56,8 +57,24 @@ _LABEL_FIELD_MAP: dict[str, str] = {
 }
 
 
+#: A trailing parenthetical qualifier on a label, e.g. "Wohnfläche (Bauernhaus)"
+#: or "Nutzfläche (Wirtschaftsteil)" - owner-written exposés for a Hofstelle
+#: routinely split an area figure this way between the living quarters and the
+#: working/farm part of the building. The qualifier is real content, not
+#: noise, so it is never stripped from the label text itself - it is only
+#: bypassed when the plain label alone would otherwise fail to match below.
+_TRAILING_PARENTHETICAL_RE = re.compile(r"\s*\([^)]*\)\s*$")
+
+
 def extract_labeled_fields(text: str) -> dict[str, str]:
-    """Scan "Label: value" lines for the fields exposés almost always spell out."""
+    """Scan "Label: value" lines for the fields exposés almost always spell out.
+
+    A label with a trailing parenthetical qualifier matches the same field as
+    its unqualified form *only when that unqualified form is already a known
+    key* - this fills in the common "which part of the building" qualifier
+    without turning the lookup into a fuzzy match for labels this map has
+    never heard of in any form.
+    """
     found: dict[str, str] = {}
     for line in text.splitlines():
         if ":" not in line:
@@ -68,6 +85,10 @@ def extract_labeled_fields(text: str) -> dict[str, str]:
         if not value:
             continue
         field = _LABEL_FIELD_MAP.get(key)
+        if field is None:
+            base_key = _TRAILING_PARENTHETICAL_RE.sub("", key).strip()
+            if base_key != key:
+                field = _LABEL_FIELD_MAP.get(base_key)
         if field and field not in found:
             found[field] = value
     return found
