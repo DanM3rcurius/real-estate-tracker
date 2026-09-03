@@ -77,11 +77,19 @@ def is_genuinely_new(prop: Any, since: datetime) -> bool:
 
 
 def price_events_since(prop: Any, since: datetime) -> list[Any]:
+    """Price *changes* in the window - not the first price we ever learned.
+
+    Ingest journals the opening price as a row with ``old_price = None``. That
+    is the property becoming known, which the NEU chip already says; counting it
+    here put a PREISAENDERUNG chip on every brand-new property, next to a NEU
+    chip contradicting it.
+    """
     cutoff = as_aware(since)
     return [
         row
         for row in (getattr(prop, "price_history", None) or [])
-        if (as_aware(getattr(row, "observed_at", None)) or now_utc()) >= cutoff
+        if getattr(row, "old_price", None) is not None
+        and (as_aware(getattr(row, "observed_at", None)) or now_utc()) >= cutoff
     ]
 
 
@@ -138,7 +146,19 @@ def timeline(prop: Any) -> list[dict[str, Any]]:
         moment = as_aware(getattr(row, "observed_at", None))
         old, new = getattr(row, "old_price", None), getattr(row, "new_price", None)
         delta_pct = getattr(row, "delta_pct", None)
-        direction = "gefallen" if (new or 0) < (old or 0) else "gestiegen"
+        if old is None:
+            # The opening price: the property becoming known, not a movement.
+            events.append(
+                {
+                    "at": moment,
+                    "kind": "price_first",
+                    "icon": "💶",
+                    "title": "Erster bekannter Preis",
+                    "text": f"Erster bekannter Preis: {de_eur(new)}.",
+                }
+            )
+            continue
+        direction = "gefallen" if (new or 0) < old else "gestiegen"
         text = f"Preis von {de_eur(old)} auf {de_eur(new)} {direction}."
         if delta_pct is not None:
             text += f" ({delta_pct:+.1f} %)"

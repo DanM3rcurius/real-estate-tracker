@@ -64,5 +64,10 @@ PYTHONPATH=src python -m pytest -q
 ruff check src tests
 ```
 
-Tests must never hit the network. Use `respx` for HTTP and `HOFRADAR_OFFLINE=1`
-for the geo gazetteer path.
+Tests must never hit the network: they mock every outbound call with `respx`
+and assert on the request that *would* have been made.
+
+Do **not** run the suite with `HOFRADAR_OFFLINE=1` in the environment. That
+variable short-circuits the very geo code paths those tests exercise, and 12
+tests fail for a reason that has nothing to do with the code. Only the tests
+that want the gazetteer set it, and they set it themselves.

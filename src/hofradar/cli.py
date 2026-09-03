@@ -73,10 +73,15 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_report(args: argparse.Namespace) -> int:
     from hofradar.report import build_report, render_markdown
+    from hofradar.scoring import rescore_all
 
     init_db()
     cfg = reload_config()
     with session_scope() as session:
+        # Scores and cost estimates are profile-keyed, so a report for a
+        # profile nothing has been scored against yet would print "noch nicht
+        # berechnet" everywhere. Bring the cache up to date first.
+        rescore_all(session, cfg.profile, only_dirty=True)
         data = build_report(session, cfg.profile)
         markdown = render_markdown(data)
     if args.out:

@@ -195,6 +195,23 @@ def categorise(prop: Property, since: datetime) -> str:
     return "known"
 
 
+#: Scoring flags are warnings by default. Only these read as a reason to be
+#: interested; everything else is routed to the risk list instead, so "Warum
+#: interessant" never argues for a property with the reasons not to buy it.
+POSITIVE_FLAG_LABELS: dict[str, str] = {
+    "EXCEPTIONAL_DEVELOPMENT_CARVE_OUT": "Belegtes Entwicklungspotenzial trägt das Budget",
+    "EXCLUSION_OVERRIDDEN_BY_SUBSTANCE": "Trotz Ausschlussbegriff echte Hofsubstanz",
+}
+
+#: Warning flags that the risk list does not already state in its own words.
+#: DRIVING_UNVERIFIED and SHORTLIST_BLOCKED are deliberately absent - _risks
+#: derives both from the underlying facts, and saying it twice reads as two
+#: separate problems.
+WARNING_FLAG_LABELS: dict[str, str] = {
+    "SANIERUNGSRISIKO": "Sanierungskosten übersteigen den Kaufpreis deutlich",
+}
+
+
 def _why(prop: Property, score: Score | None, profile: SearchProfile) -> list[str]:
     reasons: list[str] = []
     if prop.land_sqm:
@@ -216,8 +233,10 @@ def _why(prop: Property, score: Score | None, profile: SearchProfile) -> list[st
     if prop.special_features:
         reasons.append("Besonderheiten: " + ", ".join(prop.special_features[:3]))
     if score is not None:
-        for label in (score.flags or [])[:3]:
-            reasons.append(str(label))
+        for label in score.flags or []:
+            phrase = POSITIVE_FLAG_LABELS.get(str(label))
+            if phrase:
+                reasons.append(phrase)
     if not reasons and prop.price is not None:
         reasons.append(f"Im Budget ({de_eur(prop.price)})")
     return reasons[:5]
@@ -227,6 +246,10 @@ def _risks(prop: Property, score: Score | None, cost: Any, profile: SearchProfil
     risks: list[str] = []
     if score is not None:
         risks.extend(str(r) for r in (score.reject_reasons or []))
+        for label in score.flags or []:
+            phrase = WARNING_FLAG_LABELS.get(str(label))
+            if phrase:
+                risks.append(phrase)
         if score.capital_risk and score.capital_risk != "low":
             risks.append(f"Kapitalrisiko: {score.capital_risk}")
         if score.confidence_score < profile.gates.min_confidence_for_shortlist:
