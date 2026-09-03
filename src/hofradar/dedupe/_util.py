@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import UTC, datetime
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 # TODO(integration): use hofradar.normalize.normalize_text
 _UMLAUTS = {
@@ -101,6 +102,79 @@ def relative_delta(a: float | None, b: float | None) -> float | None:
     if base == 0:
         return 0.0
     return abs(a - b) / base
+
+
+#: Query parameters that only ever describe *how a visitor arrived*, never
+#: which listing they arrived at. Restricted to the ``utm_`` family and a
+#: fixed set of advertising click identifiers, all of which are unambiguous.
+#: Deliberately NOT included: ``ref``, ``source``, ``id``, ``page`` and
+#: friends - plenty of sites use those to select content, and dropping one
+#: would collide two genuinely different listings, which is a far worse error
+#: than failing to join two spellings of one.
+_TRACKING_PARAM_PREFIXES: tuple[str, ...] = ("utm_",)
+_TRACKING_PARAMS: frozenset[str] = frozenset(
+    {"gclid", "dclid", "fbclid", "msclkid", "igshid", "mc_cid", "mc_eid", "yclid", "twclid"}
+)
+
+#: Ports that carry no information because the scheme already implies them.
+_DEFAULT_PORTS: dict[str, str] = {"http": "80", "https": "443"}
+
+#: http and https reach the same document, so the key folds them together.
+#: Any other scheme is kept as written rather than guessed at.
+_WEB_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+_CANONICAL_WEB_SCHEME = "https"
+
+
+def _is_tracking_param(name: str) -> bool:
+    lowered = name.lower()
+    return lowered in _TRACKING_PARAMS or lowered.startswith(_TRACKING_PARAM_PREFIXES)
+
+
+def canonical_url(url: str | None) -> str | None:
+    """The identity of a listing page, with the cosmetic parts removed.
+
+    A URL identifies a listing, so two sources that publish the same URL are
+    publishing the same listing - see ``compare_facts``, which treats that as
+    proof across sources. This function decides what "the same URL" means, and
+    its job is to be *conservative*: it removes only differences that provably
+    cannot select different content, because a false join fuses two farmsteads
+    into one property and destroys both their histories, while a missed join
+    merely leaves a duplicate the ordinary evidence model can still catch.
+
+    Removed: the fragment (never sent to a server), a default port, a ``www.``
+    host prefix, userinfo, a trailing slash, the http/https distinction, and
+    the tracking parameters named above. Query parameters are otherwise kept
+    (sorted, so ``?a=1&b=2`` and ``?b=2&a=1`` agree) and the path's case is
+    kept, because paths can be case-sensitive and a query parameter this
+    function does not recognise may well be what selects the listing.
+
+    Returns ``None`` for anything without a host - a bare path or a pasted
+    fragment of text is not an identity, and must never match another one.
+    """
+    if not url or not url.strip():
+        return None
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if not host:
+        return None
+    if host.startswith("www."):
+        host = host[4:]
+    scheme = parts.scheme.lower()
+    port = str(parts.port) if parts.port else ""
+    if port and port == _DEFAULT_PORTS.get(scheme):
+        port = ""
+    netloc = f"{host}:{port}" if port else host
+    path = parts.path.rstrip("/")
+    query = sorted(
+        (key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not _is_tracking_param(key)
+    )
+    query_string = "&".join(f"{key}={value}" for key, value in query)
+    canonical_scheme = _CANONICAL_WEB_SCHEME if scheme in _WEB_SCHEMES else scheme
+    return urlunsplit((canonical_scheme, netloc, path, query_string, ""))
 
 
 def as_utc(value: datetime | None) -> datetime | None:

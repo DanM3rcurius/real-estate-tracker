@@ -3,15 +3,21 @@
 ``compare`` is expensive-ish and, more importantly, *quadratic* if handed the
 whole table. Every week the pipeline re-ingests thousands of listings against a
 growing property table, so the candidate set has to come from indexed columns
-only. Four blocking passes are tried, cheapest and most selective first, and
+only. Five blocking passes are tried, cheapest and most selective first, and
 their results unioned:
 
 1. the exact listing again - same source and same URL, or same source and same
    ``external_id`` (both covered by indexes on ``property_sources``);
-2. the coarse :func:`~hofradar.dedupe.fingerprint.fingerprint`
+2. the same URL under *any* source. A URL identifies a listing, so one portal
+   reached by two routes (a dedicated adapter and a syndicated feed of the
+   same site) has to be able to block against itself across the source
+   boundary - pass 1 filters on ``Source.key`` and structurally cannot. The
+   verdict is still ``compare_facts``', not this pass's: blocking only decides
+   what is worth comparing;
+3. the coarse :func:`~hofradar.dedupe.fingerprint.fingerprint`
    (``properties.fingerprint`` is indexed);
-3. postcode or town (both indexed);
-4. a latitude/longitude bounding box (``ix_properties_geo``).
+4. postcode or town (both indexed);
+5. a latitude/longitude bounding box (``ix_properties_geo``).
 
 Every query is bounded by :data:`CANDIDATE_LIMIT`, so a pathological town never
 turns into a table scan.
@@ -166,14 +172,27 @@ def _blocking_statements(
             .limit(CANDIDATE_LIMIT)
         )
 
-    # 2. the coarse fingerprint bucket.
+    # 2. the same URL on ANY source. The stored column holds the URL as the
+    # adapter wrote it, so this pass matches exact strings only; a variant
+    # spelling (a stray tracking parameter, a trailing slash) still has to be
+    # blocked by fingerprint/town/geo below, and compare_facts then applies
+    # the canonical-URL proof to whatever those turn up.
+    if listing.url:
+        yield (
+            select(Property)
+            .join(PropertySource, PropertySource.property_id == Property.id)
+            .where(PropertySource.url == listing.url, alive)
+            .limit(CANDIDATE_LIMIT)
+        )
+
+    # 3. the coarse fingerprint bucket.
     yield (
         select(Property)
         .where(Property.fingerprint == fingerprint(listing, geo=(lat, lon)), alive)
         .limit(CANDIDATE_LIMIT)
     )
 
-    # 3. postcode / town.
+    # 4. postcode / town.
     location_filters = []
     if listing.postcode:
         location_filters.append(Property.postcode == listing.postcode)
@@ -182,7 +201,7 @@ def _blocking_statements(
     if location_filters:
         yield select(Property).where(or_(*location_filters), alive).limit(CANDIDATE_LIMIT)
 
-    # 4. geographic bounding box.
+    # 5. geographic bounding box.
     box = _bounding_box(lat, lon)
     if box is not None:
         min_lat, max_lat, min_lon, max_lon = box
