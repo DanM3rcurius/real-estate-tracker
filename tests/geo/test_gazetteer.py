@@ -83,6 +83,30 @@ def test_more_specific_entry_wins_over_a_shorter_entry_it_contains() -> None:
     assert entry.name == "Gmund am Tegernsee"
 
 
+def test_leftmost_match_wins_over_longer_entry_name_further_right() -> None:
+    """Load-bearing: picking the longer *entry name* on a tie between two
+    disjoint matches is wrong, not just a different tie-break.
+
+    "Chieming bei Waging am See" is the shape ``_town_from_title`` actually
+    passes through whole for a Denkmalboerse "X bei Y" title, and it
+    boundary-matches two unrelated gazetteer entries: "Chieming" (the
+    subject, written first) and "Waging am See" (the reference town, further
+    right). Preferring the longer name ("Waging am See", 13 chars, over
+    "Chieming", 8) resolves the query to the *reference* town instead of the
+    subject - and because the far entries in this gazetteer systematically
+    have longer names than the near ones, that is not a one-off wrong
+    answer, it is a systematic bias toward the wrong (and typically
+    farther-out) entry, which flips genuinely in-range subjects to
+    out-of-range verdicts and makes ``town_in_radius`` skip their fetch.
+    Leftmost-match has no such bias: the query is about whichever place is
+    named first, so the earliest match should win regardless of how long
+    either name is.
+    """
+    entry = lookup("Chieming bei Waging am See")
+    assert entry is not None
+    assert entry.name == "Chieming"
+
+
 def test_unrelated_query_still_misses() -> None:
     assert lookup("Timbuktu, Mali") is None
 
