@@ -122,3 +122,16 @@ sources:
     notes: >
       May surface a property. May NEVER mark it verified or fresh - a search
       snippet is not proof that a listing is still live.
+
+  - key: demo_seed
+    name: "Demo-Datensatz (erfunden)"
+    role: primary
+    adapter: manual
+    reliability: 0.5
+    enabled: false
+    notes: >
+      Attribution for the synthetic rows in data/seed/demo_listings.yaml, which
+      the public GitHub Pages snapshot is built from. Every listing under this
+      key is invented. Disabled: it is never crawled, it has no discover() of
+      its own, and it enumerates nothing - so its silence proves nothing and it
+      may never remove a listing.

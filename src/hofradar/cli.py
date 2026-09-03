@@ -204,6 +204,21 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seed_demo(args: argparse.Namespace) -> int:
+    """Load the synthetic dataset the public snapshot is built from."""
+    from hofradar.demo import seed_demo
+
+    init_db()
+    cfg = reload_config()
+    with session_scope() as session:
+        from hofradar.sources import sync_sources_to_db
+
+        sync_sources_to_db(session, cfg.sources)
+        count = seed_demo(session, cfg.profile, path=Path(args.path) if args.path else None)
+    print(f"seeded {count} synthetic listings")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hofradar", description="Hofradar")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -247,6 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
         "(it will land in your shell history)",
     )
     p_hash.set_defaults(func=cmd_hash_password)
+
+    p_seed = sub.add_parser(
+        "seed-demo", help="load the synthetic demo dataset (invented listings)"
+    )
+    p_seed.add_argument("--path", help="path to the seed YAML")
+    p_seed.set_defaults(func=cmd_seed_demo)
 
     sub.add_parser("config", help="show the resolved search profile").set_defaults(
         func=cmd_config

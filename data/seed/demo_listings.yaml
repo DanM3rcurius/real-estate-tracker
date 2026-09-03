@@ -1,0 +1,304 @@
+# Synthetic demo listings for the public GitHub Pages snapshot.
+#
+# Every entry here is INVENTED. The towns and postcodes are real Bavarian
+# places so that distances, the radius and the map look right, but no
+# farmstead, price, seller or URL below refers to anything that exists. The
+# links use the example.invalid TLD, which RFC 2606 reserves precisely so that
+# it can never resolve to a real listing.
+#
+# Nothing here was scraped. This is authored data whose purpose is to give the
+# static export something to render, and to let CI exercise the whole read path
+# without a database that remembers real searches.
+#
+# The text fields are written the way a German Exposé is written, because they
+# are fed through hofradar.normalize exactly like a crawled listing would be:
+# property type, feature tags, price type and the foreclosure / monument /
+# private-seller booleans in the snapshot are DERIVED by the real code, not
+# declared in this file.
+#
+# `geo` is supplied per entry rather than geocoded, so seeding never touches
+# the network. `driving_km` is omitted wherever a road route was never
+# computed - an unknown driving distance stays unknown and never inherits the
+# air distance.
+
+meta:
+  fictional: true
+  note: >
+    Erfundene Beispieldaten für die öffentliche Vorschau. Keines dieser
+    Objekte existiert.
+
+listings:
+  - external_id: demo-0001
+    url: "https://example.invalid/hofradar-demo/dreiseithof-miesbach"
+    title: "Dreiseithof mit Stadel und Obstgarten, Alleinlage bei Miesbach"
+    description: >
+      Historische Hofstelle aus dem Jahr 1878 in ruhiger Alleinlage im
+      Außenbereich. Wohnhaus mit 210 m² Wohnfläche, angebauter Stall und ein
+      freistehender Stadel mit Tenne. Der Obstgarten mit altem Baumbestand
+      grenzt direkt an die Weide. Historische Bausubstanz weitgehend erhalten,
+      Sanierung erforderlich: Dach und Elektrik stammen aus den 1960er Jahren.
+      Von privat, kein Makler.
+    price_raw: "645.000 €"
+    land_raw: "7.400 m² Grundstück"
+    living_raw: "210 m² Wohnfläche"
+    rooms_raw: "8 Zimmer"
+    year_raw: "Baujahr 1878"
+    location_raw: "83714 Miesbach"
+    postcode: "83714"
+    town: "Miesbach"
+    source_date: "2026-08-14"
+    geo:
+      lat: 47.7897
+      lon: 11.8331
+      precision: exact
+      driving_km: 18.4
+      driving_minutes: 24
+
+  - external_id: demo-0002
+    url: "https://example.invalid/hofradar-demo/resthof-wasserburg"
+    title: "Resthof mit Nebengebäuden, teilbares Grundstück, Wasserburg am Inn"
+    description: >
+      Ehemalige Landwirtschaft am Ortsrand. Wohnhaus Baujahr 1924, zwei
+      Wirtschaftsgebäude, davon eines mit Scheune. Das Grundstück ist nach
+      Auskunft der Gemeinde teilbar, Entwicklungspotenzial vorhanden.
+      Renovierungsbedürftig.
+    price_raw: "VB 489.000 EUR"
+    land_raw: "4.100 m²"
+    living_raw: "165 m²"
+    rooms_raw: "6 Zimmer"
+    year_raw: "1924"
+    location_raw: "83512 Wasserburg am Inn"
+    postcode: "83512"
+    town: "Wasserburg am Inn"
+    source_date: "2026-08-22"
+    geo:
+      lat: 48.0603
+      lon: 12.2264
+      precision: exact
+      driving_km: 39.7
+      driving_minutes: 41
+
+  - external_id: demo-0003
+    url: "https://example.invalid/hofradar-demo/einoedhof-bad-toelz"
+    title: "Einödhof, denkmalgeschützt, südlich von Bad Tölz"
+    description: >
+      Denkmalgeschütztes Anwesen in Einzellage, Baujahr um 1790. Wohnteil und
+      Stallteil unter einem Dach, dazu ein separater Stadel. Weide und
+      Streuobst gehören zum Anwesen. Das Objekt steht unter Denkmalschutz,
+      Auflagen sind zu beachten. Umfassende Sanierung notwendig.
+    price_raw: "Kaufpreis auf Anfrage"
+    land_raw: "11.800 m²"
+    living_raw: "240 m²"
+    year_raw: "um 1790"
+    location_raw: "83646 Bad Tölz"
+    postcode: "83646"
+    town: "Bad Tölz"
+    source_date: "2026-07-30"
+    geo:
+      lat: 47.7607
+      lon: 11.5605
+      precision: town
+      # No road route was ever computed for this one. It stays unknown.
+
+  - external_id: demo-0004
+    url: "https://example.invalid/hofradar-demo/sacherl-ebersberg"
+    title: "Kleines Sacherl mit Scheune, Landkreis Ebersberg"
+    description: >
+      Sacherl mit Wohnhaus und angebauter Scheune, ortsnah gelegen. Baujahr
+      1951, in den 1990er Jahren teilsaniert. Kleiner Garten, Nebengebäude
+      für Werkstatt oder Lager geeignet. Bezugsfrei.
+    price_raw: "398.000 €"
+    land_raw: "2.350 m²"
+    living_raw: "132 m²"
+    rooms_raw: "5 Zimmer"
+    year_raw: "Baujahr 1951"
+    location_raw: "85560 Ebersberg"
+    postcode: "85560"
+    town: "Ebersberg"
+    source_date: "2026-08-28"
+    geo:
+      lat: 48.0776
+      lon: 11.9704
+      precision: exact
+      driving_km: 27.1
+      driving_minutes: 32
+
+  - external_id: demo-0005
+    url: "https://example.invalid/hofradar-demo/vierseithof-dorfen"
+    title: "Vierseithof, Zwangsversteigerung, Nähe Dorfen"
+    description: >
+      Vierseithof mit umlaufenden Wirtschaftsgebäuden, Baujahr 1863.
+      Zwangsversteigerung, Verkehrswert laut Gutachten. Der Innenhof ist
+      vollständig umbaut, historische Bausubstanz im Wohntrakt erhalten.
+      Erheblicher Sanierungsstau, Dachstuhl teilweise schadhaft.
+    price_raw: "Verkehrswert 720.000 €"
+    land_raw: "9.600 m²"
+    living_raw: "285 m²"
+    year_raw: "1863"
+    location_raw: "84405 Dorfen"
+    postcode: "84405"
+    town: "Dorfen"
+    source_date: "2026-08-05"
+    geo:
+      lat: 48.2664
+      lon: 12.1584
+      precision: street
+      driving_km: 58.9
+      driving_minutes: 55
+
+  - external_id: demo-0006
+    url: "https://example.invalid/hofradar-demo/hofstelle-bad-aibling"
+    title: "Hofstelle mit Stall und Tenne, Außenbereich bei Bad Aibling"
+    description: >
+      Hofstelle im Außenbereich mit Wohnhaus, Stall und Tenne. Baujahr 1902.
+      Die Weideflächen sind verpachtet und können übernommen werden.
+      Alleinlage, nächster Nachbar rund 400 Meter entfernt. Modernisierung
+      erforderlich.
+    price_raw: "575.000 €"
+    land_raw: "6.900 m²"
+    living_raw: "195 m²"
+    rooms_raw: "7 Zimmer"
+    year_raw: "Baujahr 1902"
+    location_raw: "83043 Bad Aibling"
+    postcode: "83043"
+    town: "Bad Aibling"
+    source_date: "2026-08-19"
+    geo:
+      lat: 47.8642
+      lon: 12.0086
+      precision: exact
+      driving_km: 21.6
+      driving_minutes: 26
+
+  - external_id: demo-0007
+    url: "https://example.invalid/hofradar-demo/austragshaus-holzkirchen"
+    title: "Austragshaus mit Nebengebäude, Holzkirchen"
+    description: >
+      Kleines Austragshaus, Baujahr 1936, mit separatem Nebengebäude.
+      Grundstück eben und gut erschlossen. Für ein Paar oder als
+      Wochenendobjekt geeignet. Renovierungsbedarf im Innenbereich.
+    price_raw: "349.000 €"
+    land_raw: "1.850 m²"
+    living_raw: "98 m²"
+    rooms_raw: "4 Zimmer"
+    year_raw: "1936"
+    location_raw: "83607 Holzkirchen"
+    postcode: "83607"
+    town: "Holzkirchen"
+    source_date: "2026-08-26"
+    geo:
+      lat: 47.8763
+      lon: 11.6979
+      precision: exact
+      driving_km: 14.2
+      driving_minutes: 19
+
+  - external_id: demo-0008
+    url: "https://example.invalid/hofradar-demo/bauernhof-muehldorf"
+    title: "Bauernhof mit großem Stadel, Landkreis Mühldorf am Inn"
+    description: >
+      Bauernhof mit Wohnhaus und einem sehr großen Stadel, Baujahr 1889.
+      Wirtschaftsgebäude in ordentlichem Zustand, Wohnteil unsaniert.
+      Obstgarten und Weide vorhanden. Von privat.
+    price_raw: "612.000 €"
+    land_raw: "8.750 m²"
+    living_raw: "228 m²"
+    year_raw: "Baujahr 1889"
+    location_raw: "84453 Mühldorf am Inn"
+    postcode: "84453"
+    town: "Mühldorf am Inn"
+    source_date: "2026-07-18"
+    geo:
+      lat: 48.2478
+      lon: 12.5236
+      precision: town
+      # Road distance not checked.
+
+  - external_id: demo-0009
+    url: "https://example.invalid/hofradar-demo/anwesen-prien"
+    title: "Landwirtschaftliches Anwesen am Chiemsee, Prien"
+    description: >
+      Anwesen mit Wohnhaus, Stall und Scheune in Seenähe. Baujahr 1908,
+      laufend instand gehalten. Der Preis liegt deutlich über dem üblichen
+      Niveau der Region, die Lage erklärt einen Teil davon.
+    price_raw: "1.180.000 €"
+    land_raw: "5.200 m²"
+    living_raw: "260 m²"
+    rooms_raw: "9 Zimmer"
+    year_raw: "1908"
+    location_raw: "83209 Prien am Chiemsee"
+    postcode: "83209"
+    town: "Prien am Chiemsee"
+    source_date: "2026-08-11"
+    geo:
+      lat: 47.8558
+      lon: 12.3456
+      precision: exact
+      driving_km: 46.3
+      driving_minutes: 44
+
+  - external_id: demo-0010
+    url: "https://example.invalid/hofradar-demo/stadel-grafing"
+    title: "Grundstück mit Altbestand, ehemaliger Stadel, Grafing"
+    description: >
+      Grundstück mit Altbestand: ein ehemaliger Stadel steht auf der Fläche,
+      der Wohnbestand wurde vor Jahren aufgegeben. Entwicklungspotenzial,
+      Bauvoranfrage empfohlen. Historische Bausubstanz nur noch in Teilen.
+    price_raw: "289.000 €"
+    land_raw: "3.100 m²"
+    year_raw: "1911"
+    location_raw: "85567 Grafing bei München"
+    postcode: "85567"
+    town: "Grafing bei München"
+    source_date: "2026-06-24"
+    geo:
+      lat: 48.0453
+      lon: 11.9678
+      precision: street
+      driving_km: 25.8
+      driving_minutes: 30
+
+  - external_id: demo-0011
+    url: "https://example.invalid/hofradar-demo/hofanwesen-traunstein"
+    title: "Hofanwesen mit Wirtschaftsgebäuden, Traunstein"
+    description: >
+      Hofanwesen mit Wohnhaus, zwei Wirtschaftsgebäuden und Tenne. Baujahr
+      1871. Größere Weidefläche, teilbar nach Auskunft des Eigentümers.
+      Sanierungsbedürftig, aber trocken und statisch geprüft.
+    price_raw: "698.000 €"
+    land_raw: "12.400 m²"
+    living_raw: "252 m²"
+    year_raw: "1871"
+    location_raw: "83278 Traunstein"
+    postcode: "83278"
+    town: "Traunstein"
+    source_date: "2026-08-02"
+    geo:
+      lat: 47.8683
+      lon: 12.6433
+      precision: exact
+      driving_km: 71.5
+      driving_minutes: 58
+
+  - external_id: demo-0012
+    url: "https://example.invalid/hofradar-demo/sacherl-rosenheim"
+    title: "Sacherl mit Weide und Nebengebäude, Landkreis Rosenheim"
+    description: >
+      Sacherl mit kleinem Wohnhaus und Nebengebäude, Baujahr 1948. Weide
+      direkt angrenzend. Ruhige Ortsrandlage, kein Durchgangsverkehr.
+      Teilsaniert, Heizung 2019 erneuert.
+    price_raw: "452.000 €"
+    land_raw: "3.800 m²"
+    living_raw: "124 m²"
+    rooms_raw: "5 Zimmer"
+    year_raw: "Baujahr 1948"
+    location_raw: "83022 Rosenheim"
+    postcode: "83022"
+    town: "Rosenheim"
+    source_date: "2026-08-30"
+    geo:
+      lat: 47.8561
+      lon: 12.1289
+      precision: exact
+      driving_km: 31.2
+      driving_minutes: 34

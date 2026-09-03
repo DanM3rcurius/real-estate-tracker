@@ -44,12 +44,22 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+# The database itself is never committed - it is the owner's search history,
+# and this repository is public. data/ keeps its structure so the layout is
+# visible, and data/seed/ carries the synthetic dataset the public Pages
+# snapshot is built from. Git cannot re-include a path inside an excluded
+# *directory*, so each of these ignores the contents and re-admits the marker.
 data/*.sqlite3
 data/*.sqlite3-*
-data/raw/
-data/documents/
-data/images/
-data/exports/
+data/secret_key
+data/raw/*
+!data/raw/.gitkeep
+data/documents/*
+!data/documents/.gitkeep
+data/images/*
+!data/images/.gitkeep
+data/exports/*
+!data/exports/.gitkeep
 reports/weekly/*.md
 reports/weekly/*.html
 !.gitkeep
