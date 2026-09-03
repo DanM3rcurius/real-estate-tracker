@@ -34,14 +34,21 @@ before changing a package's public surface.
    password configured the middleware is absent entirely; with one, every
    path outside `PUBLIC_PATHS` needs a valid session, and `/healthz` tells
    an anonymous caller nothing about the database.
+9. **What GitHub Pages serves is invented, and says so.** A static host cannot
+   run the password gate, so the published snapshot is built from
+   `data/seed/demo_listings.yaml` and every page carries a banner naming the
+   data as fictional. The workflow fails if any property in the build is not
+   an `example.invalid` listing. (`docs/DECISIONS.md` 13.)
 
 ## Layout
 
 ```
 config/          search DNA, scoring, keywords, source registry (YAML)
+data/            gitkeep'd structure; data/seed/ holds the synthetic demo set
 src/hofradar/
   config.py      SearchProfile - the adjustable parameters, profile_hash
   contracts.py   stage-to-stage dataclasses
+  demo.py        loads data/seed/ through lifecycle.ingest (never around it)
   db/            models.py, enums.py, session.py
   normalize/     German text -> typed facts + evidence
   dedupe/        fingerprint, compare, merge
@@ -55,6 +62,7 @@ src/hofradar/
   report/        weekly digest (max 10 entries, everything else counted)
   web/           FastAPI + Jinja + HTMX + Leaflet
   web/auth.py    one password, one signed cookie (see docs/DEPLOY.md)
+  web/export.py  static snapshot for GitHub Pages (drives the real app)
 tests/           mirrors src/, one directory per package
 ```
 
@@ -76,6 +84,10 @@ pip install -e ".[dev,pdf,images]"
 hofradar init-db && hofradar serve
 PYTHONPATH=src python -m pytest -q
 ruff check src tests
+
+# The public snapshot. Never point export-site at a real database and then
+# publish the output: a static host cannot run the password gate.
+hofradar seed-demo && hofradar export-site --out site --base-path /real-estate-tracker
 ```
 
 Tests must never hit the network: they mock every outbound call with `respx`

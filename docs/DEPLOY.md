@@ -9,6 +9,7 @@
 | **Railway / Render** | ✅ browser-only path | Deploy straight from GitHub, add a persistent disk, no CLI needed |
 | **Vercel** | ❌ wrong shape | No persistent disk, no long-running process, no real scheduler |
 | **Netlify / Cloudflare Pages** | ❌ same reasons | Same serverless model |
+| **GitHub Pages** | ⚠️ snapshot only | Cannot host the app at all, but does host a read-only static export of it — see below |
 
 ## Why not Vercel
 
@@ -86,6 +87,56 @@ Zero cost, zero public attack surface, the disk is a real disk, and you can
 still open it from your phone. The password gate still applies — belt and
 braces.
 
+## The public snapshot on GitHub Pages
+
+`https://danm3rcurius.github.io/real-estate-tracker/` is **not** this
+application. It is a directory of static files produced by
+`hofradar export-site` and published by `.github/workflows/pages.yml`.
+
+It exists to show what the tool does without asking anyone to install anything.
+What it shows is **invented**: twelve fictional farmsteads in real Bavarian
+towns, from `data/seed/demo_listings.yaml`. Every page carries a banner saying
+so.
+
+That is not squeamishness. Pages serves files, so there is no process to run the
+password gate, so everything published there is world-readable — and this
+repository is public. A snapshot of your actual radar would be your search
+history on the open web, permanently, in git history and in search indexes. The
+workflow enforces this rather than trusting it: the build fails if any property
+in the database it just built is not an `example.invalid` listing.
+
+### What works in the snapshot, and what does not
+
+| | |
+|---|---|
+| The two sliders | **Live.** `app.js` recomputes the derived driving and purchase bands client-side. |
+| The ranked list, map and dossiers | **Frozen** at build time. Moving a slider does not re-query — there is nothing to query. |
+| Triage, report generation, "Jetzt suchen", the paste box, settings | **Absent.** Each is replaced by a line saying it needs a database. |
+| CSV and JSON export | Present, as the files they were at build time. |
+
+### Building it yourself
+
+```bash
+hofradar init-db
+hofradar seed-demo                      # or point it at your own database
+hofradar export-site --out site --base-path /real-estate-tracker
+python -m http.server -d site 8080      # then open http://localhost:8080/real-estate-tracker/
+```
+
+`--base-path` is the subdirectory the site is served from. A project Pages site
+lives under `/<repo>/`; for a user or organisation site served from the root,
+leave it off.
+
+Nothing stops you pointing the exporter at a real database — it is the same
+command — but then **do not publish the output anywhere public.** It has no
+password gate and cannot be given one.
+
+### Turning it on
+
+One setting, once, by hand: **Settings → Pages → Source: GitHub Actions**. The
+workflow cannot set this itself, and until it is set the deploy step fails with
+an error saying exactly that.
+
 ## The password gate
 
 One password, one signed cookie. There is exactly one user, so there is no
@@ -126,6 +177,39 @@ What it deliberately does not do: no user accounts, no 2FA, no password reset,
 no rate limiting beyond the login form. If this ever needs to be shared with
 someone else, that is the point to put a real identity provider in front of it
 rather than to grow this file.
+
+## When CI and Pages fail before they start
+
+If a workflow run fails within a few seconds and the job has **no logs at all**,
+do not go looking for the bug in the YAML. Check whether a runner was ever
+assigned:
+
+```
+GET /repos/{owner}/{repo}/actions/jobs/{job_id}
+```
+
+`"runner_id": 0`, an empty `runner_name`, no `steps` array, and
+`"duration_ms": 0` in the run's usage together mean the job died before
+`Set up job` — GitHub never gave it a machine. That is an account-level state,
+not a defect in the workflow, and no edit to `ci.yml` or `pages.yml` will change
+it. Both workflows fail identically while it holds.
+
+Where to look, in order:
+
+1. <https://github.com/settings/billing> — a spending limit or a failed payment
+   method. Actions minutes are free for public repositories, but a payment
+   failure can disable Actions across the whole account, public repos included.
+2. **Settings → Actions → General** on the repository, for a policy that
+   disables workflows.
+
+Once cleared, re-run the failed run rather than pushing an empty commit. The
+steps themselves are known good — they can all be reproduced locally:
+
+```bash
+ruff check src tests scripts
+python scripts/sync_config_defaults.py && git diff --exit-code src/hofradar/_config_defaults
+PYTHONPATH=src python -m pytest -q
+```
 
 ## Backups
 

@@ -3,6 +3,11 @@
 A research platform with **memory** for finding Hofstellen, Sacherl and Resthöfe
 in Upper Bavaria — not a scraper.
 
+**[Look at it →](https://danm3rcurius.github.io/real-estate-tracker/)** — a
+static snapshot of the UI. The farmsteads in it are **invented**; the tool has
+no public instance, because a static host cannot run its password gate. See
+[docs/DEPLOY.md](docs/DEPLOY.md#the-public-snapshot-on-github-pages).
+
 The difference matters. A scraper searches again every week and shows you the
 same twelve farms it showed you last week. Hofradar remembers every property it
 has ever seen, so it can tell you the only things that are actually new:
@@ -43,6 +48,12 @@ docker compose up -d          # → http://localhost:8000
 ```
 
 Nothing else is required. No API keys, no database server, no npm.
+
+Want the demo data rather than an empty database?
+
+```bash
+hofradar seed-demo            # twelve invented farmsteads, no network calls
+```
 
 > **`does not appear to be a Python project`?** You are on a branch that does
 > not have the code yet. `git fetch origin && git checkout <branch>`, then

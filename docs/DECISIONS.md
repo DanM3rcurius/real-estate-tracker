@@ -206,3 +206,52 @@ host, so it trades one deployment unit for three.
 **Consequence.** The Dockerfile and `docker-compose.yml` are the deployment
 contract, and `fly.toml` is the worked example. A volume at `/data` is not
 optional anywhere.
+
+---
+
+## 13. GitHub Pages hosts a read-only snapshot, not the app
+
+**Decision.** `hofradar export-site` renders the UI to a directory of static
+files, and `.github/workflows/pages.yml` publishes it. Decision 12 stands
+unchanged: this is not the app moving to a static host. It is a generated
+artefact with no database behind it, built from
+`data/seed/demo_listings.yaml` — twelve invented farmsteads — and never from a
+real database.
+
+**Why not the real data.** Pages serves files. There is no process to run the
+password gate, so everything published is world-readable, and this repository is
+public. Decision 11 exists because a public URL needs a gate; a public URL that
+*cannot have one* is not a place for the owner's search history. The snapshot
+therefore shows synthetic listings, and every page says so in a banner. The
+workflow refuses to publish a build whose properties are not all
+`example.invalid` URLs, checking the database rather than the filtered JSON —
+a real listing rejected by the budget gate would be absent from that file but
+its dossier page would still have been published.
+
+**Why drive the real app.** The exporter boots the FastAPI application and
+fetches each page over an in-process transport rather than re-rendering the
+templates itself. A second rendering path would be a second thing to keep
+correct, and the first symptom of drift would be a public page that is wrong.
+This is the same reason `routes/radar.py` serves the HTMX partial and the full
+page from one `build_results`.
+
+**What the snapshot cannot do, and how it says so.** Anything that writes —
+triage, generating a report, starting a run, the paste box, the settings screen
+— is dropped at the template level behind a `static_export` flag, replaced by a
+sentence saying it needs a database. Guarding the templates rather than
+stripping the rendered HTML means the export is correct by construction. The
+sliders stay live: `app.js` recomputes the derived driving and purchase bands
+client-side, so the two adjustable parameters still demonstrate themselves, and
+only the ranked list underneath is frozen.
+
+**Consequence.** A project Pages site is served from `/<repo>/`, so the
+exporter rewrites root-absolute URLs and injects `window.HOFRADAR_BASE` for the
+one link `app.js` builds at runtime. Unset, that global is `""` and the live app
+is byte-for-byte unaffected.
+
+**Alternatives considered.**
+- *Publish the real radar.* Rejected: no gate is possible, and git history and
+  search indexes do not forget.
+- *A landing page with screenshots.* Cheaper, but it demonstrates nothing about
+  whether the thing works.
+- *Pages as the actual host.* Not possible at all — see decision 12.

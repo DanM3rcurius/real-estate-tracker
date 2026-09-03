@@ -122,3 +122,26 @@ def render_html(data: ReportData) -> str
 async def run_pipeline(profile: SearchProfile, *, trigger: str = "manual",
                        source_keys: list[str] | None = None, dry_run: bool = False) -> SearchRun
 ```
+
+## `hofradar.demo`
+
+```python
+def seed_demo(session, profile: SearchProfile, *, path: Path | None = None,
+              rescore: bool = True) -> int
+```
+
+Ingests `data/seed/demo_listings.yaml` through `lifecycle.ingest` — it is not a
+second writer of `Property` rows. Refuses a file that does not declare
+`meta.fictional: true`.
+
+## `hofradar.web.export`
+
+```python
+def export_site(destination: Path | str, *, base_path: str = "",
+                session_factory=None, built_at: datetime | None = None) -> ExportResult
+def rewrite_urls(html: str, base_path: str) -> str
+def inject_base_global(html: str, base_path: str) -> str
+```
+
+`ExportResult` carries `destination`, `pages`, `properties`, `assets`. Raises
+`ExportError` if any route does not answer 200.
