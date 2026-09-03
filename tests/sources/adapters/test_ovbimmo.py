@@ -14,11 +14,11 @@ Four things worth pinning:
    flagged complete.
 4. What `fetch_detail` genuinely pulls out of a real detail page: the title
    (og:title), the visible body text as description, and image URLs - but
-   NOT the structured Objektdaten fields (price/rooms/area/...), because
+   NOT the structured price/rooms/area fields, because
    `_htmlutil.extract_labeled_fields` looks for "Label: value" lines and
-   this page's Objektdaten table renders the value *before* the label in
-   separate `col-value`/`col-label` divs, one per line. See
-   docs/SOURCES.md for the consequence.
+   this page's `eps-item` blocks render the value *before* the label, each
+   on its own line once the body is flattened. See docs/SOURCES.md for the
+   consequence.
 
 Both fixtures used here are real captures, not hand-written approximations:
 `ovbimmo_search_rosenheim.html` (`ovbimmo.de/kaufen/rosenheim-kreis`,
@@ -124,8 +124,8 @@ async def test_fetch_detail_against_the_real_capture(adapter, read_fixture) -> N
     assert "690.000,00" in (listing.description or "")
     assert "Kaufpreis" in (listing.description or "")
     # ...but NOT as structured fields: extract_labeled_fields wants a single
-    # "Label: value" line, and this page's Objektdaten table renders the
-    # value and its label in separate divs with the value FIRST
+    # "Label: value" line, and this page's eps-item blocks render the value
+    # and its label on separate lines with the value FIRST
     # ("690.000,00 €\n\nKaufpreis", not "Kaufpreis: 690.000,00 €"). So the
     # generic extractor genuinely gets nothing here - this is not something
     # this task fixes; see docs/SOURCES.md.
@@ -133,6 +133,11 @@ async def test_fetch_detail_against_the_real_capture(adapter, read_fixture) -> N
     assert listing.rooms_raw is None
     assert listing.living_raw is None
     assert listing.land_raw is None
+    # The one thing this task must NOT do: guess contact_kind. The captured
+    # page is a broker listing ("Provision für Käufer") whose own dataLayer
+    # disagrees with itself (features includes "free_of_commission") - two
+    # independent reasons never to derive this field from either source.
+    assert listing.contact_kind is None
 
 
 @pytest.mark.asyncio
@@ -260,6 +265,84 @@ async def test_discover_follows_pagination_until_no_next_link_remains(
     assert len(listings) == 20
     assert adapter.enumeration_complete is True
     assert adapter.can_prove_absence is True
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_incomplete_when_a_search_page_errors(
+    adapter, search_profile, sample_keywords
+) -> None:
+    """The >=400 branch in `_walk_search` - untested until now. 404 (not a
+    retryable status in PoliteClient) keeps this test fast and deterministic.
+    """
+    search_url = f"{BASE}/kaufen/haus/rosenheim-kreis"
+
+    with respx.mock:
+        respx.get(search_url).mock(return_value=httpx.Response(404))
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert listings == []
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_incomplete_when_a_search_fetch_raises(
+    adapter, search_profile, sample_keywords
+) -> None:
+    """The transport-exception branch in `_walk_search` - untested until now.
+    A plain exception (not httpx.TransportError) keeps PoliteClient's own
+    retry/backoff out of this test, which is about `_walk_search`'s except
+    clause, not PoliteClient's retry policy.
+    """
+    search_url = f"{BASE}/kaufen/haus/rosenheim-kreis"
+
+    with respx.mock:
+        respx.get(search_url).mock(side_effect=RuntimeError("boom"))
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert listings == []
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_discover_marks_incomplete_when_a_listed_id_fails_to_fetch(
+    adapter, search_profile, sample_keywords, read_fixture
+) -> None:
+    """A listed id whose own detail fetch fails must not silently shrink the
+    observed set: it was seen on the search page but never actually looked
+    at, so its absence from the results must not license 'this is gone'.
+    Concrete failure mode this guards: a property first observed 3 days ago
+    (inside listing_ttl_days) would otherwise be read as fully enumerated
+    and, via mark_missing, misclassified REMOVED rather than left alone.
+    """
+    search_url = f"{BASE}/kaufen/haus/rosenheim-kreis"
+    adapter.options["max_pages_per_search"] = 1
+
+    with respx.mock:
+        respx.get(search_url).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE))
+        )
+        # One specific listed id 404s; every other detail fetch succeeds
+        # normally. 404 is not a retryable status in PoliteClient, so this
+        # stays fast and exercises fetch_detail's own >=400 -> None path.
+        respx.get(
+            f"{BASE}/immobilien/interessante-wertanlage-bad-endorf-charmantes-"
+            "apartment-mit-serioesem-mieter-GZJFXJ"
+        ).mock(return_value=httpx.Response(404))
+        respx.get(url__regex=rf"{BASE}/immobilien/.+").mock(
+            return_value=httpx.Response(200, text=STUB_DETAIL_HTML)
+        )
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    # 20 ids on the page, 1 failed - 19 make it through, not silently 20.
+    assert len(listings) == 19
+    assert "GZJFXJ" not in {listing.external_id for listing in listings}
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False
 
 
 @pytest.mark.asyncio

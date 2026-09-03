@@ -141,8 +141,10 @@ against a real search-results capture. `ovbimmo` is enabled in
 recorded here.
 
 Terms check status: **DONE (2026-09-03)**, by a human on a networked
-machine - not from this container, which cannot reach `ovbimmo.de` at all
-(see Ruling 1 in the plan's shared context). Two pages were read:
+machine, per Ruling 1 in the plan's shared context (the container's own
+egress to `ovbimmo.de` was blocked when the terms were checked; it was
+opened later in the same session to capture the detail page below). Two
+pages were read for the terms check:
 
 - `https://ovbimmo.de/robots.txt`: `User-agent: *` carries **no blanket
   `Disallow`**. Only `*/2823228/`, `/_widget/*` and `/search-widget/*` are
@@ -172,9 +174,11 @@ that trail per municipality/property-type facet, capped at
 `options.max_pages_per_search` (module default
 `ovbimmo.DEFAULT_MAX_PAGES_PER_SEARCH = 5`). Per invariant 4b, any run that
 stops before the trail runs out - the cap, a bad page, a failed fetch, or no
-municipalities configured at all - calls `mark_enumeration_incomplete` with
+municipalities configured at all, or a listed id's own detail fetch fails
+(a 4xx/5xx or transport error) - calls `mark_enumeration_incomplete` with
 the reason, so this source's silence is never misread as "removed" for a
-run that saw only page one of ten.
+run that saw only page one of ten, nor for a single listing whose detail
+page 500'd once inside its 14-day `listing_ttl_days` window.
 
 **The detail page, against a real capture.**
 `tests/fixtures/html/ovbimmo_detail.html` is a real page captured from
@@ -182,8 +186,13 @@ run that saw only page one of ten.
 fixture and `tests/sources/adapters/test_ovbimmo.py`). It confirms the
 structure expected going in: a `dataLayer` JSON blob carrying `listing_id`
 (the same 6-char code as the URL), `property_price` **in cents**, `rooms`,
-`area`, `postal_code`, `locality`, `geo_hierarchy_*`; and an Objektdaten
-table built from `col-label`/`col-value` divs.
+`area`, `postal_code`, `locality`, `geo_hierarchy_*`; and the headline price/
+rooms/area figures rendered as three `eps-item` blocks, e.g. `<div
+class="eps-item eps-item-price col-4">690.000,00 €<br> <span
+class="eps-item-unit">Kaufpreis</span></div>` (value first, label in a
+nested span). The page also carries `col-label`/`col-value` divs, but those
+are unrelated sidebar widgets (Umzugsrechner, Immobilienwert, Kredit) - not
+where the Objektdaten figures live.
 
 None of that structured data is parsed by this adapter. `fetch_detail` uses
 only `_htmlutil`'s generic, markup-agnostic HTML fallback - and against the
@@ -195,11 +204,11 @@ real page, that gets:
   text, so the `hidden_score` keyword vocabulary still fires on them;
 - **nothing** for `price_raw`/`rooms_raw`/`living_raw`/`land_raw`/etc.
   `extract_labeled_fields` wants a single "Label: value" line, and this
-  page's Objektdaten table renders the value *before* its label in two
-  separate divs, one per line ("690.000,00 €" then "Kaufpreis", never
-  "Kaufpreis: 690.000,00 €") - so it genuinely extracts nothing here. This
-  is a real limitation, not a bug in this task's scope: reading the
-  dataLayer JSON or the col-label/col-value table would need a
+  page's `eps-item` blocks render the value *before* its label, each on its
+  own line after the body text is flattened ("690.000,00 €" then
+  "Kaufpreis", never "Kaufpreis: 690.000,00 €") - so it genuinely extracts
+  nothing here. This is a real limitation, not a bug in this task's scope:
+  reading the dataLayer JSON or the `eps-item` blocks would need a
   purpose-built extension to this adapter (or to `_htmlutil`) that does not
   exist yet.
 - `external_id` always comes from the **URL**, never the page - the same
@@ -217,6 +226,17 @@ Traunstein. It does **not** cover Lkr. Miesbach or Ebersberg — those are
 Ippen/Münchner Merkur titles with a different portal. Until an Ippen source
 exists, those municipalities are served only by `gemeindeblatt_pdf`. See
 `docs/coverage.md`.
+
+**URL slug vs. town name - a deliberate asymmetry.** `options.municipalities`
+in the registry uses OVB's own URL slugs (`feldkirchen-westerham`,
+`bad-aibling`, `wasserburg-a-inn`, ...), verified live against all 12
+configured facets (6 municipalities × 2 property types): 10 return 200 with
+real result cards, and the other two (`wasserburg-am-inn`, the gazetteer's
+own spelling) 301-redirect to `wasserburg-a-inn`. `docs/coverage.md` and
+`config/search.yaml`'s `coverage.municipalities` instead use **"Wasserburg
+am Inn"**, because that is the name the gazetteer and the normalizer
+produce. These are two different namespaces, each correct in its own place -
+do not "fix" one to match the other.
 
 ## Adding a regional source
 

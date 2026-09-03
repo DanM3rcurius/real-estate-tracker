@@ -32,21 +32,25 @@ REMOVED. See docs/DECISIONS.md entry 15.
 A real detail page (tests/fixtures/html/ovbimmo_detail.html) confirms the
 structure the plan expected: a `dataLayer` JSON blob carrying `listing_id`
 (the same 6-char code), `property_price` in cents, `rooms`, `area`,
-`postal_code`, `locality`, `geo_hierarchy_*`; an Objektdaten table built from
-`col-label`/`col-value` divs. None of that structured data is parsed here -
+`postal_code`, `locality`, `geo_hierarchy_*`; and the headline figures
+(price/rooms/area) rendered as three `eps-item` blocks, e.g. `<div
+class="eps-item eps-item-price col-4">690.000,00 €<br> <span
+class="eps-item-unit">Kaufpreis</span></div>` - the VALUE first, then the
+label in a nested span. (The page also has `col-label`/`col-value` divs, but
+those are unrelated sidebar widgets - Umzugsrechner, Immobilienwert, Kredit -
+not the Objektdaten figures.) None of that structured data is parsed here -
 `fetch_detail` uses only the generic HTML fallback in `_htmlutil`
 (og:title/description/images), which is markup-agnostic on purpose and was
-never meant to read a JSON blob or a label/value table. Concretely, on the
-real capture: title and images come through cleanly via og: tags, but
+never meant to read a JSON blob or a value-then-label block. Concretely, on
+the real capture: title and images come through cleanly via og: tags, but
 `extract_labeled_fields` (which wants a single "Label: value" line) gets
-nothing, because this page's Objektdaten table renders the value *before*
-its label in two separate divs, one per line ("690.000,00 €" then
-"Kaufpreis", never "Kaufpreis: 690.000,00 €"). Parsing the dataLayer JSON or
-the col-label/col-value table would need a page-specific extension to this
-adapter (or to `_htmlutil`) that does not exist yet - the price/rooms/area
-figures still reach `description` as plain text, so the hidden_score
-keyword vocabulary still fires on them, but no typed RawListing field does.
-See docs/SOURCES.md.
+nothing, because "690.000,00 €" and "Kaufpreis" land on separate lines in
+that order, never as "Kaufpreis: 690.000,00 €". Parsing the dataLayer JSON or
+the `eps-item` blocks would need a page-specific extension to this adapter
+(or to `_htmlutil`) that does not exist yet - the price/rooms/area figures
+still reach `description` as plain text, so the hidden_score keyword
+vocabulary still fires on them, but no typed RawListing field does. See
+docs/SOURCES.md.
 
 The external id always comes from the URL, never the page - deliberately,
 since it needs no parser at all and survives a broker rewriting the title.
@@ -54,7 +58,11 @@ since it needs no parser at all and survives a broker rewriting the title.
 does - OVB carries both broker and private inventory (the one real detail
 page captured so far is a broker listing with "Provision für Käufer"), and
 guessing wrong would corrupt the hidden_score signal this source exists to
-feed.
+feed. The same capture is independent evidence for never trusting the
+`dataLayer` for this either: its `features` list says
+`free_of_commission`, while the page body plainly says "Provision für
+Käufer" - the JSON blob and the human-facing text disagree on commission,
+so `contact_kind` stays unset rather than derived from either.
 """
 
 from __future__ import annotations
@@ -179,9 +187,21 @@ class OvbimmoAdapter(SourceAdapter):
                 if match is None or match.group(1) in seen:
                     continue
                 seen.add(match.group(1))
-                listing = await self.fetch_detail(urljoin(base, href))
-                if listing is not None:
-                    yield listing
+                detail_url = urljoin(base, href)
+                listing = await self.fetch_detail(detail_url)
+                if listing is None:
+                    # The search page listed this id; fetch_detail returning
+                    # None (a 4xx/5xx or a transport failure) means we never
+                    # actually looked at it - its absence from the observed
+                    # set must not be read as "gone". Without this, a single
+                    # flaky detail fetch shrinks the observed set silently
+                    # and can turn into a false REMOVED via mark_missing.
+                    self.mark_enumeration_incomplete(
+                        f"{facet}: detail fetch failed for listed id "
+                        f"{match.group(1)} ({detail_url})"
+                    )
+                    continue
+                yield listing
 
             next_node = tree.css_first(NEXT_LINK_SELECTOR)
             next_href = next_node.attributes.get("href") if next_node is not None else None
@@ -199,8 +219,8 @@ class OvbimmoAdapter(SourceAdapter):
             self.key, url, response.text, http_status=response.status_code
         )
         # The external id lives in the URL, not the page - deliberate, since
-        # the detail markup itself is unverified against a real capture (see
-        # the module docstring and docs/SOURCES.md).
+        # it needs no parser at all and survives a broker rewriting the
+        # title (see the module docstring).
         match = DETAIL_HREF_RE.search(url)
         if match is not None:
             listing.external_id = match.group(1)

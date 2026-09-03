@@ -173,14 +173,16 @@ sources:
       paper, not a portal. listing_ttl_days: 14 because adverts run a fixed
       paid window, so a disappearance within that window is EXPIRED, not
       REMOVED - see docs/DECISIONS.md entry 15.
-      The detail page's dataLayer JSON and Objektdaten col-label/col-value
-      table are confirmed by a real capture but not parsed - fetch_detail
-      only reads the external id from the URL and the generic og:/body-text
-      fallback, so price/rooms/area stay in description as plain text
-      rather than typed fields. See docs/SOURCES.md. contact_kind is
-      deliberately left unset because this source carries both broker and
+      The detail page's dataLayer JSON and its three eps-item price/rooms/
+      area blocks are confirmed by a real capture but not parsed -
+      fetch_detail only reads the external id from the URL and the generic
+      og:/body-text fallback, so price/rooms/area stay in description as
+      plain text rather than typed fields. See docs/SOURCES.md. contact_kind
+      is deliberately left unset because this source carries both broker and
       private inventory, and the one detail page captured so far is a
-      broker listing.
+      broker listing whose own dataLayer.features disagrees with its body
+      text about commission (free_of_commission vs. "Provision für Käufer") -
+      further reason not to trust either as a source of truth for this field.
     options:
       municipalities:
         - feldkirchen-westerham
@@ -188,7 +190,10 @@ sources:
         - bad-aibling
         - kolbermoor
         - rosenheim
-        - wasserburg-am-inn
+        # NOT "wasserburg-am-inn": that is the gazetteer/coverage.md town
+        # name ("Wasserburg am Inn"), a different namespace from OVB's URL
+        # slug. Verified live: wasserburg-am-inn 301-redirects to this slug.
+        - wasserburg-a-inn
       property_types: ["haus", "grundstueck"]
 
   # ------------------------------------------------- off by default (ToS/bot)
