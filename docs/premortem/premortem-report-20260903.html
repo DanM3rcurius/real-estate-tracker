@@ -1,0 +1,585 @@
+<title>Hofradar Befundbericht</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#F2F3EE;
+  --raised:#FBFBF8;
+  --sunk:#E7E9E1;
+  --ink:#1B211E;
+  --ink-soft:#4E5851;
+  --ink-faint:#7C8880;
+  --rule:#D3D8CE;
+  --accent:#2F6B5B;
+  --accent-soft:#E2EDE8;
+  --kritisch:#8C3A32;
+  --erheblich:#B07C2A;
+  --beobachten:#4E7288;
+  --shadow:0 1px 2px rgba(27,33,30,.05), 0 8px 24px -16px rgba(27,33,30,.22);
+
+  --display:"Bricolage Grotesque","Helvetica Neue",Arial,sans-serif;
+  --body:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+
+  --measure:66ch;
+  --pad:clamp(1.15rem,3.4vw,2.4rem);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#141917;
+    --raised:#1C2320;
+    --sunk:#101514;
+    --ink:#E8ECE6;
+    --ink-soft:#A9B4AC;
+    --ink-faint:#78847C;
+    --rule:#2C3531;
+    --accent:#6FB39C;
+    --accent-soft:#1E302B;
+    --kritisch:#D4796D;
+    --erheblich:#D6A857;
+    --beobachten:#89AEC4;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141917;
+  --raised:#1C2320;
+  --sunk:#101514;
+  --ink:#E8ECE6;
+  --ink-soft:#A9B4AC;
+  --ink-faint:#78847C;
+  --rule:#2C3531;
+  --accent:#6FB39C;
+  --accent-soft:#1E302B;
+  --kritisch:#D4796D;
+  --erheblich:#D6A857;
+  --beobachten:#89AEC4;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--body);
+  font-size:16.5px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:76rem;margin:0 auto;padding:0 var(--pad) 5rem;}
+
+/* ---------- masthead ---------- */
+.masthead{
+  border-bottom:2px solid var(--ink);
+  padding:2.6rem 0 1.15rem;
+  display:flex;flex-wrap:wrap;gap:1.5rem 2.5rem;align-items:flex-end;
+  justify-content:space-between;
+}
+.masthead h1{
+  font-family:var(--display);
+  font-weight:800;
+  font-size:clamp(2.1rem,5.6vw,3.5rem);
+  line-height:.98;
+  letter-spacing:-.022em;
+  margin:0;
+  text-wrap:balance;
+  max-width:18ch;
+}
+.masthead h1 em{font-style:normal;color:var(--accent);}
+.stamp{
+  font-family:var(--mono);
+  font-size:.7rem;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:var(--ink-faint);
+  text-align:right;
+  line-height:1.85;
+  white-space:nowrap;
+}
+.premise{
+  border-left:3px solid var(--accent);
+  background:var(--accent-soft);
+  padding:1rem 1.35rem;
+  margin:1.9rem 0 0;
+  max-width:var(--measure);
+  font-size:1.02rem;
+}
+.premise strong{font-weight:600;}
+.method{
+  font-family:var(--mono);
+  font-size:.76rem;
+  color:var(--ink-faint);
+  margin:.85rem 0 0;
+  letter-spacing:.01em;
+}
+
+/* ---------- section furniture ---------- */
+.sec{margin-top:4.2rem;}
+.eyebrow{
+  font-family:var(--mono);
+  font-size:.71rem;
+  letter-spacing:.17em;
+  text-transform:uppercase;
+  color:var(--accent);
+  margin:0 0 .5rem;
+  display:flex;align-items:center;gap:.75rem;
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--rule);}
+h2{
+  font-family:var(--display);
+  font-weight:700;
+  font-size:clamp(1.4rem,3.1vw,1.95rem);
+  letter-spacing:-.014em;
+  line-height:1.14;
+  margin:0 0 1.4rem;
+  text-wrap:balance;
+}
+h3{
+  font-family:var(--display);
+  font-weight:700;
+  font-size:1.06rem;
+  letter-spacing:-.006em;
+  line-height:1.25;
+  margin:0;
+  text-wrap:balance;
+}
+p{margin:0 0 .95rem;max-width:var(--measure);}
+p:last-child{margin-bottom:0;}
+code{
+  font-family:var(--mono);
+  font-size:.855em;
+  background:var(--sunk);
+  padding:.1em .34em;
+  border-radius:3px;
+}
+
+/* ---------- verdicts ---------- */
+.verdicts{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(19rem,1fr));}
+.verdict{
+  background:var(--raised);
+  border:1px solid var(--rule);
+  border-top:3px solid var(--vc,var(--accent));
+  padding:1.35rem 1.4rem 1.45rem;
+  box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:.6rem;
+}
+.verdict .vlabel{
+  font-family:var(--mono);
+  font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--vc,var(--accent));
+}
+.verdict p{font-size:.94rem;max-width:none;}
+.ref{
+  font-family:var(--mono);font-size:.72rem;font-weight:600;
+  color:var(--ink-soft);border:1px solid var(--rule);
+  padding:.06em .4em;border-radius:3px;white-space:nowrap;
+}
+
+/* ---------- the thesis ---------- */
+.thesis{
+  margin-top:1.4rem;
+  background:var(--ink);
+  color:var(--ground);
+  padding:clamp(1.6rem,4vw,2.9rem);
+  display:grid;gap:1.3rem;
+}
+.thesis .vlabel{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--accent);
+}
+:root[data-theme="dark"] .thesis .vlabel,
+.thesis .vlabel{color:#8FCBB6;}
+.thesis blockquote{
+  margin:0;
+  font-family:var(--display);
+  font-weight:700;
+  font-size:clamp(1.35rem,3.7vw,2.15rem);
+  line-height:1.14;
+  letter-spacing:-.018em;
+  text-wrap:balance;
+  max-width:24ch;
+}
+.thesis p{color:#C6CEC7;max-width:60ch;font-size:.97rem;margin:0;}
+.thesis .sig{
+  font-family:var(--mono);font-size:.73rem;color:#8B9790;
+  border-top:1px solid #333C37;padding-top:.9rem;margin:0;
+}
+
+/* ---------- plan + checklist ---------- */
+.twocol{display:grid;gap:2.6rem;grid-template-columns:repeat(auto-fit,minmax(21rem,1fr));align-items:start;}
+ol.plan{margin:0;padding:0;list-style:none;counter-reset:p;display:grid;gap:.85rem;}
+ol.plan li{
+  counter-increment:p;
+  display:grid;grid-template-columns:1.85rem 1fr;gap:.85rem;
+  padding-bottom:.85rem;border-bottom:1px solid var(--rule);
+  font-size:.95rem;
+}
+ol.plan li:last-child{border-bottom:0;padding-bottom:0;}
+ol.plan li::before{
+  content:counter(p);
+  font-family:var(--mono);font-size:.78rem;font-weight:600;
+  color:var(--accent);padding-top:.24em;
+}
+ol.plan b{font-weight:600;font-family:var(--display);letter-spacing:-.004em;}
+
+ul.check{margin:0;padding:0;list-style:none;display:grid;gap:.7rem;}
+ul.check li{
+  background:var(--raised);border:1px solid var(--rule);
+  padding:.8rem .95rem;font-size:.92rem;
+  display:grid;grid-template-columns:auto 1fr;gap:.7rem;align-items:start;
+}
+ul.check li::before{
+  content:"☐";font-family:var(--mono);color:var(--accent);
+  font-size:1rem;line-height:1.5;
+}
+ul.check .prevents{
+  display:block;font-family:var(--mono);font-size:.7rem;
+  color:var(--ink-faint);margin-top:.3rem;letter-spacing:.02em;
+}
+
+/* ---------- findings ---------- */
+.legend{
+  display:flex;flex-wrap:wrap;gap:1.15rem;
+  font-family:var(--mono);font-size:.72rem;color:var(--ink-soft);
+  margin:0 0 1.5rem;letter-spacing:.02em;
+}
+.legend span{display:flex;align-items:center;gap:.42rem;}
+.legend i{width:.72rem;height:.72rem;display:block;border-radius:2px;}
+
+.findings{display:grid;gap:1.15rem;grid-template-columns:repeat(auto-fit,minmax(25rem,1fr));}
+.finding{
+  background:var(--raised);
+  border:1px solid var(--rule);
+  box-shadow:var(--shadow);
+  display:grid;
+  grid-template-columns:4px 1fr;
+}
+.finding .stripe{background:var(--sv);}
+.finding .inner{padding:1.3rem 1.4rem 1.4rem;display:flex;flex-direction:column;gap:.85rem;}
+.fhead{display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap;}
+.fcode{
+  font-family:var(--mono);font-size:.72rem;font-weight:600;
+  color:var(--sv);letter-spacing:.06em;
+}
+.fsev{
+  font-family:var(--mono);font-size:.64rem;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--sv);
+  border:1px solid var(--sv);border-radius:2px;
+  padding:.1em .42em;margin-left:auto;
+}
+.finding h3{flex-basis:100%;}
+.finding p{font-size:.925rem;max-width:none;margin:0;color:var(--ink-soft);}
+.assume{
+  border-left:2px solid var(--rule);
+  padding-left:.9rem;
+  font-size:.92rem;
+}
+.assume b{
+  display:block;font-family:var(--mono);font-size:.66rem;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);
+  margin-bottom:.28rem;font-weight:500;
+}
+.signs{
+  background:var(--sunk);
+  padding:.85rem .95rem;
+  font-family:var(--mono);
+  font-size:.78rem;
+  line-height:1.55;
+  display:grid;gap:.55rem;
+}
+.signs b{
+  font-size:.66rem;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--ink-faint);font-weight:500;
+}
+.signs div{display:grid;grid-template-columns:auto 1fr;gap:.55rem;color:var(--ink-soft);}
+.signs div::before{content:"▸";color:var(--sv);}
+
+footer{
+  margin-top:4.5rem;padding-top:1.3rem;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);
+  display:flex;flex-wrap:wrap;gap:.5rem 2rem;justify-content:space-between;
+}
+
+@media (max-width:640px){
+  .stamp{text-align:left;}
+  .finding{grid-template-columns:3px 1fr;}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <h1>Befundbericht: <em>Hofradar</em> Quellenausbau</h1>
+  <div class="stamp">
+    Premortem · Klein-Methode<br>
+    Aufgenommen 03.09.2026<br>
+    9 Befunde · 9 Prüfer
+  </div>
+</header>
+
+<p class="premise">
+  <strong>Premise.</strong> It is six months from now. The six-workstream source
+  expansion shipped. Dan still has not found a Hofstelle through Hofradar — he
+  checks two websites by hand on Saturdays instead. This report works backward
+  from that.
+</p>
+<p class="method">
+  Method — nine failure modes generated against the plan, then one investigator sent
+  into each independently and in parallel. Findings below are their conclusions, not a
+  risk register written after the fact.
+</p>
+
+<!-- ============ SYNTHESIS ============ -->
+<section class="sec">
+  <p class="eyebrow">Zusammenfassung</p>
+  <h2>What actually kills it</h2>
+
+  <div class="verdicts">
+    <article class="verdict" style="--vc:var(--kritisch)">
+      <span class="vlabel">Most likely</span>
+      <h3>Yield never justifies the machinery <span class="ref">B1</span></h3>
+      <p>
+        It is most likely because <strong>nothing has to go wrong.</strong> Every
+        other failure needs a bug, a bad call or bad luck. This one is the default
+        outcome when all six workstreams work exactly as designed: the Denkmalbörse
+        is Bavaria-wide and holds a handful of in-radius objects; ovbimmo is largely
+        brokered stock already visible on the portals.
+      </p>
+      <p>Three investigators reached the same three-property shortlist independently.</p>
+    </article>
+
+    <article class="verdict" style="--vc:var(--kritisch)">
+      <span class="vlabel">Most dangerous</span>
+      <h3>The schema change erases the memory <span class="ref">B4</span></h3>
+      <p>
+        Every other failure here is recoverable — re-tune the gate, fix the regex,
+        disable the source. <strong>Observation history cannot be refetched from
+        anywhere.</strong> Months of price drops and honest <code>first_seen</code>
+        dates live in one SQLite file, and DECISIONS #2 names that history as the
+        one feature that turns a scraper into a radar.
+      </p>
+      <p>
+        DECISIONS #10 (no Alembic) makes <code>rm</code> the path of least resistance
+        at exactly the mid-build moment when ingest tests are red.
+      </p>
+    </article>
+  </div>
+
+  <div class="thesis">
+    <span class="vlabel">The hidden assumption</span>
+    <blockquote>Hofradar is being built as a ranking problem. Its actual constraint is coverage.</blockquote>
+    <p>
+      The scoring system is already far more sophisticated than the corpus justifies:
+      five weighted components, twelve hidden signals, nine named gates, a confidence
+      model, per-profile caching — over a database that, by the project's own
+      description, “finds almost nothing.” The expansion adds a tempo axis, a cost
+      branch and a thirteenth signal: more <em>reasoning about</em> properties, almost
+      no new <em>properties</em>.
+    </p>
+    <p>
+      Meanwhile <code>gemeindeblatt_pdf</code> ships complete with
+      <code>options.bulletins: []</code>, and <code>generic_rss</code> /
+      <code>generic_sitemap</code> ship <em>enabled</em> with
+      <code>options.feeds: []</code> and <code>options.sites: []</code>. Those three
+      empty lists are the highest-yield, lowest-risk, zero-code intervention available
+      — and they stay empty because filling them is data entry, not engineering.
+    </p>
+    <p class="sig">
+      Four of nine investigators arrived at the empty-config observation without being
+      prompted toward it. Findings B3, B5 and B9 are worse than neutral on this axis:
+      they describe the reasoning machinery actively hiding or destroying intake the
+      system already had.
+    </p>
+  </div>
+</section>
+
+<!-- ============ REVISED PLAN ============ -->
+<section class="sec">
+  <p class="eyebrow">Maßnahmen</p>
+  <h2>The revised plan</h2>
+  <div class="twocol">
+    <ol class="plan">
+      <li><span><b>Config before code.</b> Fill <code>options.bulletins</code> (Weyarn, Valley, Holzkirchen, Bruckmühl, Feldkirchen-Westerham, Bad Aibling, Irschenberg, Otterfing) and seed <code>options.feeds</code>/<code>options.sites</code> from the ovbimmo <code>/anbieter</code> directory. Both adapters are already built and tested. Run four weeks — this is the experiment that tests the whole thesis.</span></li>
+      <li><span><b>Write the yield gate down now.</b> No <code>market_tempo</code>, no cost branch, no Atlas enrichment until a source has produced ≥5 in-radius objects. Decide the number before the data, not after.</span></li>
+      <li><span><b>Terms before enablement.</b> Add <code>terms_checked_at</code> and <code>terms_excerpt</code> to <code>SourceConfig</code>; no source may be <code>enabled: true</code> without both. Makes B7 structurally impossible rather than merely unlikely.</span></li>
+      <li><span><b>Make <code>mark_missing</code> refuse weak evidence.</b> Refuse an empty seen-set outright; refuse any run marking &gt;30% of a source's inventory missing; add source-level <code>listing_ttl_days</code> so disappearance-at-TTL yields an EXPIRED state that is <em>not</em> in <code>GONE_STATUSES</code>.</span></li>
+      <li><span><b>Back up before any schema change.</b> A <code>scripts/backup_db.py</code>, plus a pre-run assertion refusing to start if the Observation count fell or FIRST_SEEN would exceed 20% of processed listings.</span></li>
+      <li><span><b>Reorder: monument provenance <em>before</em> the tempo class.</b> Split <code>is_monument</code> into claimed vs confirmed; <code>market_tempo=SLOW</code> requires confirmed. A reordering of existing work, not extra work.</span></li>
+      <li><span><b>Modelled cost may not drive a hard gate.</b> Where renovation is inferred rather than observed, <code>REJECT_TOTAL_COST</code> becomes a flag and a rank penalty — or gate on <code>total_low</code> instead of <code>total_mid</code>.</span></li>
+      <li><span><b>Build a coverage map, not just a source registry.</b> One query: municipalities inside the radius × observations in the last four weeks. The dark cells are the backlog, in priority order.</span></li>
+    </ol>
+
+    <div>
+      <p class="eyebrow" style="margin-top:0">Vor Baubeginn</p>
+      <h2 style="font-size:1.2rem;margin-bottom:1.1rem">Pre-launch checklist</h2>
+      <ul class="check">
+        <li><span><code>curl</code> robots.txt and the AGB for blfd.bayern.de and ovbimmo.de; paste excerpts and a date into the source registry.<span class="prevents">prevents B7</span></span></li>
+        <li><span>Back up <code>/data/hofradar.db</code>; add the pre-run assertion that Observation count never decreases.<span class="prevents">prevents B4</span></span></li>
+        <li><span>Fill the three empty config lists; run four weeks; record in-radius yield per source before writing any new adapter.<span class="prevents">prevents B1, B8</span></span></li>
+        <li><span>Add the three <code>mark_missing</code> guards and <code>listing_ttl_days</code> before enabling any source whose listings expire on a billing cycle.<span class="prevents">prevents B2, B3</span></span></li>
+        <li><span>Write the per-Gemeinde coverage query — and actually look at it.<span class="prevents">prevents B8</span></span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINDINGS ============ -->
+<section class="sec">
+  <p class="eyebrow">Schadensregister</p>
+  <h2>Nine findings</h2>
+  <div class="legend">
+    <span><i style="background:var(--kritisch)"></i> Kritisch — likely and hard to reverse</span>
+    <span><i style="background:var(--erheblich)"></i> Erheblich — likely or damaging, recoverable</span>
+    <span><i style="background:var(--beobachten)"></i> Beobachten — contingent, watch it</span>
+  </div>
+
+  <div class="findings">
+
+    <article class="finding" style="--sv:var(--kritisch)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B1</span><span class="fsev">Kritisch</span>
+          <h3>Yield/effort mismatch</h3></div>
+        <p>The adapter shipped clean and found four objects Bavaria-wide — two in Franken, one in Schwaben, one in Landshut. Zero in radius. Nobody flagged it, because the adapter <em>was</em> working: the suite proved parsing, not yield. Five further weeks went into scoring machinery for a corpus of four unrankable properties.</p>
+        <p>The ovbimmo harvest broke faith. Sixty brokers, ~380 listings a month, six surviving the filters — five of which carried an IS24 or Immowelt object ID in the exposé. The same listings the disabled adapters would have shown, arriving late via a broker's own site.</p>
+        <div class="assume"><b>Assumption</b>That the bottleneck was source coverage rather than the number of Hofstellen that actually change hands in the radius per month — a number small enough that no engineering beats a human looking twice a week.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>In-radius yield per adapter, measured <em>before</em> building the next one.</div>
+          <div>Novelty rate under ~50% for two months = duplicating Saturday, not extending it.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--erheblich)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B2</span><span class="fsev">Erheblich</span>
+          <h3>Silent fixture rot</h3></div>
+        <p>The site changed its detail-page layout in May. Selectors stopped matching, <code>discover()</code> returned <code>[]</code> without raising — an empty result set is a legal result set — and all 565 tests stayed green against March's HTML. The frozen fixture had become the only page the adapter was ever asked to parse.</p>
+        <p>Nothing alerted, because the pipeline has no concept of an implausible zero. A digest of zero and a digest of ten look like the same healthy artifact. Then an empty seen-set flowed into <code>mark_missing</code> and marked eleven live Hofstellen gone in one run — with clean Observation rows recording the disappearance.</p>
+        <div class="assume"><b>Assumption</b>That a passing test suite says something about the live site, when frozen fixtures only prove the adapter still parses the past.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>Consecutive-zero-run counter per source; four straight zeros is alertable.</div>
+          <div>Any run marking &gt;30% of a source's inventory missing is a parser failure until proven otherwise.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--kritisch)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B3</span><span class="fsev">Kritisch</span>
+          <h3>The 14-day ad expiry poisons listing_status</h3></div>
+        <p>OVB shipped as <code>role=local</code> and nobody asked what <em>local</em> licensed it to do. On day 15, <code>mark_missing</code> marked eleven listings REMOVED in one pass. Every one was still for sale; the ad package had run its two-week course. The system could not distinguish “the seller stopped paying” from “the farmstead sold,” because absence was interpreted by role rather than by evidence.</p>
+        <p>Then renewals started. Ingest correctly refused FIRST_SEEN and wrote REACTIVATED — invariant 2 honoured, outcome still garbage. By month two the change feed was a metronome on a 14-day beat, and the ten-entry digest was all churn.</p>
+        <div class="assume"><b>Assumption</b>That a source's <em>role</em> decides whether its silence is evidence, when what actually decides it is the source's <em>retention policy</em> — whether listings leave because the property left the market or because a clock ran out.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>Bimodal removal age: a hard spike at 13–15 days is a billing cycle, not a market.</div>
+          <div>Any property with more than one REMOVED→REACTIVATED transition. Alert on the second, not the tenth.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--kritisch)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B4</span><span class="fsev">Kritisch</span>
+          <h3>The schema change destroys the memory</h3></div>
+        <p>Week three. New cached columns; <code>create_all()</code> is a no-op on existing tables, so every query raised <code>no such column</code>. The fix was five minutes of hand-written ALTER, or fifteen seconds of <code>rm /data/hofradar.db</code>. Mid-build with ingest tests red, the second won. The database was four months old and <em>felt</em> like scratch data.</p>
+        <p>The next run wrote 340 Observations and ingest did exactly what invariant 2 requires: no prior row existed, so every one became FIRST_SEEN. The digest went out with ten entries, all “neu entdeckt,” including the Bruckmühl Hof that had been dropping from 690k to 595k since spring. Nothing errored. Price history rendered as a single point.</p>
+        <div class="assume"><b>Assumption</b>That the SQLite file at <code>/data</code> was a rebuildable artifact of the code, rather than the irreplaceable, un-refetchable product itself.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>FIRST_SEEN exceeding ~20% of processed listings in any run.</div>
+          <div>Observation row count failing to increase monotonically across a deploy.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--erheblich)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B5</span><span class="fsev">Erheblich</span>
+          <h3>The monument regex becomes a staleness launderer</h3></div>
+        <p>The tempo slice shipped clean and needed no migration. Every SLOW fixture was hand-written with a genuine BLfD entry; nobody wrote one for an exposé saying “Denkmalschutz nicht vorhanden” — the case <code>re.compile(r"denkmal")</code> gets exactly backwards. The Atlas provenance slice went into the backlog and stayed there.</p>
+        <p>The exploit paid twice: a stretched band table scored a 400-day listing like a 60-day one, and the later STALE threshold withheld the −10 that also feeds <code>hidden</code>. Listings that mention Denkmal in passing are disproportionately the ones that have been sitting — broker copy accretes adjectives on relists. Real BLfD entries were a handful; false positives were dozens.</p>
+        <div class="assume"><b>Assumption</b>That <code>is_monument</code> was accurate enough for a display flag, therefore accurate enough for a scoring multiplier — ignoring that a flag's tolerable error rate scales with what depends on it.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div><code>count(is_monument)</code> exceeding the authoritative source's entry count.</div>
+          <div>Median age of the top ten rising while the corpus median stays flat.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--erheblich)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B6</span><span class="fsev">Erheblich</span>
+          <h3>Scoring crosses the threshold of explicability</h3></div>
+        <p>Dan opened a breakdown to understand why a Denkmal farmstead outranked a cheaper, closer, sounder property. It was honest, exactly as designed: thirteen signals as separate line items, a stale penalty not netted off, a capital_risk widened by the approval additive, and a freshness band he could not reconcile because <code>market_tempo</code> had swapped both the band table <em>and</em> the STALE threshold underneath it. Every number labelled; none of it an answer.</p>
+        <p>The subtler failure: after a slider nudge he could no longer predict the reorder <em>directionally</em>. Explicability had always rested on naming rejections — it never had to explain <em>ordering</em> among survivors, because the ordering was still intuitable. The expansion pushed it past that point, and honest breakdowns made it worse: more true line items, less understanding.</p>
+        <div class="assume"><b>Assumption</b>That a rejection being <em>named</em> is the same thing as a ranking being <em>predictable</em> — that explaining exclusion also explains order.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>Opening a score breakdown, then opening <code>scoring/</code> in the same session.</div>
+          <div>A small weight change reordering the top ten by more than two positions.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--beobachten)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B7</span><span class="fsev">Beobachten</span>
+          <h3>The deferred ToS check kills OVB late</h3></div>
+        <p>The adapter got written first because it was the interesting part, with fixtures hand-built from a memory of the site's shape. Nobody flagged that as a blocker, because the source was classed <code>local</code> — and <code>local</code> had been defined in <em>opposition to</em> the disabled portals rather than by positive evidence about OVB. The classification was an argument, not a finding, but it entered the registry as a fact.</p>
+        <p>Week 11: the AGB restricted automated retrieval in language close enough to IS24's that invariant 7 admitted no argument. What remained was a tempo axis whose FAST pole was unreachable, a lifecycle expiry path with no producer, and no evidence for the local-press thesis, because OVB <em>was</em> the test.</p>
+        <div class="assume"><b>Assumption</b>That a source's legal status is a compliance detail to confirm later, rather than the input deciding whether the abstractions built on it are worth designing.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>Any enabled source with no recorded robots.txt timestamp or AGB excerpt. Greppable today.</div>
+          <div>A tempo class with one producing adapter is one AGB away from being two-valued.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--kritisch)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B8</span><span class="fsev">Kritisch</span>
+          <h3>The coverage blind spot swallows the one real find</h3></div>
+        <p>OVB was the source that could be built in an afternoon; Ippen/Merkur went into “later” with no date, no ticket, no owner. The decision was never revisited because nothing surfaced it: the config carries a source <em>registry</em>, not a coverage <em>map</em>. The radius is expressed in kilometres, the coverage in publishers; nobody laid one over the other — and the circle around Westham spills straight over the Miesbach line that runs past the village.</p>
+        <p>Meanwhile <code>pdf_bulletin</code> sat complete and pointed at nothing, because an empty list produces no errors and no red CI. The Sacherl in Weyarn ran in the Miesbacher Merkur and the Gemeindeblatt, sold in four weeks, and the database has no row for it. Not a missed match — a blank.</p>
+        <div class="assume"><b>Assumption</b>That source coverage and search radius are independent settings, so sources could be sequenced by integration cost rather than by which parts of the radius were still dark.</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>Per-Gemeinde observation counts against municipalities in radius. Queryable today.</div>
+          <div>Any in-radius listing Dan hears about from a human and cannot find in the database.</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="finding" style="--sv:var(--kritisch)">
+      <div class="stripe"></div>
+      <div class="inner">
+        <div class="fhead"><span class="fcode">B9</span><span class="fsev">Kritisch</span>
+          <h3>Cost pessimism compounds into a hard gate</h3></div>
+        <p>The shortlist came back with four 1980s bungalows and not one Hofstelle. Dan assumed the market was thin. It wasn't — the pipeline had ingested eleven genuine farmsteads that month and gated every one.</p>
+        <p>The mechanism was arithmetic. Pre-1960 with condition unstated (as it always is — German listings say “sanierungsbedürftig” and stop) took the pessimistic branch to HEAVY; the Denkmal multiplier then applied to 400+ m², not 120. <code>total_mid</code> cleared <code>effective_total_hard_max</code> on properties whose <em>asking price</em> sat well inside budget. A rejection manufactured entirely by a modelled figure with no observed evidence behind it — and REJECT_TOTAL_COST removes rather than ranks, so they never appeared at all.</p>
+        <div class="assume"><b>Assumption</b>That pessimism is safe because it only lowers scores — ignoring that the same pessimism was wired into a hard gate, where “cautious” means “invisible.”</div>
+        <div class="signs"><b>Warning signs</b>
+          <div>&gt;30% of Denkmal/pre-1960 listings exiting via REJECT_TOTAL_COST vs &lt;5% of post-1980.</div>
+          <div>How often <code>total_mid − asking_price</code> exceeds the asking price itself.</div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<footer>
+  <span>Hofradar — Premortem on the Denkmalbörse + local-press source expansion</span>
+  <span>9 findings · 3. September 2026 · full transcript in docs/premortem/</span>
+</footer>
+
+</div>
