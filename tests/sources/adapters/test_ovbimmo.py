@@ -317,14 +317,25 @@ async def test_discover_marks_incomplete_when_a_listed_id_fails_to_fetch(
     Concrete failure mode this guards: a property first observed 3 days ago
     (inside listing_ttl_days) would otherwise be read as fully enumerated
     and, via mark_missing, misclassified REMOVED rather than left alone.
+
+    Deliberately isolated from the page-cap branch: the real search fixture
+    itself carries a `<link rel="next">` to page 2, so a low
+    `max_pages_per_search` would ALSO mark the enumeration incomplete for an
+    entirely unrelated reason - making this test pass regardless of whether
+    the detail-fetch-failure branch does anything at all. Page 2 here is a
+    terminal page (no cards, no further `rel="next"`), the cap is left at
+    its generous default, and the walk ends cleanly on its own; the only
+    thing left standing that can mark the enumeration incomplete is the
+    fetch_detail failure this test is actually about.
     """
     search_url = f"{BASE}/kaufen/haus/rosenheim-kreis"
-    adapter.options["max_pages_per_search"] = 1
+    page_2_url = f"{BASE}/kaufen/rosenheim-kreis?page=2"
 
     with respx.mock:
         respx.get(search_url).mock(
             return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE))
         )
+        respx.get(page_2_url).mock(return_value=httpx.Response(200, text=EMPTY_NEXT_PAGE_HTML))
         # One specific listed id 404s; every other detail fetch succeeds
         # normally. 404 is not a retryable status in PoliteClient, so this
         # stays fast and exercises fetch_detail's own >=400 -> None path.
@@ -341,6 +352,9 @@ async def test_discover_marks_incomplete_when_a_listed_id_fails_to_fetch(
     # 20 ids on the page, 1 failed - 19 make it through, not silently 20.
     assert len(listings) == 19
     assert "GZJFXJ" not in {listing.external_id for listing in listings}
+    # The walk reached page 2, which had no further rel="next" - so the page
+    # cap (default 5) was never in play. Only the failed detail fetch can
+    # have caused this.
     assert adapter.enumeration_complete is False
     assert adapter.can_prove_absence is False
 
