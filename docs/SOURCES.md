@@ -302,9 +302,23 @@ nested span). The page also carries `col-label`/`col-value` divs, but those
 are unrelated sidebar widgets (Umzugsrechner, Immobilienwert, Kredit) - not
 where the Objektdaten figures live.
 
-None of that structured data is parsed by this adapter. `fetch_detail` uses
-only `_htmlutil`'s generic, markup-agnostic HTML fallback - and against the
-real page, that gets:
+Exactly two of those structured fields are parsed by this adapter, and only
+because nothing else on the page carries them: `postal_code` and `locality`,
+lifted verbatim (as strings, unconverted) into `RawListing.postcode` and
+`RawListing.town` by `_datalayer_location`. Without them an OVB listing has
+no location at all — `hofradar.geo.locate._build_geocode_queries` returns
+`[]`, nothing is geocoded, `distance_air_km` stays NULL, and the whole OVB
+inventory is invisible to both the report's in-radius yield column and its
+per-Gemeinde coverage map. Reading a site-specific structured field is what a
+*dedicated* adapter is for; the generic adapters stay generic (see the
+`generic_rss` note below, which solves the same problem through
+configuration).
+
+Everything else in the blob stays unread — the rest of it is numbers, and
+`property_price` is in **cents**, so converting any of them here would be
+`hofradar.normalize`'s job done in the wrong place. For those, `fetch_detail`
+uses only `_htmlutil`'s generic, markup-agnostic HTML fallback - and against
+the real page, that gets:
 
 - **title** and **image_urls** cleanly, via `og:title` / `og:image`;
 - **description**, the full visible body text - which means the price,
@@ -315,10 +329,10 @@ real page, that gets:
   page's `eps-item` blocks render the value *before* its label, each on its
   own line after the body text is flattened ("690.000,00 €" then
   "Kaufpreis", never "Kaufpreis: 690.000,00 €") - so it genuinely extracts
-  nothing here. This is a real limitation, not a bug in this task's scope:
-  reading the dataLayer JSON or the `eps-item` blocks would need a
-  purpose-built extension to this adapter (or to `_htmlutil`) that does not
-  exist yet.
+  nothing here. This is a real limitation: reading the `eps-item` blocks (or
+  the dataLayer's cent-denominated `property_price`) into typed raw fields
+  would need a purpose-built extension to this adapter — or to `_htmlutil` —
+  that does not exist yet.
 - `external_id` always comes from the **URL**, never the page - the same
   6-char code the dataLayer also carries, but reading it from the URL needs
   no parser at all and survives a broker rewriting the title.
@@ -401,11 +415,16 @@ broker-own-site feed (not an ovbimmo re-aggregation) is ever added alongside
 these four.
 
 **What the `cm:`/`cms:` classmarkets namespace does and does not give up to
-`feedparser` - recorded here as a precise follow-up, deliberately not
-implemented in this generic adapter** (reading a feed's own vendor namespace
-belongs in a dedicated adapter or a normalize-layer mapping, not in the
-adapter meant to work for any broker's feed). Checked directly against
-`tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom`:
+`feedparser`.** Reading a feed's own vendor namespace still does not belong
+in this adapter's *code* — it is the adapter meant to work for any broker's
+feed. The element names come from **configuration** instead:
+`options.entry_field_map` maps a feedparser entry key to one of
+`generic_rss.MAPPABLE_ENTRY_FIELDS` (raw string fields only — identity and
+authority fields are not mappable, and a non-string value is refused). The
+shipped registry entry maps `cm_postalcode -> postcode` and
+`cm_locality -> town`, which is what gives this route a location at all; the
+adapter itself still knows nothing about classmarkets. Checked directly
+against `tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom`:
 
 | Field | feedparser key | What comes through |
 |---|---|---|
@@ -424,16 +443,24 @@ reading the raw entry XML directly (e.g. with `lxml`/`ElementTree` against
 the `classmarkets` namespace) instead of trusting `feedparser`'s generic
 path - real, scoped work for whoever picks this up, not a config change.
 
-**Net effect today: ovbimmo.de now arrives through two routes -
+**Net effect today: ovbimmo.de arrives through two routes -
 `generic_rss`'s Atom feeds and the dedicated `ovbimmo` adapter's own search
-crawl - and *neither* yields a typed price, room count or town.**
-`generic_rss` doesn't read `cm:` at all, by the ruling above; `ovbimmo`'s own
-`fetch_detail` uses only the generic HTML fallback, which gets the detail
-page's `eps-item` price/rooms/area blocks as plain description text, not
-typed fields (see that adapter's note above). Both leave `locate()` to
-geocode from the title/description string alone for every one of these
-listings, even though the feed and the detail page both state the
-municipality in a field a purpose-built reader could use directly.
+crawl - and *both* now yield a postcode and a town, while *neither* yields a
+typed price or room count.** The feed route gets its location from
+`options.entry_field_map`; the dedicated adapter gets it from the detail
+page's `dataLayer`. That is what `locate()` needs: `"83109
+Großkarolinenfeld"` is a geocodable query, and the title/description prose
+these listings used to be geocoded from was not. The figures are the part
+still missing, for the two separate reasons above (feedparser drops the text
+of an attribute-carrying namespaced element; `extract_labeled_fields` cannot
+read a value-then-label block).
+
+Because both routes reach the *same* canonical listing URLs — verified: the
+Atom `<link>` and the search page's `href` for
+`.../zweifamilienhaus-grosskarolinenfeld-...-H3N33B` are byte-identical —
+they would otherwise ingest as two properties. `hofradar.dedupe.compare`
+treats an identical canonical URL as proof of identity across sources for
+exactly this reason; see `docs/MODULE_API.md` under `hofradar.dedupe`.
 
 `generic_sitemap`'s `options.sites` was deliberately left empty rather than
 also pointing at ovbimmo.de's advertised sitemap - see that source's `notes:`

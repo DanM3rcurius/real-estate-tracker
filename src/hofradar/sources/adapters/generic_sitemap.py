@@ -5,6 +5,20 @@ misconfigured site cannot turn into an unbounded crawl), the leaf URLs are
 filtered down to whatever looks like a listing page, and each surviving URL
 is fetched once through :meth:`fetch_detail`. ``options.max_pages`` bounds
 the total number of detail pages fetched in a single ``discover()`` run.
+
+This adapter's role is ``primary`` and it claims ``enumerates=True``, so per
+invariant 4b every way this run can fall short of a complete enumeration has
+to say so - otherwise ``hofradar.lifecycle.mark_missing`` reads the gap as
+"the seller withdrew it". The ways it can fall short are: the page budget
+running out, a sitemap that could not be read, a malformed ``options.sites``
+entry, and a detail page that returned nothing or raised. A flaky single
+detail page is the dangerous one, because it looks exactly like a normal run
+minus one listing. Every leaf URL the sitemap offered is also recorded via
+``record_enumerated_url`` **before** the listing-pattern filter runs, for the
+same reason the Denkmalbörse adapter records its pre-filtered rows: a URL this
+run chose not to fetch (or stopped recognising, because the operator changed
+``options.pattern``) is a routing decision, never a claim the site withdrew
+it.
 """
 
 from __future__ import annotations
@@ -48,48 +62,90 @@ class GenericSitemapAdapter(SourceAdapter):
     async def discover(
         self, profile: SearchProfile, keywords: KeywordConfig
     ) -> AsyncIterator[RawListing]:
+        # Before the empty-sites return, not after: a run that searched
+        # nothing must leave this adapter in a state that cannot license
+        # absence detection, and the previous ordering left whatever the last
+        # run happened to set (True by default) standing.
+        self.begin_enumeration()
         sites: list[Any] = list(self.options.get("sites") or [])
         if not sites:
             logger.info("%s: no sites configured (options.sites) - nothing to discover", self.key)
+            self.mark_enumeration_incomplete("no sites configured; nothing was crawled")
             return
 
         default_pattern = self.options.get("pattern")
-        self.begin_enumeration()
         max_pages = int(self.options.get("max_pages", DEFAULT_MAX_PAGES))
         budget = max_pages
         any_readable = False
+        sites_walked_fully = False
 
-        for entry in sites:
-            if budget <= 0:
-                self.mark_enumeration_incomplete(f"max_pages={max_pages} reached")
-                break
-            sitemap_url, pattern_str = _site_config(entry)
-            if not sitemap_url:
-                logger.warning("%s: skipping malformed site entry: %r", self.key, entry)
-                continue
-            pattern = re.compile(pattern_str or default_pattern) if (pattern_str or default_pattern) else None
-
-            try:
-                urls = await self._collect_sitemap_urls(sitemap_url)
-            except Exception as exc:  # noqa: BLE001 - one bad sitemap must not abort the run
-                logger.warning("%s: could not read sitemap %s: %s", self.key, sitemap_url, exc)
-                continue
-            any_readable = True
-
-            for url in urls:
+        try:
+            for entry in sites:
                 if budget <= 0:
                     self.mark_enumeration_incomplete(f"max_pages={max_pages} reached")
                     break
-                if pattern is not None and not pattern.search(url):
+                sitemap_url, pattern_str = _site_config(entry)
+                if not sitemap_url:
+                    logger.warning("%s: skipping malformed site entry: %r", self.key, entry)
+                    self.mark_enumeration_incomplete(
+                        f"malformed options.sites entry {entry!r} was never crawled"
+                    )
                     continue
+                pattern = (
+                    re.compile(pattern_str or default_pattern)
+                    if (pattern_str or default_pattern)
+                    else None
+                )
+
                 try:
-                    listing = await self.fetch_detail(url)
-                except Exception as exc:  # noqa: BLE001 - one bad page must not stop the crawl
-                    logger.warning("%s: skipping %s: %s", self.key, url, exc)
+                    urls = await self._collect_sitemap_urls(sitemap_url)
+                except Exception as exc:  # noqa: BLE001 - one bad sitemap must not abort the run
+                    logger.warning("%s: could not read sitemap %s: %s", self.key, sitemap_url, exc)
+                    self.mark_enumeration_incomplete(
+                        f"sitemap {sitemap_url} could not be read: {exc}"
+                    )
                     continue
-                budget -= 1
-                if listing is not None:
+                any_readable = True
+
+                for url in urls:
+                    if budget <= 0:
+                        self.mark_enumeration_incomplete(f"max_pages={max_pages} reached")
+                        break
+                    # Recorded before the pattern filter: examined this run
+                    # whether or not it was fetched. See the module docstring.
+                    self.record_enumerated_url(url)
+                    if pattern is not None and not pattern.search(url):
+                        continue
+                    try:
+                        listing = await self.fetch_detail(url)
+                    except Exception as exc:  # noqa: BLE001 - one bad page must not stop the crawl
+                        logger.warning("%s: skipping %s: %s", self.key, url, exc)
+                        self.mark_enumeration_incomplete(
+                            f"detail fetch raised for listed URL {url}: {exc}"
+                        )
+                        continue
+                    budget -= 1
+                    if listing is None:
+                        # The sitemap listed this page; fetch_detail returning
+                        # None means we never actually looked at it, so its
+                        # absence from the observed set is not evidence of a
+                        # removal.
+                        self.mark_enumeration_incomplete(
+                            f"detail fetch failed for listed URL {url}"
+                        )
+                        continue
                     yield listing
+            sites_walked_fully = True
+        finally:
+            # A caller that stops draining tears this generator down at the
+            # last yield; without the finally the run would keep the True
+            # begin_enumeration() set, exactly as denkmalboerse and ovbimmo
+            # guard against.
+            if not sites_walked_fully:
+                self.mark_enumeration_incomplete(
+                    "discover() was not fully consumed - "
+                    f"{len(self.enumerated_urls)} URL(s) were examined"
+                )
 
         if not any_readable:
             raise SourceDiscoveryError(

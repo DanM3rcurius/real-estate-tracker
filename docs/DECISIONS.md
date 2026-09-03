@@ -249,6 +249,7 @@ shipped `enabled: false` until its terms were actually read; it was enabled on
 Nutzungsbedingungen had been fetched and recorded verbatim in `terms_excerpt`
 (see `docs/SOURCES.md`). The gate did its job: the source stayed off until a
 finding replaced the placeholder.
+
 ---
 
 ## 15. An expired advert and a removed listing are different facts
@@ -269,3 +270,86 @@ adds that a source's *retention policy* decides what its silence means.
 silence proves nothing. That would also forfeit their ability to verify a
 listing is live and to set freshness — both of which a newspaper legitimately
 can do. The retention policy is the narrower and truer fix.
+
+**Consequence (added by the whole-branch review).** Two seams follow from this
+decision, and both are decided here rather than left to the reader:
+
+*The retention policy explains a disappearance, never an empty run.*
+`mark_missing`'s empty-seen-set guard therefore runs **before** the EXPIRED
+split, not after it. Gating it on what survives the split left a source with
+`listing_ttl_days` with no absence guard at all: every missing row was pulled
+out as an expiry first, both guards were handed an empty list, and a template
+change wrote one false EXPIRED row per listing and returned `[]` — a run
+indistinguishable from a quiet one. The *fraction* guard stays on the far side
+of the split, which is what lets a genuine fortnightly mass-expiry through: it
+has a non-empty seen-set, because the ads that aged out are missing while the
+rest of the inventory is still listed.
+
+*A renewed advert is a reappearance in the history and not news in the digest.*
+`EXPIRED` is in `_rules.DORMANT_STATUSES`, so an advert that ran out and came
+back writes a `ChangeKind.REACTIVATED` row — invariant 2 says a reappearance
+*is* a reactivation, and the append-only history is the product. Keeping the
+fortnightly renewal out of the ten-entry digest is then a reporting judgement
+made in `hofradar.report.data._was_reactivated`, which ignores a reactivation
+whose `old_status` is EXPIRED. Nothing newsworthy is lost by that: an advert
+down long enough for its return to mean something about the farmstead has
+already been moved on to STALE by `apply_stale_rules` (EXPIRED is in
+`STALE_ELIGIBLE_STATUSES`), and a reactivation out of STALE does reach the
+digest. Suppressing the *event* instead would have bought the same quiet
+digest by lying to the history, which is the one thing this project may not do.
+
+---
+
+## 16. An identical canonical listing URL is proof of identity across sources
+
+**Decision.** Two listings that resolve to the same canonical URL are the same
+listing, whichever sources found them. `hofradar.dedupe.compare` treats that as
+a short-circuit proof alongside `(source_key, external_id)` equality and a
+shared image hash, and `find_duplicate` blocks on the stored URL across the
+source boundary so the candidate is retrievable in the first place.
+`hofradar.dedupe._util.canonical_url` defines "the same URL": it removes a
+default port, a `www.` prefix, userinfo, a trailing slash, the http/https
+distinction and the `utm_*`/click-id tracking parameters — and nothing else.
+Query parameters it does not recognise are kept and sorted, path case is kept,
+and **the fragment is kept**.
+
+**Why.** One portal is routinely reached twice: a dedicated adapter and a
+syndicated feed of the same site produce byte-identical URLs (verified on the
+two committed ovbimmo captures). Dedupe could not join those: both blocking
+passes filtered on `Source.key`, `external_id` is one source's private
+numbering, and the image-hash escape hatch is closed because nothing populates
+`image_hashes` today. The measured verdict for one such pair was
+`is_duplicate=False, confidence 0.22`, so one advert became two properties —
+two shortlist entries, an inflated `tracked_total`, and a per-source yield
+table in which two rows count one physical inventory, corrupting the very
+number decision 14 exists to provide.
+
+**Why so narrowly.** The costs are asymmetric in the opposite direction from
+the absence guards. A missed join leaves a duplicate that the ordinary
+evidence model may still catch and a human can merge; a false join fuses two
+farmsteads into one property and destroys both their histories irreversibly.
+So the normaliser removes only differences that provably cannot select
+different content. `ref`, `source`, `id` and similar are *not* treated as
+tracking parameters, because plenty of sites use them to choose what to show.
+
+**The fragment, specifically.** A browser never sends it to a server, so
+stripping it looks free — and the first version of this rule did strip it. It
+is not free. `hofradar.sources.adapters.pdf_bulletin` gives every hit it finds
+inside an Amtsblatt PDF the URL `<pdf_url>#page=<n>` and sets no `external_id`,
+so there the fragment is the *only* thing telling two listings apart. Stripping
+it merged two farmsteads found on two pages of one bulletin into a single
+property at confidence 1.0 — reproduced through the real `ingest` path:
+`properties: 1, kind: source_change` where two properties and a `first_seen`
+belong. Any source whose listings share one document URL (a CSV with a repeated
+`url` column, for instance) has the same shape. Keeping the fragment also costs
+nothing for the case this rule exists to serve: the two routes into ovbimmo.de
+produce byte-identical URLs with no fragment on either side. That is the test a
+candidate normalisation has to pass — provably cosmetic *and* actually in the
+way — and the fragment failed both halves of it.
+
+**Alternative rejected.** Widening `compare`'s soft evidence model so that a
+title plus a town could carry a cross-source match. That is precisely the
+Vogtareuth trap the corroboration rule exists to avoid — three farms in one
+village share a town and a plausible title. A URL is not a similarity signal
+at all; it is an identifier, which is why it can be proof without loosening
+anything else.

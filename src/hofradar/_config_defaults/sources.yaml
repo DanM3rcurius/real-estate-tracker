@@ -156,15 +156,51 @@ sources:
       window's silence is EXPIRED, not REMOVED (docs/DECISIONS.md entry 15) -
       the same portal inventory reached through this route needs the same
       reading, not a different lifecycle depending on which adapter saw it
-      first, so ttl is 14 here too. If a genuine broker's own-site feed (not
+      first, so ttl is 14 here too.
+
+      Correction to an earlier version of this note, which called that third
+      value load-bearing: it is NOT. listing_ttl_days is inert on this entry
+      and will stay inert while the adapter keeps enumerates=False. A feed
+      carries only the latest N items, so
+      hofradar.lifecycle.absence.mark_missing returns at its
+      enumeration_complete gate before _absence_status is ever reached - this
+      route can mark nothing EXPIRED and nothing REMOVED, whatever the ttl
+      says. It is kept rather than deleted so the two routes into one portal
+      do not appear to state different retention policies for the same
+      adverts, and so the value is already correct if options.enumerates is
+      ever overridden true for a feed that genuinely is exhaustive. Anyone
+      relying on it today is relying on nothing.
+
+      options.entry_field_map is what gives this route a location at all.
+      These feeds state the postcode and the town only in classmarkets'
+      own cm: namespace (feedparser surfaces <cm:postalCode>/<cm:locality>
+      as the plain strings cm_postalcode/cm_locality); the standard Atom
+      elements carry neither, and without them every property found here has
+      town = NULL, no geocode query, no distance_air_km, and is invisible to
+      both the in-radius yield column and the per-Gemeinde coverage map. The
+      element names live here, in the same entry that already documents this
+      feed's terms, rather than in the adapter - GenericRssAdapter must stay
+      generic, and a mapping in configuration is how it learns a feed's
+      dialect without learning a vendor. Only raw string fields can be
+      targeted (see MAPPABLE_ENTRY_FIELDS); cm:price and cm:area are
+      deliberately not mapped, and could not be usefully: they carry their
+      value as element text alongside an attribute, which feedparser reduces
+      to the attributes alone.
+
+      If a genuine broker's own-site feed (not
       an ovbimmo re-aggregation) is ever added to options.feeds alongside
       these four, reconsider: an origin listing on a broker's own site is
       arguably primary/no-ttl in its own right, and mixing that with
       ovbimmo-tuned values under one Source row would be the same kind of
-      silent mismatch this note exists to prevent. The fix then is a second
+      silent mismatch this note exists to prevent. The same goes for
+      entry_field_map, which is one feed dialect's vocabulary, not every
+      feed's. The fix then is a second
       Source entry for that feed, not stretching this one's role/limits/ttl
       to cover two different kinds of provenance at once.
     options:
+      entry_field_map:
+        cm_postalcode: postcode
+        cm_locality: town
       feeds:
         - "https://ovbimmo.de/suchergebnisse.atom?t=all:sale:living&a=de.rosenheim-kreis"
         - "https://ovbimmo.de/suchergebnisse.atom?t=all:sale:living&a=de.traunstein"

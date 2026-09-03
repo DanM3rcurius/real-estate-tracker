@@ -205,10 +205,26 @@ class ReportData:
 # --------------------------------------------------------------------------- #
 
 
+#: Statuses whose reactivation is a billing event rather than news about the
+#: farmstead, and so never headlines the digest. An advert on a fixed paid
+#: window (``listing_ttl_days``) expires and renews on a fortnightly timer;
+#: counting each renewal as REAKTIVIERT is precisely the metronome
+#: docs/DECISIONS.md entry 15 exists to keep out of a ten-entry digest. The
+#: reappearance is still in the append-only history under its own
+#: ChangeKind.REACTIVATED row - this is a reporting judgement, not an erasure.
+#: Nothing genuinely newsworthy is dropped: an advert down long enough for its
+#: return to mean something has already been moved on to STALE by
+#: ``apply_stale_rules``, and a reactivation out of STALE does count.
+_UNREPORTED_REACTIVATION_ORIGINS: frozenset[str] = frozenset({ListingStatus.EXPIRED})
+
+
 def _was_reactivated(prop: Property, since: datetime) -> bool:
     for row in history.status_events_since(prop, since):
-        if getattr(row, "change_kind", "") == ChangeKind.REACTIVATED:
-            return True
+        if getattr(row, "change_kind", "") != ChangeKind.REACTIVATED:
+            continue
+        if getattr(row, "old_status", None) in _UNREPORTED_REACTIVATION_ORIGINS:
+            continue
+        return True
     return False
 
 

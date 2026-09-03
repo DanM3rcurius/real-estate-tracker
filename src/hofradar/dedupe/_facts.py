@@ -16,6 +16,7 @@ from typing import Any
 
 from hofradar.contracts import GeoResult, NormalizedListing
 from hofradar.db.models import Property
+from hofradar.dedupe._util import canonical_url
 
 GeoLike = GeoResult | tuple[float | None, float | None] | None
 
@@ -46,6 +47,12 @@ class ListingFacts:
     image_hashes: list[str] = field(default_factory=list)
     #: ``(source_key, external_id)`` pairs. Equality of a pair is proof.
     source_ids: set[tuple[str, str]] = field(default_factory=set)
+    #: Every listing URL this candidate is known under, canonicalised (see
+    #: :func:`hofradar.dedupe._util.canonical_url`). Unlike ``source_ids``
+    #: these are comparable ACROSS sources: an external id is one source's
+    #: private numbering, but a URL names one page on one host, so two sources
+    #: publishing the same one are publishing the same listing.
+    canonical_urls: set[str] = field(default_factory=set)
 
     @property
     def coords(self) -> tuple[float, float] | None:
@@ -102,6 +109,7 @@ def _facts_from_listing(listing: NormalizedListing, *, geo: GeoLike = None) -> L
         property_type=listing.property_type,
         image_hashes=[h for h in (listing.image_hashes or []) if h],
         source_ids=source_ids,
+        canonical_urls={url for url in (canonical_url(listing.url),) if url},
     )
 
 
@@ -110,9 +118,13 @@ def _facts_from_property(prop: Property, *, geo: GeoLike = None) -> ListingFacts
     if lat is None or lon is None:
         lat, lon, precision = _geo_triple(geo)
     source_ids: set[tuple[str, str]] = set()
+    canonical_urls: set[str] = set()
     for ps in prop.property_sources:
         if ps.external_id and ps.source is not None:
             source_ids.add((ps.source.key, str(ps.external_id)))
+        canonical = canonical_url(ps.url)
+        if canonical:
+            canonical_urls.add(canonical)
     return ListingFacts(
         property_id=prop.id,
         title=prop.canonical_title,
@@ -130,4 +142,5 @@ def _facts_from_property(prop: Property, *, geo: GeoLike = None) -> ListingFacts
         property_type=prop.property_type,
         image_hashes=[img.phash for img in prop.images if img.phash],
         source_ids=source_ids,
+        canonical_urls=canonical_urls,
     )

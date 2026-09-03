@@ -133,6 +133,19 @@ async def test_fetch_detail_against_the_real_capture(adapter, read_fixture) -> N
     assert listing.rooms_raw is None
     assert listing.living_raw is None
     assert listing.land_raw is None
+    # ...with two exceptions, read straight out of the dataLayer because
+    # nothing else on the page states them: the postcode and the town. Without
+    # them this listing has no location at all, no geocode query and so no
+    # distance_air_km - which makes the whole OVB inventory invisible to the
+    # report's in-radius yield column and its per-Gemeinde coverage map.
+    assert listing.postcode == "83109"
+    assert listing.town == "Großkarolinenfeld"
+    # Raw strings, exactly as the page wrote them. The same blob's
+    # property_price is 69000000 (cents) and its area is the integer 165;
+    # neither is touched, because converting a value is hofradar.normalize's
+    # job and an adapter doing it here would be a unit bug waiting to happen.
+    assert isinstance(listing.postcode, str)
+    assert isinstance(listing.town, str)
     # The one thing this task must NOT do: guess contact_kind. The captured
     # page is a broker listing ("Provision für Käufer") whose own dataLayer
     # disagrees with itself (features includes "free_of_commission") - two
@@ -355,6 +368,84 @@ async def test_discover_marks_incomplete_when_a_listed_id_fails_to_fetch(
     # The walk reached page 2, which had no further rel="next" - so the page
     # cap (default 5) was never in play. Only the failed detail fetch can
     # have caused this.
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_detail_leaves_location_unset_when_the_datalayer_is_gone(
+    adapter,
+) -> None:
+    """A template change that drops or breaks the blob must not raise, and must
+    not invent a location either - it leaves the fields None, exactly as an
+    OVB page behaved before the blob was read at all."""
+    with respx.mock:
+        respx.get(DETAIL_URL).mock(
+            return_value=httpx.Response(
+                200,
+                text="<html><script>dataLayer = [not json at all];</script></html>",
+            )
+        )
+        listing = await adapter.fetch_detail(DETAIL_URL)
+
+    assert listing is not None
+    assert listing.postcode is None
+    assert listing.town is None
+
+
+@pytest.mark.asyncio
+async def test_a_search_page_that_parses_to_no_listings_is_a_template_change(
+    adapter, search_profile, sample_keywords
+) -> None:
+    """Invariant 4b, and the reason a TTL source needs this most.
+
+    A 200 response whose selectors match nothing is a redesigned template, not
+    an empty market. If the run still claimed a complete enumeration,
+    ``mark_missing`` would be handed an empty seen-set from a source that
+    ``can_prove_absence`` - and for ovbimmo, which ships listing_ttl_days: 14,
+    every still-visible row would be swept to EXPIRED. This is the adapter
+    half of that fix; the lifecycle half is in
+    tests/lifecycle/test_absence_guards.py.
+    """
+    search_url = f"{BASE}/kaufen/haus/rosenheim-kreis"
+
+    with respx.mock:
+        # A well-formed page with no detail links and no rel="next" - the walk
+        # ends cleanly, so nothing else can mark this run incomplete.
+        respx.get(search_url).mock(
+            return_value=httpx.Response(200, text=EMPTY_NEXT_PAGE_HTML)
+        )
+
+        listings = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert listings == []
+    assert adapter.enumeration_complete is False
+    assert adapter.can_prove_absence is False
+
+
+@pytest.mark.asyncio
+async def test_discover_abandoned_early_never_claims_a_complete_enumeration(
+    adapter, search_profile, sample_keywords, read_fixture
+) -> None:
+    """The `finally` guard denkmalboerse.discover() already had. A consumer
+    that stops draining tears the generator down at its last yield; without the
+    guard the run keeps the True that begin_enumeration() set and its partial
+    result licenses absence detection over everything it never reached."""
+    search_url = f"{BASE}/kaufen/haus/rosenheim-kreis"
+
+    with respx.mock:
+        respx.get(search_url).mock(
+            return_value=httpx.Response(200, text=read_fixture(SEARCH_FIXTURE))
+        )
+        respx.get(url__regex=rf"{BASE}/immobilien/.+").mock(
+            return_value=httpx.Response(200, text=STUB_DETAIL_HTML)
+        )
+
+        listings = adapter.discover(search_profile, sample_keywords)
+        first = await anext(listings)
+        await listings.aclose()
+
+    assert first is not None
     assert adapter.enumeration_complete is False
     assert adapter.can_prove_absence is False
 
