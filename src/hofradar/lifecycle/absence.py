@@ -18,6 +18,11 @@ the aggregator reindexed, not that the farm sold. So:
 * :func:`apply_stale_rules` exists precisely so that "we have not heard about
   this in six weeks" has somewhere to go that is *not* REMOVED. STALE means we
   stopped hearing; REMOVED means somebody checked and it was gone.
+* a *complete* enumeration can still be lying, and :class:`ImplausibleAbsence`
+  is the guard against that: a run that saw nothing from a source that used to
+  carry a real inventory, or that would remove an implausibly large slice of
+  it in one pass, is refused outright rather than written to the append-only
+  history where the fiction can never be told apart from the truth later.
 """
 
 from __future__ import annotations
@@ -35,10 +40,34 @@ from hofradar.lifecycle import _rules
 
 log = logging.getLogger(__name__)
 
-#: A source holding at least this many listings that returns none at all is
-#: treated as broken rather than emptied. Below it, a genuine sell-out is
-#: plausible enough to believe.
-EMPTY_RESULT_GUARD_MIN_ROWS = 3
+#: A source holding at least this many listings must clear this floor before
+#: the *fraction* guard below is allowed to reason about it at all. Below it,
+#: a percentage is meaningless (a broker's last listing selling is 100%). It
+#: has nothing to do with the *empty*-result guard below, which is
+#: unconditional and does not reference this constant at all: seeing
+#: literally nothing is not a percentage, it is the signature of a parser
+#: that produced no output, and that is exactly as suspicious for a 1-2
+#: listing source as for a much larger one.
+FRACTION_GUARD_MIN_ROWS = 3
+
+#: A run that saw this fraction or more of a source's visible inventory
+#: disappear is treated as a parser failure, not as a market event. Half an
+#: inventory never goes in one week; a changed HTML template does. Only
+#: applied once a source clears FRACTION_GUARD_MIN_ROWS.
+IMPLAUSIBLE_ABSENCE_FRACTION = 0.30
+
+#: ... and only once at least this many listings would actually be removed.
+#: A single disappearance is never evidence of a broken parser - it is the
+#: single most common real event this whole module exists to record (a
+#: source with exactly 3 listings loses one: that is 33%, over the fraction
+#: above, and would otherwise deadlock the source into refusing forever).
+#: Two or more vanishing in the same run is what engages the percentage.
+IMPLAUSIBLE_ABSENCE_MIN_MISSING = 2
+
+
+class ImplausibleAbsence(RuntimeError):
+    """A run's absences are too broad to be believed, so nothing is written."""
+
 
 #: Default patience before an unseen ACTIVE property is called STALE.
 DEFAULT_STALE_AFTER_DAYS = 45
@@ -68,6 +97,13 @@ def mark_missing(
     Returns one :class:`ChangeResult` per property that actually transitioned
     to REMOVED. Properties that merely lost one of several sources are updated
     silently - losing a source is not news, losing the last one is.
+
+    Raises :class:`ImplausibleAbsence` - and writes nothing - when the run's
+    absences are too broad to be believed: an empty seen-set against a real
+    inventory (unconditionally - even one visible listing), or a run that
+    would remove both :data:`IMPLAUSIBLE_ABSENCE_MIN_MISSING` or more
+    listings and :data:`IMPLAUSIBLE_ABSENCE_FRACTION` or more of the source's
+    inventory in one pass.
     """
     if not _rules.can_verify(source):
         # A discovery source's silence proves nothing whatsoever.
@@ -92,25 +128,43 @@ def mark_missing(
 
     # Last line of defence against silent parser rot. A site redesign makes
     # selectors match nothing: HTTP 200, no exception, zero results - and the
-    # enumeration looks complete. A broker legitimately selling their last one
-    # or two listings is plausible; a source with a real portfolio going to
-    # zero in one step is far more likely to be broken. The costs are
-    # asymmetric (a missed removal is a stale row; a wrong removal is lost
-    # history), so above the threshold we make the operator look instead.
-    if not seen and len(rows) >= EMPTY_RESULT_GUARD_MIN_ROWS:
-        log.warning(
-            "%s: enumeration returned nothing while %d listings were on record - "
-            "refusing to read that as %d removals. Check the adapter.",
-            source.key,
-            len(rows),
-            len(rows),
+    # enumeration looks complete. This guard is deliberately unconditional on
+    # inventory size: seeing literally nothing is not a percentage, it is the
+    # exact signature of a parser matching nothing, and that is exactly as
+    # likely for a source with 1-2 listings as for one with a hundred - a
+    # narrow search DNA makes 1-2 matches the *modal* inventory for a small
+    # source, not an edge case to special-case away. The costs are asymmetric
+    # (a missed removal is a stale row; a wrong removal is lost history), so
+    # we refuse to write anything and make the operator look instead - a
+    # returned [] here reads as "a quiet run", which is exactly the fiction
+    # that must not survive.
+    if rows and not seen:
+        raise ImplausibleAbsence(
+            f"source {source.key!r} saw nothing while {len(rows)} of its listings "
+            "are still marked visible; refusing to mark them removed"
         )
-        return []
+
+    # The fraction guard is different in kind: a *partial* result is not
+    # inherently suspicious the way a total-zero one is, so it only engages
+    # once there is enough inventory for a percentage to mean anything
+    # (FRACTION_GUARD_MIN_ROWS) AND enough would actually be removed for that
+    # to be more than a single ordinary sale (IMPLAUSIBLE_ABSENCE_MIN_MISSING).
+    # Skipping single removals here is what keeps a small source from
+    # deadlocking: without the floor, a 3-listing source losing exactly one
+    # (33%) would raise every run forever, since a refused run writes nothing
+    # and the next run sees the same "still visible" row again.
+    missing = [ps for ps in rows if ps.property_id not in seen]
+    if len(rows) >= FRACTION_GUARD_MIN_ROWS and len(missing) >= IMPLAUSIBLE_ABSENCE_MIN_MISSING:
+        fraction = len(missing) / len(rows)
+        if fraction >= IMPLAUSIBLE_ABSENCE_FRACTION:
+            raise ImplausibleAbsence(
+                f"source {source.key!r} would remove {len(missing)} of {len(rows)} "
+                f"listings ({fraction:.0%}); refusing above "
+                f"{IMPLAUSIBLE_ABSENCE_FRACTION:.0%}"
+            )
 
     changes: list[ChangeResult] = []
-    for ps in rows:
-        if ps.property_id in seen:
-            continue
+    for ps in missing:
         ps.last_listing_visible = False
         prop = session.get(Property, ps.property_id)
         if prop is None or prop.merged_into_id is not None:

@@ -20,16 +20,18 @@ Public API (see docs/MODULE_API.md)::
     changes_since(session, since, *, kinds=None) -> list[dict]
     repair_phantom_removals(session, *, non_reporting_source_keys,
                             dry_run=True) -> RepairReport
+    ImplausibleAbsence(RuntimeError)  # raised by mark_missing, nothing written
 """
 
 from __future__ import annotations
 
-from hofradar.lifecycle.absence import apply_stale_rules, mark_missing
+from hofradar.lifecycle.absence import ImplausibleAbsence, apply_stale_rules, mark_missing
 from hofradar.lifecycle.changes import changes_since
 from hofradar.lifecycle.ingest import ingest
 from hofradar.lifecycle.repair import RepairReport, repair_phantom_removals
 
 __all__ = [
+    "ImplausibleAbsence",
     "RepairReport",
     "apply_stale_rules",
     "changes_since",

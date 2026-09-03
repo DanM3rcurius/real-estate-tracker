@@ -97,7 +97,20 @@ def test_a_discovery_source_reopens_a_removed_property_without_verifying_it(
         make_listing(source_key=primary.key, url="https://portal.example/1", **shared),
         source=primary,
     )
-    mark_missing(db_session, set(), source=primary, run_id=2, enumeration_complete=True)
+    # A second, still-visible listing on `primary`: mark_missing's empty-
+    # seen-set guard is unconditional, so an honest "only this one is gone"
+    # needs a real second listing rather than an empty set (Task 3, review
+    # round 1, Important 1).
+    anchor, _ = ingest(
+        db_session,
+        make_listing(
+            source_key=primary.key, url="https://portal.example/anchor",
+            town="Bad Aibling", postcode="83043", land_sqm=1200, living_sqm=90,
+            price=250_000, year_built=1950,
+        ),
+        source=primary,
+    )
+    mark_missing(db_session, {anchor.id}, source=primary, run_id=2, enumeration_complete=True)
     assert prop.listing_status == ListingStatus.REMOVED
 
     _, change = ingest(
