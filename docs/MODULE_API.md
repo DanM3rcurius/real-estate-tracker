@@ -5,6 +5,9 @@ Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
 GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
+`CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
+`hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
+hard-reject a property on total cost; an "inferred" one only flags it.
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig).
 `SourceConfig` carries `terms_checked_at: date | None` and `terms_excerpt: str | None` —
 the record of somebody having actually read the source's robots.txt and terms.
@@ -80,6 +83,7 @@ def town_in_radius(town: str | None, profile: SearchProfile) -> bool | None  # N
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
 def infer_renovation_tier(prop: Property) -> str
+def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
 ```
 
 ## `hofradar.scoring`

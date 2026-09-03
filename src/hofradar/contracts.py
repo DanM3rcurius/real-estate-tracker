@@ -150,6 +150,8 @@ class CostResult:
     total_mid: float = 0.0
     total_high: float = 0.0
     renovation_tier: str = "unknown"
+    #: "observed" or "inferred" - see hofradar.costmodel.renovation_evidence.
+    renovation_evidence: str = "inferred"
     breakdown: dict[str, float] = field(default_factory=dict)
     assumptions: list[str] = field(default_factory=list)
 

@@ -53,6 +53,12 @@ FLAG_DRIVING_UNVERIFIED = "DRIVING_UNVERIFIED"
 FLAG_SHORTLIST_BLOCKED = "SHORTLIST_BLOCKED"
 FLAG_EXCEPTIONAL_CARVE_OUT = "EXCEPTIONAL_DEVELOPMENT_CARVE_OUT"
 
+#: The total-cost gate was crossed only by a renovation figure nobody stated.
+#: Recorded as a flag rather than a rejection: the pessimistic age rule is a
+#: default, and defaulting a property out of the shortlist hides exactly the
+#: pre-1960 farmsteads this project exists to find.
+FLAG_COST_INFERRED = "TOTAL_COST_INFERRED"
+
 #: A property whose road route has never been measured is held back rather than
 #: silently passed: this ceiling sits between ``min_confidence_to_keep`` and
 #: ``min_confidence_for_shortlist`` in the default profile, so such a property
@@ -128,17 +134,27 @@ def _apply_gates(
 
     total_mid = float(cost.total_mid or 0.0)
     carve_out = development_score >= gates.exceptional_development_min
+    cost_is_inferred = cost.renovation_evidence != "observed"
+
+    def _cost_reject(reason: str) -> None:
+        """Reject only on a figure somebody stood behind; otherwise flag."""
+        if cost_is_inferred:
+            if FLAG_COST_INFERRED not in result.flags:
+                result.flags.append(FLAG_COST_INFERRED)
+        else:
+            result.reject_reasons.append(reason)
+
     if total_mid > budget.effective_total_hard_max:
         if carve_out:
             result.flags.append(FLAG_EXCEPTIONAL_CARVE_OUT)
         else:
-            result.reject_reasons.append(REJECT_TOTAL_COST)
+            _cost_reject(REJECT_TOTAL_COST)
     elif total_mid > budget.effective_total_exceptional_max:
         # The exceptional band: only genuinely exceptional development keeps it.
         if carve_out:
             result.flags.append(FLAG_EXCEPTIONAL_CARVE_OUT)
         else:
-            result.reject_reasons.append(REJECT_EXCEPTIONAL_WITHOUT_DEVELOPMENT)
+            _cost_reject(REJECT_EXCEPTIONAL_WITHOUT_DEVELOPMENT)
 
     if result.confidence_score < gates.min_confidence_to_keep:
         result.reject_reasons.append(REJECT_OBSERVATION_ONLY)

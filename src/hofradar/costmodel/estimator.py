@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 from hofradar.contracts import CostResult
 from hofradar.costmodel._text import fold_all
-from hofradar.costmodel.renovation import infer_renovation_tier
+from hofradar.costmodel.renovation import infer_renovation_tier, renovation_evidence
 from hofradar.db.enums import RenovationTier
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -251,6 +251,7 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
         total_mid=round(fixed + renovation_mid, 2),
         total_high=round(fixed + renovation_high, 2),
         renovation_tier=tier.value,
+        renovation_evidence=renovation_evidence(prop),
         breakdown=breakdown,
         assumptions=assumptions,
     )
