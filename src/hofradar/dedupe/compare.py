@@ -248,7 +248,8 @@ def compare_facts(fa: ListingFacts, fb: ListingFacts) -> DuplicateVerdict:
     )
 
     if corroborating:
-        reasons.append(f"corroborating_dimensions: {len(corroborating)} ({', '.join(sorted(corroborating))})")
+        joined = ", ".join(sorted(corroborating))
+        reasons.append(f"corroborating_dimensions: {len(corroborating)} ({joined})")
     else:
         reasons.append("corroborating_dimensions: 0")
 

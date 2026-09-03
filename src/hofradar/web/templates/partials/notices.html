@@ -1,0 +1,11 @@
+{# Degraded-mode banners. A missing sibling module is a sentence, never a 500. #}
+{% if degraded %}
+<div class="notices" role="status">
+  {% for note in degraded %}
+  <p class="notice notice--warn">
+    <span aria-hidden="true">⚠️</span> {{ note.message }}
+    {% if note.detail %}<code class="notice__detail">{{ note.detail }}</code>{% endif %}
+  </p>
+  {% endfor %}
+</div>
+{% endif %}

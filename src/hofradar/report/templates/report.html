@@ -1,0 +1,85 @@
+{# Embeddable digest fragment. The web layout wraps it; ReportRecord stores it. #}
+<article class="hof-report">
+  <header class="hof-report__header">
+    <h1>Hofradar – {{ data.week_label }}</h1>
+    <dl class="hof-report__meta">
+      <div><dt>Suchprofil</dt><dd>{{ data.profile_name }} <code>{{ data.profile_hash }}</code></dd></div>
+      <div><dt>Zentrum</dt><dd>{{ data.center_name }}</dd></div>
+      <div><dt>Entfernung</dt>
+        <dd>{{ data.radius_air_km | de_km(0) }} Luftlinie
+          <small>(Fahrstrecke weich {{ data.radius_driving_soft_km | de_km }},
+            hart {{ data.radius_driving_hard_km | de_km }})</small></dd></div>
+      <div><dt>Gesamtbudget</dt>
+        <dd>{{ data.budget_total_max | de_eur }}
+          <small>(Kaufpreisziel {{ data.budget_purchase_target | de_eur }},
+            hart {{ data.budget_purchase_hard | de_eur }})</small></dd></div>
+      <div><dt>Zeitraum</dt><dd>seit {{ data.period_start | de_date }}</dd></div>
+    </dl>
+  </header>
+
+  <section class="hof-report__counts">
+    <h2>Lage der Woche</h2>
+    <table>
+      <thead><tr><th scope="col">Kennzahl</th><th scope="col">Anzahl</th></tr></thead>
+      <tbody>
+        {% for label, attribute in COUNT_ROWS %}
+        <tr><th scope="row">{{ label }}</th><td>{{ counts | attr(attribute) | de_number }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="hof-report__shortlist">
+    <h2>Shortlist</h2>
+    {% if not data.entries %}
+      <p class="hof-report__empty">Diese Woche nichts, das einen Anruf rechtfertigt.</p>
+    {% endif %}
+    {% for entry in data.entries %}
+    <article class="hof-report__entry" id="entry-{{ entry.public_id }}">
+      <h3>
+        <span class="hof-report__rank">{{ entry.rank }}</span>
+        <span class="hof-report__action">{{ entry.action }}</span>
+        {{ entry.title }}{% if entry.town %}, {{ entry.town }}{% endif %}
+        <code>{{ entry.public_id }}</code>
+      </h3>
+      <p class="hof-report__chips">
+        <span class="chip chip--status">{{ entry.status_label }}</span>
+        <span class="chip">{{ entry.category_label }}</span>
+        <span class="chip">{% if entry.is_primary_source %}Primärquelle{% else %}nur Discovery-Quelle{% endif %}</span>
+      </p>
+      <dl class="hof-report__facts">
+        <div><dt>Preis</dt><dd>{{ entry.price | de_eur }} <small>({{ entry.price_type }})</small></dd></div>
+        <div><dt>Grund</dt><dd>{{ entry.land_sqm | de_sqm }}</dd></div>
+        <div><dt>Wohnfläche</dt><dd>{{ entry.living_sqm | de_sqm }}</dd></div>
+        <div><dt>Luftlinie</dt><dd>{{ entry.distance_air_km | de_km }}</dd></div>
+        <div><dt>Fahrstrecke</dt><dd>{{ entry.driving_display }}</dd></div>
+        <div><dt>Gesamtinvestition</dt><dd>{{ cost_band(entry) }}</dd></div>
+      </dl>
+      <p class="hof-report__scores">
+        {% for label, attribute in SCORE_COLUMNS %}
+        <span class="badge"><b>{{ label }}</b> {{ entry | attr(attribute) | de_score }}</span>
+        {% endfor %}
+        <span class="badge badge--final"><b>FINAL</b> {{ entry.final_score | de_score }}</span>
+      </p>
+      <p><b>Warum interessant:</b> {{ entry.why | join('; ') or '–' }}</p>
+      <p><b>Risiko:</b> {{ entry.risks | join('; ') or '–' }}</p>
+      {% if entry.url %}<p><a href="{{ entry.url }}" rel="noopener noreferrer nofollow">Quelle öffnen</a></p>{% endif %}
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="hof-report__rest">
+    <h2>Nicht einzeln gelistet</h2>
+    <p>
+      {{ data.counts.not_listed | de_number }} weitere Objekte sind erfasst und bewertet,
+      erscheinen hier aber nur als Zahl. Details im Radar.
+    </p>
+  </section>
+
+  {% if data.notes %}
+  <section class="hof-report__notes">
+    <h2>Hinweise</h2>
+    <ul>{% for note in data.notes %}<li>{{ note }}</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+</article>

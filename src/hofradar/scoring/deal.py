@@ -80,6 +80,11 @@ RENOVATION_RATIO_BANDS: tuple[tuple[float, float], ...] = (
 #: though nothing has been breached yet.
 MODERATE_RISK_FRACTION = 0.90
 
+#: A property the user cannot pay for is not a good deal at any price per square
+#: metre, so an EXTREME capital risk caps the whole score rather than merely
+#: zeroing the total-cost component.
+EXTREME_RISK_DEAL_CEILING = 10.0
+
 SANIERUNGSRISIKO_FLAG = "SANIERUNGSRISIKO"
 OVER_BUDGET_FLAG = "OVER_BUDGET"
 EXCEPTIONAL_BUDGET_FLAG = "EXCEPTIONAL_BUDGET_BAND"
@@ -212,4 +217,8 @@ def deal_score(
         }
     )
     total = total_points + land_points + living_points + renovation_points
+    if risk is CapitalRisk.EXTREME and total > EXTREME_RISK_DEAL_CEILING:
+        out["extreme_risk_cap"] = EXTREME_RISK_DEAL_CEILING
+        out["uncapped_score"] = round(total, 2)
+        total = EXTREME_RISK_DEAL_CEILING
     return round(total, 2), out

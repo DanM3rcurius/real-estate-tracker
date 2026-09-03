@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{{ app_title }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  {% block head %}{% endblock %}
+  <script src="/static/vendor/htmx.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Zum Inhalt springen</a>
+
+<header class="topbar">
+  <div class="topbar__brand">
+    <span class="topbar__logo" aria-hidden="true">🌾</span>
+    <span>
+      <strong>{{ app_title }}</strong>
+      <small>{{ app_subtitle }}</small>
+    </span>
+  </div>
+  <nav class="topbar__nav" aria-label="Hauptnavigation">
+    {% for path, label, icon in nav_items %}
+    <a href="{{ path }}"
+       class="topbar__link{% if nav_path == path or (path != '/' and nav_path.startswith(path)) %} is-active{% endif %}">
+      <span aria-hidden="true">{{ icon }}</span> {{ label }}
+    </a>
+    {% endfor %}
+  </nav>
+</header>
+
+<main id="main">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  <span>Hofradar – Entfernung und Gesamtbudget sind die zwei Regler, alles andere folgt daraus.</span>
+</footer>
+</body>
+</html>

@@ -8,7 +8,7 @@ exactly one function here.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from hofradar.db.enums import ListingStatus, SourceRole
@@ -77,10 +77,22 @@ def geo_is_better(current_precision: str | None, incoming_precision: str | None)
     )
 
 
+def as_utc(value: datetime | None) -> datetime | None:
+    """Attach UTC to a naive datetime.
+
+    SQLite has no timezone type, so a value written as aware UTC comes back
+    naive; comparing the two raises ``TypeError``. Every datetime comparison
+    in this package goes through here first.
+    """
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 def source_rank(ps: PropertySource) -> tuple[int, float, datetime]:
     """Ordering for ``is_best``: primary role, then reliability, then recency."""
     reliability = ps.source.reliability if ps.source is not None else 0.0
-    return (_ROLE_RANK.get(ps.role, 0), float(reliability or 0.0), ps.last_seen)
+    return (_ROLE_RANK.get(ps.role, 0), float(reliability or 0.0), as_utc(ps.last_seen))
 
 
 def assign_best_source(prop: Any) -> None:

@@ -1,0 +1,48 @@
+{% macro score_badges(score) %}
+  {% if score %}
+  <p class="badges" aria-label="Bewertung">
+    <span class="badge" title="Passung zum Suchprofil"><b>FIT</b> {{ score.fit_score | de_score }}</span>
+    <span class="badge" title="Preis-Leistung inkl. Sanierung"><b>DEAL</b> {{ score.deal_score | de_score }}</span>
+    <span class="badge" title="Wie unentdeckt das Objekt ist"><b>HIDDEN</b> {{ score.hidden_score | de_score }}</span>
+    <span class="badge" title="Wie frisch die Information ist"><b>FRESH</b> {{ score.freshness_score | de_score }}</span>
+    <span class="badge" title="Wie belastbar die Fakten sind"><b>CONF</b> {{ score.confidence_score | de_score }}</span>
+    <span class="badge badge--final" title="Gewichteter Gesamtscore"><b>FINAL</b> {{ score.final_score | de_score }}</span>
+  </p>
+  {% else %}
+  <p class="badges"><span class="badge badge--muted">noch nicht bewertet</span></p>
+  {% endif %}
+{% endmacro %}
+
+{% macro chips(items) %}
+  <p class="chips">
+    {% for chip in items %}
+    <span class="chip chip--{{ chip.kind }}" title="{{ chip.title }}">{{ chip.label }}</span>
+    {% endfor %}
+  </p>
+{% endmacro %}
+
+{% macro status_chip(prop) %}
+  <span class="chip chip--status chip--status-{{ prop.listing_status }}">{{ prop.listing_status }}</span>
+{% endmacro %}
+
+{% macro distances(prop) %}
+  {# Two distinct numbers. The driving field never borrows the air value. #}
+  <span class="facts__pair">
+    <span class="facts__label">Luftlinie</span>
+    <span class="facts__value">{{ prop.distance_air_km | de_km }}</span>
+  </span>
+  <span class="facts__pair">
+    <span class="facts__label">Fahrstrecke</span>
+    <span class="facts__value{% if prop.distance_driving_km is none %} facts__value--unknown{% endif %}"
+          data-field="driving">{{ prop.distance_driving_km | de_driving_km }}</span>
+  </span>
+{% endmacro %}
+
+{% macro cost_band(cost) %}
+  {% if cost %}
+    {{ cost.total_low | de_eur }} – {{ cost.total_high | de_eur }}
+    <small>(Mitte {{ cost.total_mid | de_eur }}{% if cost.renovation_tier %}, Sanierung {{ cost.renovation_tier }}{% endif %})</small>
+  {% else %}
+    <small>Gesamtkosten noch nicht berechnet</small>
+  {% endif %}
+{% endmacro %}

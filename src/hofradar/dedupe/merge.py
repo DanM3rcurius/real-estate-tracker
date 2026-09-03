@@ -34,6 +34,7 @@ from hofradar.db.models import (
     PropertySource,
     StatusHistory,
 )
+from hofradar.dedupe._util import as_utc
 
 #: Scalar facts copied from ``drop`` only where ``keep`` knows nothing.
 _FILLABLE_FIELDS = (
@@ -140,8 +141,8 @@ def _move_property_sources(session: Session, keep: Property, drop: Property) -> 
                 .values(property_id=keep.id)
             )
             continue
-        twin.first_seen = min(twin.first_seen, ps.first_seen)
-        twin.last_seen = max(twin.last_seen, ps.last_seen)
+        twin.first_seen = min(as_utc(twin.first_seen), as_utc(ps.first_seen))
+        twin.last_seen = max(as_utc(twin.last_seen), as_utc(ps.last_seen))
         twin.last_listing_visible = twin.last_listing_visible or ps.last_listing_visible
         for attr in ("external_id", "source_date", "contact_name", "contact_kind",
                      "contact_detail"):
@@ -192,8 +193,8 @@ def _merge_facts(keep: Property, drop: Property) -> None:
     ):
         keep.lat, keep.lon, keep.geo_precision = drop.lat, drop.lon, drop.geo_precision
 
-    keep.first_seen = min(keep.first_seen, drop.first_seen)
-    keep.last_seen = max(keep.last_seen, drop.last_seen)
+    keep.first_seen = min(as_utc(keep.first_seen), as_utc(drop.first_seen))
+    keep.last_seen = max(as_utc(keep.last_seen), as_utc(drop.last_seen))
     keep.last_verified = _max_optional(keep.last_verified, drop.last_verified)
     keep.source_date = _max_optional(keep.source_date, drop.source_date)
     keep.price_reduction_count = max(
@@ -240,7 +241,7 @@ def _assign_best_source(session: Session, prop: Property) -> None:
 
 def _source_rank(ps: PropertySource) -> tuple[int, float, Any]:
     reliability = ps.source.reliability if ps.source is not None else 0.0
-    return (_ROLE_RANK.get(ps.role, 0), reliability, ps.last_seen)
+    return (_ROLE_RANK.get(ps.role, 0), float(reliability or 0.0), as_utc(ps.last_seen))
 
 
 def _is_blank(value: Any) -> bool:
@@ -261,4 +262,4 @@ def _max_optional(a, b):
         return b
     if b is None:
         return a
-    return max(a, b)
+    return max(as_utc(a), as_utc(b))

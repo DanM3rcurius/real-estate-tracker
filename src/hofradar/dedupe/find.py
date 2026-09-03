@@ -25,10 +25,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from hofradar.contracts import DuplicateVerdict, NormalizedListing
+from hofradar.db.models import Property, PropertySource, Source
 from hofradar.dedupe._facts import GeoLike, facts_of
 from hofradar.dedupe.compare import compare_facts
 from hofradar.dedupe.fingerprint import fingerprint
-from hofradar.db.models import Property, PropertySource, Source
 
 #: Upper bound on candidates fetched per blocking pass.
 CANDIDATE_LIMIT = 200
@@ -56,6 +56,16 @@ def find_duplicate(
         geo = (lat, lon)
     facts = facts_of(listing, geo=geo)
 
+    exact = _exact_source_match(session, listing)
+    if exact is not None:
+        prop, why = exact
+        return DuplicateVerdict(
+            is_duplicate=True,
+            confidence=1.0,
+            reasons=[f"same_listing: {why} (proof)"],
+            matched_property_id=prop.id,
+        )
+
     candidates = _candidates(session, listing, facts.lat, facts.lon)
     if not candidates:
         return DuplicateVerdict(
@@ -75,6 +85,43 @@ def find_duplicate(
             best = verdict
     assert best is not None
     return best
+
+
+def _exact_source_match(
+    session: Session, listing: NormalizedListing
+) -> tuple[Property, str] | None:
+    """The same URL, or the same external id, on the same source.
+
+    This is proof, not evidence: it is literally the listing we already have a
+    row for. It short-circuits the similarity model, which matters because a
+    thin listing (no price, no areas) would otherwise fail to score highly
+    enough against the property it created last week and would be inserted a
+    second time.
+    """
+    if not listing.source_key:
+        return None
+    filters = []
+    if listing.url:
+        filters.append((PropertySource.url == listing.url, f"{listing.source_key} {listing.url}"))
+    if listing.external_id:
+        filters.append(
+            (
+                PropertySource.external_id == str(listing.external_id),
+                f"{listing.source_key} external_id={listing.external_id}",
+            )
+        )
+    for condition, why in filters:
+        prop = session.execute(
+            select(Property)
+            .join(PropertySource, PropertySource.property_id == Property.id)
+            .join(Source, Source.id == PropertySource.source_id)
+            .where(Source.key == listing.source_key, condition,
+                   Property.merged_into_id.is_(None))
+            .limit(1)
+        ).scalars().first()
+        if prop is not None:
+            return prop, why
+    return None
 
 
 def _candidates(

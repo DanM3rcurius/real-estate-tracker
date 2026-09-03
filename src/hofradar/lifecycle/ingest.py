@@ -46,7 +46,7 @@ from hofradar.db.models import (
     VerificationEvent,
     utcnow,
 )
-from hofradar.dedupe import fingerprint, find_duplicate
+from hofradar.dedupe import find_duplicate, fingerprint
 from hofradar.lifecycle import _rules
 
 #: Smallest price movement that counts as a change rather than rounding noise.
@@ -137,7 +137,9 @@ def ingest(
         price_change=price_change,
         source_row_created=source_row_created,
         text_hash=listing.text_hash,
-        verdict_reasons=verdict.reasons if is_new else [],
+        verdict_reasons=(
+            verdict.reasons if is_new and verdict.matched_property_id is not None else []
+        ),
     )
     _write_history(session, prop, before=before, result=result, run_id=run_id, now=now)
 
@@ -506,7 +508,9 @@ def _decide_change(
     reactivated = before.known and before.status in _rules.DORMANT_STATUSES
 
     if is_new:
-        detail = "; ".join(verdict_reasons[:6]) or None
+        # Record why the new row was *not* merged into a look-alike, so a human
+        # can audit the needs_review cases instead of losing them.
+        detail = "; ".join(verdict_reasons) or None
         return ChangeResult(
             kind=ChangeKind.FIRST_SEEN,
             old_status=None,

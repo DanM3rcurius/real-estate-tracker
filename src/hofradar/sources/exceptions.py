@@ -37,3 +37,13 @@ class SourceDiscoveryError(SourceError):
     changed shape, credentials missing) so the pipeline has something clear
     to record against the source.
     """
+
+
+class BotDefenseDetected(SourceDiscoveryError):
+    """A ToS-restricted, disabled-by-default adapter got blocked.
+
+    Raised by ``kleinanzeigen``/``immoscout``/``immowelt`` when a response
+    looks like a CAPTCHA/anti-bot challenge, or comes back 403/429/503. Those
+    adapters never try to get around a block - this is the clean stop
+    instead.
+    """

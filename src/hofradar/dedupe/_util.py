@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import UTC, datetime
 
 # TODO(integration): use hofradar.normalize.normalize_text
 _UMLAUTS = {
@@ -100,3 +101,16 @@ def relative_delta(a: float | None, b: float | None) -> float | None:
     if base == 0:
         return 0.0
     return abs(a - b) / base
+
+
+def as_utc(value: datetime | None) -> datetime | None:
+    """Attach UTC to a naive datetime.
+
+    SQLite has no timezone type, so a value written as aware UTC comes back
+    naive. Comparing the two raises ``TypeError``, which would otherwise blow
+    up somewhere far away from the cause, so every datetime comparison in this
+    package goes through here first.
+    """
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
