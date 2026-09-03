@@ -1,0 +1,82 @@
+# Hofradar search DNA.
+# Everything here is editable in the web UI; this file is the boot default.
+search:
+  name: default
+
+  center:
+    name: "Westham, Feldkirchen-Westerham"
+    lat: 47.907
+    lon: 11.840
+
+  # ---- ADJUSTABLE PARAMETER 1: distance -------------------------------- #
+  radius:
+    air_km_max: 80
+    # Leave the driving limits null to derive them from air_km_max via the
+    # factors below (Alpine foreland roads run ~1.25-1.45x the straight line).
+    driving_km_soft_max: null
+    driving_km_hard_max: null
+    driving_factor_soft: 1.25
+    driving_factor_hard: 1.45
+    require_driving_check: true
+
+  # ---- ADJUSTABLE PARAMETER 2: total budget ---------------------------- #
+  budget:
+    # All-in capital: purchase + acquisition costs + renovation.
+    total_budget_max: 1200000
+    total_budget_exceptional_max: null   # default 1.125x
+    total_budget_hard_max: null          # default 1.25x
+    # Purchase bands derive from the total budget unless set explicitly.
+    purchase_target_max: 750000
+    purchase_negotiation_max: 850000
+    purchase_hard_max: 900000
+    purchase_share_of_total: 0.625
+    # Bavarian side costs.
+    grunderwerbsteuer_pct: 0.035
+    notar_pct: 0.015
+    grundbuch_pct: 0.005
+    makler_pct: 0.0357
+
+  land:
+    preferred_min_sqm: 2000
+    strong_min_sqm: 5000
+
+  property_types:
+    - Hofstelle
+    - Sacherl
+    - Bauernhof
+    - Resthof
+    - ehemaliger Bauernhof
+    - ehemalige Landwirtschaft
+    - Austragshaus
+    - Einödhof
+    - Dreiseithof
+    - Vierseithof
+    - Gut
+    - Landwirtschaftliches Anwesen
+    - Stadel
+    - Tenne
+    - Hofanwesen
+    - Grundstück mit Altbestand
+
+  preferred_features:
+    - Alleinlage
+    - Außenbereich
+    - historische Bausubstanz
+    - Scheune
+    - Stall
+    - Tenne
+    - Stadel
+    - Wirtschaftsgebäude
+    - Obstgarten
+    - Weide
+    - Nebengebäude
+    - teilbar
+    - Entwicklungspotenzial
+
+  exclude:
+    - reine Eigentumswohnung
+    - Doppelhaushälfte
+    - Reihenhaus
+    - Neubau
+    - Bauplatz ohne Altbestand
+    - Gewerbehalle ohne Wohnbestand

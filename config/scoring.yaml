@@ -1,0 +1,33 @@
+# Ranking weights, gates and the renovation cost model.
+scoring:
+  weights:
+    fit: 0.35
+    deal: 0.25
+    hidden: 0.15
+    freshness: 0.15
+    confidence: 0.10
+
+  gates:
+    min_confidence_for_shortlist: 70
+    min_confidence_to_keep: 60
+    renovation_to_price_risk_ratio: 1.5
+    exceptional_development_min: 8
+    reject_removed: true
+    reject_unrouted: false
+    shortlist_size: 10
+    llm_review_size: 100
+
+  renovation:
+    light_min: 300
+    light_max: 600
+    medium_min: 700
+    medium_max: 1200
+    heavy_min: 1300
+    heavy_max: 2000
+    complete_min: 2000
+    complete_max: 2800
+    roof_per_sqm_footprint: 350
+    outbuilding_per_sqm: 450
+    utilities_base: 80000
+    contingency_pct: 0.20
+    immediate_capex_base: 25000

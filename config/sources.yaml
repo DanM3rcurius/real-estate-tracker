@@ -1,0 +1,124 @@
+# Source registry.
+#
+# role decides what a source is ALLOWED TO PROVE:
+#   primary   - may verify that a listing is live, and set freshness
+#   local     - may verify (newspapers, Amtsblätter, Gemeindeblätter)
+#   discovery - may only DISCOVER. Never confirms availability or freshness.
+#
+# enabled: false ships for every source whose terms of service or bot defences
+# make unattended crawling from a server inappropriate. Those adapters exist and
+# work; switch them on deliberately, ideally running the crawler from your own
+# machine and IP. See docs/SOURCES.md.
+
+sources:
+  # ---------------------------------------------------------------- always on
+  - key: manual
+    name: "Manuelle Eingabe / Paste-Ingest"
+    role: primary
+    adapter: manual
+    reliability: 0.95
+    enabled: true
+    notes: >
+      Paste a listing URL or an entire exposé text into the web UI. Always
+      available, never blocked, and the fastest way to get value on day one.
+
+  - key: csv_import
+    name: "CSV Import"
+    role: primary
+    adapter: csv
+    reliability: 0.9
+    enabled: true
+    notes: "Bulk import from a spreadsheet export."
+
+  - key: zvg_bayern
+    name: "ZVG - Zwangsversteigerungen Bayern"
+    role: primary
+    adapter: zvg
+    base_url: "https://www.zvg-portal.de"
+    region: Bayern
+    reliability: 0.95
+    enabled: true
+    rate_limit_seconds: 3.0
+    notes: "Official public foreclosure register. Highest-signal hidden source."
+    options:
+      land_abk: "by"
+
+  - key: generic_rss
+    name: "Regionale Makler (RSS/Atom)"
+    role: primary
+    adapter: generic_rss
+    reliability: 0.75
+    enabled: true
+    rate_limit_seconds: 2.0
+    notes: "Feed URLs are configured per broker in options.feeds."
+    options:
+      feeds: []
+
+  - key: generic_sitemap
+    name: "Regionale Makler (Sitemap-Crawl)"
+    role: primary
+    adapter: generic_sitemap
+    reliability: 0.7
+    enabled: true
+    rate_limit_seconds: 3.0
+    notes: "Polite sitemap.xml crawl of small broker sites that publish one."
+    options:
+      sites: []
+
+  - key: gemeindeblatt_pdf
+    name: "Gemeinde-/Amtsblätter (PDF)"
+    role: local
+    adapter: pdf_bulletin
+    region: "Landkreis Rosenheim / Miesbach / Ebersberg / Mühldorf"
+    reliability: 0.85
+    enabled: false
+    rate_limit_seconds: 4.0
+    notes: >
+      Chiffre ads live here. Needs a per-municipality list of bulletin index
+      URLs in options.bulletins; requires the [pdf] extra.
+    options:
+      bulletins: []
+
+  # ------------------------------------------------- off by default (ToS/bot)
+  - key: kleinanzeigen
+    name: "Kleinanzeigen.de"
+    role: primary
+    adapter: kleinanzeigen
+    base_url: "https://www.kleinanzeigen.de"
+    reliability: 0.9
+    enabled: false
+    rate_limit_seconds: 8.0
+    notes: >
+      Highest yield for private/hidden farm sales, but actively bot-defended and
+      its terms forbid automated access. Enable only for personal, low-rate use
+      from your own machine.
+
+  - key: immobilienscout24
+    name: "ImmobilienScout24"
+    role: primary
+    adapter: immoscout
+    base_url: "https://www.immobilienscout24.com"
+    reliability: 0.9
+    enabled: false
+    rate_limit_seconds: 10.0
+    notes: "Bot-defended. Prefer their official API/partner access if you have it."
+
+  - key: immowelt
+    name: "Immowelt / Immonet"
+    role: primary
+    adapter: immowelt
+    base_url: "https://www.immowelt.de"
+    reliability: 0.85
+    enabled: false
+    rate_limit_seconds: 8.0
+
+  - key: web_search
+    name: "Websuche (Discovery only)"
+    role: discovery
+    adapter: web_search
+    reliability: 0.35
+    enabled: false
+    rate_limit_seconds: 2.0
+    notes: >
+      May surface a property. May NEVER mark it verified or fresh - a search
+      snippet is not proof that a listing is still live.
