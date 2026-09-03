@@ -178,39 +178,67 @@ other **139** with certainty, before any gazetteer lookup runs. The gazetteer
 pre-filter alone would have skipped zero of those 98 - of the towns it
 recognises inside the default set, none are known-and-outside the radius.
 
-**Decision 14's yield gate is met, on a real snapshot, by a wide margin.**
+**Decision 14's yield gate is met, on a real snapshot, with margin - and this
+figure was re-derived after `hofradar.geo.gazetteer.lookup()` was fixed to
+anchor matches on token boundaries instead of matching substrings.** That fix
+changed the number below; see the Fürstenfeldbruck note further down for why.
 Decision 14 requires 5 in-radius objects across the Denkmalbörse's first four
 runs. Scoring the 43 Oberbayern rows from the 2026-09-03 capture through this
 project's own gazetteer and `haversine_km`, against the real search profile
-(origin 47.907, 11.84; `air_km_max` 80.0 km), yields **11 in-radius objects**:
-Kirchseeon (20.6 km), Rosenheim (22.3 km), Vaterstetten (23.1 km), Rohrdorf
-(27.8 km), Prien am Chiemsee (38.1 km), Kiefersfelden (42.2 km),
-Fürstenfeldbruck (~52.9 km), Reit im Winkl (53.2 km), Mühldorf am Inn
-(63.4 km, two distinct objects - 008637 and 007505), and Niedertaufkirchen -
-Arbing (71.3 km, via its postcode 84494 resolving to the gazetteer's
-Neumarkt-Sankt Veit entry - a real PLZ match, not a coincidence, unlike the
-Fürstenfeldbruck entry below). That clears the gate more than twice over. It
-is a **lower bound**, not the true figure: **32 of the 43** Oberbayern towns
-are unknown to the bundled offline gazetteer (it only covers the Landkreise
-immediately around the search origin), so a real geocoder would very likely
-place more of them inside the radius. Method: Regierungsbezirk = Oberbayern
-subset of the real capture, town read from each row's own `PLZ Ort` address
-line (falling back to the title only for the few rows with no address
-paragraph at all), looked up in `hofradar.geo.gazetteer`, distance via
-`hofradar.geo.distance.haversine_km` against the profile center - the same
-offline path `town_in_radius` uses, not a live Nominatim run.
+(origin 47.907, 11.84; `air_km_max` 80.0 km), yields **10 gazetteer-confirmed
+in-radius objects**: Kirchseeon (20.6 km), Rosenheim (22.3 km), Vaterstetten
+(23.1 km), Rohrdorf (27.8 km), Prien am Chiemsee (38.1 km, via its postcode
+83209), Kiefersfelden (42.2 km), Reit im Winkl (53.2 km), Mühldorf am Inn
+(63.4 km, two distinct objects - 008637 and 007505, both via postcode 84453),
+and Niedertaufkirchen - Arbing (71.3 km, via its postcode 84494 resolving to
+the gazetteer's Neumarkt-Sankt Veit entry - a real PLZ match). That clears
+the gate twice over.
 
-Fürstenfeldbruck needs a caveat the other ten do not: `gazetteer.lookup()`
-substring-matches it to the unrelated entry "Bruck" (Landkreis Ebersberg),
-so its *listed* distance above (~52.9 km) is a manual correction using
-Fürstenfeldbruck's real coordinates (48.1772, 11.2547), not what the code
-path actually returns for it (which would read 18.3 km, the distance to
-Bruck instead). The object's in-radius verdict does not change either way -
-52.9 km and 18.3 km are both well inside 80 km - only the printed distance
-is corrected here. The substring-matching bug itself lives in
-`hofradar.geo.gazetteer.lookup()` and is being fixed on a separate branch;
-this document does not depend on that fix landing, since the verdict for
-this object is correct regardless.
+This is a **gazetteer-confirmed count, and it is a lower bound on the true
+in-radius yield, not the true figure itself**: **33 of the 43** Oberbayern
+towns in this capture are unknown to the bundled offline gazetteer (it only
+covers the Landkreise immediately around the search origin), so those rows
+fall through `town_in_radius` as `None` - correctly, since a hamlet the
+gazetteer has never heard of is exactly where a farmstead lives - and are
+never scored either way. A real geocoder would very likely place more of
+them inside the radius; today the code simply cannot say which. Method:
+Regierungsbezirk = Oberbayern subset of the real capture, town read via the
+adapter's own `_town_from_row` (each row's `PLZ Ort` address paragraph,
+falling back to the title heuristic only for rows with no address paragraph
+at all - this is the extraction the shipped adapter performs, not a
+title/address union), looked up in `hofradar.geo.gazetteer.lookup()`,
+distance via `hofradar.geo.distance.haversine_km` against the profile
+center - the same offline path `town_in_radius` uses, not a live Nominatim
+run.
+
+**Fürstenfeldbruck is why the confirmed count moved from 11 to 10, and it
+illustrates exactly why the count is a floor.** Before the anchoring fix,
+`gazetteer.lookup("82256 Fürstenfeldbruck")` substring-matched the unrelated
+entry "Bruck" (Landkreis Ebersberg) and returned a fabricated 18.3 km,
+which the previous version of this document manually corrected to
+Fürstenfeldbruck's real ~52.9 km (real coordinates 48.1772, 11.2547;
+`haversine_km` from the profile origin) rather than removing the object.
+That correction is no longer needed, because the entry is no longer there
+to correct: with the fix merged, `lookup("82256 Fürstenfeldbruck")` and
+`lookup("Fürstenfeldbruck")` both return `None` - "Bruck" no longer matches
+inside the longer word, and there is no separate gazetteer entry for
+Fürstenfeldbruck itself - so the object now falls into the gazetteer-unknown
+33, not the confirmed 10. Fürstenfeldbruck is **genuinely** inside the 80 km
+radius (~52.9 km, real coordinates above); it just cannot be confirmed by
+this offline path any more, because the path that used to place it there
+was wrong. Nothing about the object changed - only the matcher's honesty
+about what it actually knows.
+
+The gazetteer-confirmed count went *down* by exactly one object between the
+substring-matching code and the fixed code (11 -> 10), and the
+gazetteer-unknown count went *up* by exactly the same one (32 -> 33) -
+Fürstenfeldbruck is the only row either fixed value moved. Every other row
+in the confirmed list resolves identically before and after the fix, since
+none of the other nine matches ever depended on substring behaviour: six
+are exact or word-boundary town-name matches, and three (Prien am Chiemsee,
+one of the two Mühldorf objects, and Niedertaufkirchen - Arbing) resolve
+through `lookup()`'s postcode fallback, which the boundary-anchoring fix
+does not touch.
 
 ## OVBimmo (OVB Heimatzeitungen): terms check complete, source enabled
 
