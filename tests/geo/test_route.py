@@ -81,7 +81,9 @@ async def test_route_distance_http_error_status_returns_none_none(session):
 async def test_route_distance_offline_mode_returns_none_none_without_network(session, monkeypatch):
     monkeypatch.setenv("HOFRADAR_OFFLINE", "1")
     with respx.mock:
-        respx.route(url__regex=OSRM_PATTERN).mock(side_effect=AssertionError("must not hit network"))
+        respx.route(url__regex=OSRM_PATTERN).mock(
+            side_effect=AssertionError("must not hit network")
+        )
         km, minutes = await route_distance(session, ORIGIN, DEST)
 
     assert (km, minutes) == (None, None)

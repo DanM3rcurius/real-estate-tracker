@@ -51,7 +51,9 @@ def _build_geocode_queries(listing: NormalizedListing) -> list[str]:
     return queries
 
 
-async def locate(session: Session, listing: NormalizedListing, profile: SearchProfile) -> GeoResult:
+async def locate(
+    session: Session, listing: NormalizedListing, profile: SearchProfile
+) -> GeoResult:
     """Geocode a listing, compute its air distance from ``profile.center``,
     and - only if that puts it inside the air radius - the real road
     distance. Never infers one distance from the other."""
@@ -65,7 +67,11 @@ async def locate(session: Session, listing: NormalizedListing, profile: SearchPr
     if result.lat is not None and result.lon is not None:
         result.distance_air_km = haversine_km(center, (result.lat, result.lon))
 
-    if result.lat is not None and within_air_radius(result.distance_air_km, profile):
+    if (
+        result.lat is not None
+        and result.lon is not None
+        and within_air_radius(result.distance_air_km, profile)
+    ):
         km, minutes = await route_distance(session, center, (result.lat, result.lon))
         if km is not None and minutes is not None:
             result.distance_driving_km = km
@@ -85,7 +91,9 @@ def within_air_radius(distance_air_km: float | None, profile: SearchProfile) -> 
     return distance_air_km <= profile.radius.air_km_max
 
 
-def within_driving_radius(distance_driving_km: float | None, profile: SearchProfile) -> bool | None:
+def within_driving_radius(
+    distance_driving_km: float | None, profile: SearchProfile
+) -> bool | None:
     """Whether the real road distance is inside the hard driving limit.
 
     Returns ``None`` when the distance is unknown (not yet routed, or

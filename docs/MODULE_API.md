@@ -59,6 +59,7 @@ def haversine_km(a: tuple[float,float], b: tuple[float,float]) -> float
 async def locate(session, listing: NormalizedListing, profile: SearchProfile) -> GeoResult
 def within_air_radius(distance_air_km: float | None, profile: SearchProfile) -> bool
 def within_driving_radius(distance_driving_km: float | None, profile: SearchProfile) -> bool | None  # None = unknown
+def driving_band(km: float | None, profile: SearchProfile) -> str  # within_soft | within_hard | beyond | unknown
 ```
 
 ## `hofradar.costmodel`
