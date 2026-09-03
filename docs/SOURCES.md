@@ -269,11 +269,63 @@ provenance comment at the top) is parsed correctly end-to-end by
 `classmarkets` `cm:`/`cms:` namespaces alongside the plain Atom elements the
 adapter actually reads (`<title>`, `<id>`, `<link>`, `<updated>`,
 `<summary>`) without choking on the two `<link>` elements per entry (one bare,
-one explicit `rel="alternate"`) or the entries-without-price/rooms/area-as-
-typed-fields limitation `_entry_to_listing` already has - price, rooms and
-area stay in `cm:` elements this adapter does not read; only `fetch_detail`'s
-generic HTML fallback ever gets a chance at those, and only if the detail
-page renders them as plain text.
+one explicit `rel="alternate"`), and 100/100 entries come through as
+`RawListing`s. `_entry_image_urls` also reads `media:thumbnail`
+(`http://search.yahoo.com/mrss/`, a standard Media RSS element this feed
+happens to carry, not a classmarkets vendor extension) alongside the
+`enclosure`/`media:content` shapes it already read, so every entry's image
+survives too - pinned in the same test by asserting the real thumbnail URL
+from entry one.
+
+**`role`, `rate_limit_seconds` and `listing_ttl_days` are set to match
+`ovbimmo`, not this adapter's previous per-source defaults**, because every
+feed configured here today is that same host reached a second way: `role:
+local` (not `primary`) so a listing seen by both routes doesn't let the
+generic, less-structured route outrank the dedicated `ovbimmo` adapter as
+the property's primary source in `dedupe._primary_sort_key`;
+`rate_limit_seconds: 5.0` (not `2.0`) so the generic route doesn't poll
+ovbimmo.de faster than the entry that deliberately chose to go slow;
+`listing_ttl_days: 14` (not unset) so the same paid-advert-window inventory
+reads as EXPIRED rather than REMOVED regardless of which route saw it
+(`docs/DECISIONS.md` entry 15). See the reasoning recorded in `generic_rss`'s
+own `notes:` in `config/sources.yaml`, including what to do if a genuine
+broker-own-site feed (not an ovbimmo re-aggregation) is ever added alongside
+these four.
+
+**What the `cm:`/`cms:` classmarkets namespace does and does not give up to
+`feedparser` - recorded here as a precise follow-up, deliberately not
+implemented in this generic adapter** (reading a feed's own vendor namespace
+belongs in a dedicated adapter or a normalize-layer mapping, not in the
+adapter meant to work for any broker's feed). Checked directly against
+`tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom`:
+
+| Field | feedparser key | What comes through |
+|---|---|---|
+| `cm:locality` | `entry.cm_locality` | plain text, e.g. `"Stephanskirchen"` - reachable as-is |
+| `cm:postalCode` | `entry.cm_postalcode` | plain text, e.g. `"83071"` - reachable as-is |
+| `cm:rooms` | `entry.cm_rooms` | plain text, e.g. `"5"` - reachable as-is |
+| `cm:marketingType` | `entry.cm_marketingtype` | plain text, e.g. `"sale"` - reachable as-is |
+| `cm:price` | `entry.cm_price` | **element text lost.** `<cm:price cm:currency="EUR">659000</cm:price>` carries an attribute, so feedparser's generic unknown-namespace handling keeps only the attribute dict (`{"currency": "EUR"}`) and drops `"659000"` entirely - needs real work |
+| `cm:area` | `entry.cm_area` | **element text lost**, same cause: `<cm:area cm:unit="m²">131</cm:area>` yields `{"unit": "m²"}`, the `"131"` is gone - needs real work |
+
+The two broken fields share one cause: `feedparser` only special-cases
+namespaces it recognises (Dublin Core, Media RSS, etc.); for an unrecognised
+namespaced element that also carries attributes, it keeps the attributes and
+discards the text. Getting `cm:price`/`cm:area` would mean bypassing that -
+reading the raw entry XML directly (e.g. with `lxml`/`ElementTree` against
+the `classmarkets` namespace) instead of trusting `feedparser`'s generic
+path - real, scoped work for whoever picks this up, not a config change.
+
+**Net effect today: ovbimmo.de now arrives through two routes -
+`generic_rss`'s Atom feeds and the dedicated `ovbimmo` adapter's own search
+crawl - and *neither* yields a typed price, room count or town.**
+`generic_rss` doesn't read `cm:` at all, by the ruling above; `ovbimmo`'s own
+`fetch_detail` uses only the generic HTML fallback, which gets the detail
+page's `eps-item` price/rooms/area blocks as plain description text, not
+typed fields (see that adapter's note above). Both leave `locate()` to
+geocode from the title/description string alone for every one of these
+listings, even though the feed and the detail page both state the
+municipality in a field a purpose-built reader could use directly.
 
 `generic_sitemap`'s `options.sites` was deliberately left empty rather than
 also pointing at ovbimmo.de's advertised sitemap - see that source's `notes:`

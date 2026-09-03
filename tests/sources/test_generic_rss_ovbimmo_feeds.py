@@ -19,10 +19,17 @@ Two things are verified here, fully offline:
 If ``feedparser`` ever choked on this feed shape (the two ``<link>``
 elements per entry - one with no ``rel`` and one with an explicit
 ``rel="alternate"`` - or the classmarkets namespaces), that would be a real
-finding to report, not something to paper over. It does not: entries come
-through with a link that ``_entry_to_listing`` skips a missing one, and
-their titles, ids, dates and body summaries all populate exactly where the
-adapter reads them.
+finding to report, not something to paper over. It does not: every entry
+that carries a ``<link>`` comes through as a ``RawListing`` (only the rare
+entry with none would be skipped by ``_entry_to_listing``, and this capture
+has none), and titles, ids, dates and body summaries all populate exactly
+where the adapter reads them - as does ``media:thumbnail``, the one
+image field this feed carries that is a standard Media RSS element rather
+than a classmarkets vendor extension. The ``cm:price``/``cm:rooms``/
+``cm:area``/``cm:locality`` fields stay unread here on purpose - see
+docs/SOURCES.md for exactly what feedparser does and does not surface from
+them, and why reading them belongs to the dedicated ``ovbimmo`` adapter, not
+to this generic one.
 """
 
 from __future__ import annotations
@@ -90,6 +97,13 @@ async def test_discover_parses_a_real_ovbimmo_atom_capture(
     )
     # this feed's <id> IS the canonical listing URL, unlike a synthetic guid.
     assert first.external_id == first.url
+    # media:thumbnail is standard Media RSS, not a classmarkets vendor
+    # element - _entry_image_urls must read it, or every listing arrives
+    # with no image at all.
+    assert first.image_urls == [
+        "https://cmcdn.de/img-service/gZC35Wg4MG_oSvykbmlwf6A_7bzRvyMO41JWtVMGTUsSFkArYkHRg5STyyJcZ9WiBdT"
+        "-qDY7wquFuyIO9pE2z0Q;safescale=440x330,crop=440x330"
+    ]
     assert first.source_date_raw == "2026-09-03T21:46:22Z"
     assert "Reihenmittelhaus" in first.description
 

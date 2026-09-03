@@ -119,19 +119,28 @@ check for this before concluding the publisher gap is real. This errs on the
 loud side — a phantom gap gets investigated, not a real one missed — so it is
 noted here rather than fixed.
 
-**Ruling 1 update, 2026-09-03: partly obsolete.** Egress to `ovbimmo.de` and
-`www.blfd.bayern.de` was opened, which is what made the Atom-feed check above
-possible. **Bavarian municipality sites are still 403-blocked** — re-tested
-this session against `feldkirchen-westerham.de`, `bruckmuehl.de`,
-`weyarn.de` and `holzkirchen.de`, all four denied. So `options.bulletins`
-index URLs for the Gemeindeblatt/Amtsblatt adapter remain genuinely
-unreachable from this container, and none was guessed or fabricated to fill
-the gap — see the `gemeindeblatt_pdf` entry's `notes:` in
-`config/sources.yaml` for the precise per-Gemeinde checklist left for
-whoever next has network access. Broker RSS/JSON feeds and sitemap URLs for
+**Note on the development sandbox, dated 2026-09-03 — this is a statement
+about this container's egress policy at this point in time, not a claim
+about whether the municipalities themselves are reachable from a normal
+network.** Ruling 1 (`shared-context.md`) said the sandbox's egress proxy
+denied `ovbimmo.de`, `www.blfd.bayern.de` and Bavarian municipality sites
+alike; that has partly changed. As of this date, the same proxy allows
+`ovbimmo.de` and `www.blfd.bayern.de` — which is what made the Atom-feed
+check above possible — **but still returns a 403 CONNECT denial for
+Bavarian municipality domains**: re-tested this session against
+`feldkirchen-westerham.de`, `bruckmuehl.de`, `weyarn.de` and `holzkirchen.de`,
+all four denied by the proxy. So, from *this development sandbox, on this
+date*, `options.bulletins` index URLs for the Gemeindeblatt/Amtsblatt adapter
+could not be filled in, and none was guessed or fabricated to fill the gap —
+see the `gemeindeblatt_pdf` entry's `notes:` in `config/sources.yaml` for the
+precise per-Gemeinde checklist left for whoever next runs this from a machine
+with ordinary internet access. Broker RSS/JSON feeds and sitemap URLs for
 individual local Makler are also still unfilled, for the same reason: the
 directory task (`https://ovbimmo.de/anbieter`) that would enumerate them was
-not run this session — only the aggregate Atom feeds were.
+not run this session — only the aggregate Atom feeds were. This paragraph
+describes a sandbox limitation on one date, not a property of any
+municipality's actual web presence, and should be read (and eventually
+deleted) as such once someone runs the checklist from a normal connection.
 
 ### What a networked human still needs to do
 
