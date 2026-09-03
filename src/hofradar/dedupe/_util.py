@@ -141,15 +141,28 @@ def canonical_url(url: str | None) -> str | None:
     into one property and destroys both their histories, while a missed join
     merely leaves a duplicate the ordinary evidence model can still catch.
 
-    Removed: the fragment (never sent to a server), a default port, a ``www.``
-    host prefix, userinfo, a trailing slash, the http/https distinction, and
-    the tracking parameters named above. Query parameters are otherwise kept
-    (sorted, so ``?a=1&b=2`` and ``?b=2&a=1`` agree) and the path's case is
-    kept, because paths can be case-sensitive and a query parameter this
-    function does not recognise may well be what selects the listing.
+    Removed: a default port, a ``www.`` host prefix, userinfo, a trailing
+    slash, the http/https distinction, and the tracking parameters named
+    above. Query parameters are otherwise kept (sorted, so ``?a=1&b=2`` and
+    ``?b=2&a=1`` agree) and the path's case is kept, because paths can be
+    case-sensitive and a query parameter this function does not recognise may
+    well be what selects the listing.
+
+    **The fragment is kept**, even though a browser never sends it to a
+    server. ``hofradar.sources.adapters.pdf_bulletin`` gives every hit it
+    finds inside an Amtsblatt PDF the URL ``<pdf_url>#page=<n>`` and sets no
+    ``external_id``, so there the fragment is the *only* thing telling two
+    listings apart: strip it and two farmsteads found on two pages of one
+    bulletin merge into a single property at confidence 1.0, irreversibly,
+    in the append-only history. Any source whose listings share one document
+    URL has that shape. Keeping it also costs nothing for the case this
+    function exists to serve - the two routes into ovbimmo.de produce
+    byte-identical URLs with no fragment on either side - which is the whole
+    test for whether a difference may be normalised away: it has to be
+    provably cosmetic *and* actually in the way.
 
     Returns ``None`` for anything without a host - a bare path or a pasted
-    fragment of text is not an identity, and must never match another one.
+    scrap of text is not an identity, and must never match another one.
     """
     if not url or not url.strip():
         return None
@@ -174,7 +187,7 @@ def canonical_url(url: str | None) -> str | None:
     )
     query_string = "&".join(f"{key}={value}" for key, value in query)
     canonical_scheme = _CANONICAL_WEB_SCHEME if scheme in _WEB_SCHEMES else scheme
-    return urlunsplit((canonical_scheme, netloc, path, query_string, ""))
+    return urlunsplit((canonical_scheme, netloc, path, query_string, parts.fragment))
 
 
 def as_utc(value: datetime | None) -> datetime | None:

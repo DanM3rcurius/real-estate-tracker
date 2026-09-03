@@ -84,7 +84,6 @@ def test_two_different_listings_on_one_portal_never_collide(make_listing):
     "variant",
     [
         SHARED_URL + "/",
-        SHARED_URL + "#exposé",
         SHARED_URL + "?utm_source=newsletter&utm_medium=email",
         SHARED_URL + "?gclid=abc123",
         SHARED_URL.replace("https://", "http://"),
@@ -108,6 +107,9 @@ def test_cosmetic_url_differences_still_name_one_listing(variant):
         SHARED_URL + "?id=1",
         # ...and two values of one are two listings.
         SHARED_URL + "?ref=partner-a",
+        # The fragment is kept: pdf_bulletin uses it as its ONLY identity
+        # discriminator (see the dedicated test below).
+        SHARED_URL + "#page=7",
     ],
 )
 def test_meaningful_url_differences_are_kept(other):
@@ -161,3 +163,65 @@ def test_two_routes_into_one_portal_ingest_as_one_property(
     assert db_session.query(Property).count() == 1
     assert db_session.query(PropertySource).filter_by(property_id=first.id).count() == 2
     assert change.kind != "first_seen"
+
+
+# --------------------------------------------------------------------------- #
+# The fragment. Stripping it (the first version of this rule did) is the exact
+# irreversible failure the narrow normalisation exists to prevent.
+# --------------------------------------------------------------------------- #
+
+#: One Amtsblatt PDF, two hits on two pages - the shape
+#: hofradar.sources.adapters.pdf_bulletin yields: `url=f"{pdf_url}#page={n}"`
+#: with NO external_id, so the fragment is the only thing telling the two
+#: apart. See that adapter around the RawListing it builds per page hit.
+_BULLETIN_PDF = "https://bruckmuehl.example/rathaus/amtsblatt/2026-09.pdf"
+BULLETIN_PAGE_3 = f"{_BULLETIN_PDF}#page=3"
+BULLETIN_PAGE_7 = f"{_BULLETIN_PDF}#page=7"
+
+
+def test_two_hits_on_two_pages_of_one_bulletin_are_two_listings():
+    """Two farmsteads mentioned on two pages of one PDF are two farmsteads."""
+    assert canonical_url(BULLETIN_PAGE_3) != canonical_url(BULLETIN_PAGE_7)
+    # ...and neither collapses onto the document itself.
+    assert canonical_url(BULLETIN_PAGE_3) != canonical_url(_BULLETIN_PDF)
+
+
+def test_two_bulletin_page_hits_never_merge_into_one_property(
+    db_session, make_source, make_listing
+):
+    """The reproduction, through the real ingest path.
+
+    ``gemeindeblatt_pdf`` ships disabled with an empty ``options.bulletins``,
+    so this is latent - but docs/coverage.md names it the only configured
+    route into Miesbach and Ebersberg, so it is a matter of time. A false
+    merge here is not a duplicate a human can undo later: it is two
+    farmsteads' histories fused at confidence 1.0 in an append-only table.
+    """
+    source = make_source(key="gemeindeblatt_pdf", role=SourceRole.LOCAL, reliability=0.85)
+
+    first, _ = ingest(
+        db_session,
+        make_listing(
+            source_key="gemeindeblatt_pdf",
+            url=BULLETIN_PAGE_3,
+            title="Amtsblatt 2026-09 - Seite 3: Hofstelle",
+            external_id=None,
+        ),
+        source=source,
+        run_id=1,
+    )
+    second, change = ingest(
+        db_session,
+        make_listing(
+            source_key="gemeindeblatt_pdf",
+            url=BULLETIN_PAGE_7,
+            title="Amtsblatt 2026-09 - Seite 7: Aussiedlerhof",
+            external_id=None,
+        ),
+        source=source,
+        run_id=1,
+    )
+
+    assert second.id != first.id
+    assert db_session.query(Property).count() == 2
+    assert change.kind == "first_seen"

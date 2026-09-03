@@ -307,11 +307,11 @@ listing, whichever sources found them. `hofradar.dedupe.compare` treats that as
 a short-circuit proof alongside `(source_key, external_id)` equality and a
 shared image hash, and `find_duplicate` blocks on the stored URL across the
 source boundary so the candidate is retrievable in the first place.
-`hofradar.dedupe._util.canonical_url` defines "the same URL": it removes the
-fragment, a default port, a `www.` prefix, userinfo, a trailing slash, the
-http/https distinction and the `utm_*`/click-id tracking parameters — and
-nothing else. Query parameters it does not recognise are kept and sorted, and
-path case is kept.
+`hofradar.dedupe._util.canonical_url` defines "the same URL": it removes a
+default port, a `www.` prefix, userinfo, a trailing slash, the http/https
+distinction and the `utm_*`/click-id tracking parameters — and nothing else.
+Query parameters it does not recognise are kept and sorted, path case is kept,
+and **the fragment is kept**.
 
 **Why.** One portal is routinely reached twice: a dedicated adapter and a
 syndicated feed of the same site produce byte-identical URLs (verified on the
@@ -331,6 +331,21 @@ farmsteads into one property and destroys both their histories irreversibly.
 So the normaliser removes only differences that provably cannot select
 different content. `ref`, `source`, `id` and similar are *not* treated as
 tracking parameters, because plenty of sites use them to choose what to show.
+
+**The fragment, specifically.** A browser never sends it to a server, so
+stripping it looks free — and the first version of this rule did strip it. It
+is not free. `hofradar.sources.adapters.pdf_bulletin` gives every hit it finds
+inside an Amtsblatt PDF the URL `<pdf_url>#page=<n>` and sets no `external_id`,
+so there the fragment is the *only* thing telling two listings apart. Stripping
+it merged two farmsteads found on two pages of one bulletin into a single
+property at confidence 1.0 — reproduced through the real `ingest` path:
+`properties: 1, kind: source_change` where two properties and a `first_seen`
+belong. Any source whose listings share one document URL (a CSV with a repeated
+`url` column, for instance) has the same shape. Keeping the fragment also costs
+nothing for the case this rule exists to serve: the two routes into ovbimmo.de
+produce byte-identical URLs with no fragment on either side. That is the test a
+candidate normalisation has to pass — provably cosmetic *and* actually in the
+way — and the fragment failed both halves of it.
 
 **Alternative rejected.** Widening `compare`'s soft evidence model so that a
 title plus a town could carry a cross-source match. That is precisely the
