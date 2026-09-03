@@ -133,14 +133,39 @@ def _fold(text: str) -> str:
 
 _BY_NAME_FOLDED: dict[str, GazetteerEntry] = {_fold(entry.name): entry for entry in _TOWNS}
 
+#: Word-boundary-anchored matcher per entry, longest name first. Farmstead
+#: addresses paste a town name into a longer string ("83512 Wasserburg am
+#: Inn", "Titting - Altdorf"), so the match has to look inside the query -
+#: but German compounds glue words together with no separator at all
+#: ("Fuerstenfeldbruck" contains "Bruck" as bare characters, not as the town
+#: "Bruck"). ``\w`` boundaries reject a hit inside a longer word while still
+#: crossing spaces, hyphens and punctuation, which is exactly where a real
+#: town name legitimately ends inside a longer string. Longest-first ordering
+#: prefers the more specific entry when one town's name is itself a
+#: word-boundary match inside another's (e.g. "Tegernsee" inside "Gmund am
+#: Tegernsee"), so a query for the latter resolves to the latter.
+def _boundary_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+
+
+_NAME_PATTERNS: tuple[tuple[re.Pattern[str], GazetteerEntry], ...] = tuple(
+    sorted(
+        ((_boundary_pattern(name), entry) for name, entry in _BY_NAME_FOLDED.items()),
+        key=lambda pair: len(pair[1].name),
+        reverse=True,
+    )
+)
+
 
 def lookup(query: str) -> GazetteerEntry | None:
     """Best-effort match of a free-text address against the gazetteer.
 
     Tries an exact town-name match first (umlaut-folded, so "Muehldorf" and
-    "Mühldorf" both hit), then a substring match (so "Hauptstrasse 5, 83043
-    Bad Aibling" resolves via "bad aibling"), then any 5-digit postcode found
-    in the text.
+    "Mühldorf" both hit), then a word-boundary substring match (so
+    "Hauptstrasse 5, 83043 Bad Aibling" resolves via "bad aibling", but
+    "Fuerstenfeldbruck" does *not* resolve via "bruck" - the town name has to
+    appear as whole words in the query, not as a bare run of characters
+    inside a longer word), then any 5-digit postcode found in the text.
     """
     normalized = " ".join((query or "").strip().split())
     if not normalized:
@@ -150,8 +175,8 @@ def lookup(query: str) -> GazetteerEntry | None:
     if folded in _BY_NAME_FOLDED:
         return _BY_NAME_FOLDED[folded]
 
-    for name, entry in _BY_NAME_FOLDED.items():
-        if name in folded:
+    for pattern, entry in _NAME_PATTERNS:
+        if pattern.search(folded):
             return entry
 
     for match in _POSTCODE_RE.findall(normalized):
