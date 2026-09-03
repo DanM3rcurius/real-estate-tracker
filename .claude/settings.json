@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -m pip install --quiet -e '.[dev]' 2>&1 | tail -2; echo 'hofradar deps ready'",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
