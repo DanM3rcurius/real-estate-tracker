@@ -140,3 +140,99 @@ def test_radius_slider_moves_the_derived_driving_limits():
     profile = profile_from_query({"air_km_max": "40"})
     assert profile.radius.effective_driving_soft == pytest.approx(50.0)
     assert profile.radius.effective_driving_hard == pytest.approx(58.0)
+
+
+# --------------------------------------------------------------------------- #
+# The panel collapses on mobile (reported: it buried the first result card).
+# --------------------------------------------------------------------------- #
+
+
+def controls_block(html: str) -> str:
+    """The full ``<form id="controls">...</form>`` markup, start to end."""
+    start = html.index('<form id="controls"')
+    end = html.index("</form>", start) + len("</form>")
+    return html[start:end]
+
+
+def test_toggle_checkbox_starts_unchecked(client, seeded):
+    """No JS is required to collapse the panel: it starts closed by markup alone.
+
+    An earlier version used <details>/<summary> for this; a real-browser check
+    showed the "force it open past a breakpoint" CSS override does not work
+    for <details> (closed content is hidden on an internal slot, not via a
+    `display` rule an author stylesheet can override), so the desktop panel
+    rendered empty. A hidden checkbox + sibling-shown body does not have that
+    problem, so that is what ships - see app.css for the full story.
+    """
+    form = controls_block(client.get("/").text)
+    assert '<input type="checkbox" id="filter-toggle" class="controls__toggle-input"' in form
+    assert "checked" not in form[: form.index('id="filter-toggle"')]
+    # No name -> never part of the form's own serialised filter state.
+    checkbox_start = form.index('id="filter-toggle"')
+    checkbox_end = form.index(">", checkbox_start)
+    assert "name=" not in form[checkbox_start:checkbox_end]
+    assert "checked" not in form[checkbox_start:checkbox_end]
+
+
+def test_collapsed_label_still_shows_distance_and_budget(client, seeded):
+    """Base template's tagline: Entfernung and Gesamtbudget are the two that matter."""
+    form = controls_block(client.get("/").text)
+    label_start = form.index('<label for="filter-toggle"')
+    label_end = form.index("</label>")
+    label = form[label_start:label_end]
+
+    assert "Filter" in label
+    assert "Entfernung" in label
+    assert "Gesamtbudget" in label
+    # The actual figures, not just the labels - an id app.js keeps live too.
+    assert 'id="out-air-collapsed"' in label
+    assert 'id="out-budget-collapsed"' in label
+
+
+def test_every_control_stays_inside_the_htmx_form(client, seeded):
+    """Wrapping the panel in a collapsible body must not move a single input
+
+    out of #controls - hx-trigger serialises the form via FormData, so a
+    field left outside it would silently stop being sent to /api/results.
+    """
+    html = client.get("/").text
+    form = controls_block(html)
+
+    for name in (
+        "air_km_max",
+        "total_budget_max",
+        "min_land_sqm",
+        "status",
+        "q",
+        "sort",
+        "verified_only",
+        "outbuildings_only",
+        "include_rejected",
+    ):
+        assert f'name="{name}"' in form, f"{name!r} missing from #controls"
+
+    # The toggle and the collapsible body both live inside the form.
+    assert form.index('<form id="controls"') < form.index('id="filter-toggle"')
+    assert form.index('id="controls-body"') < form.index("</form>")
+
+
+def test_desktop_override_css_still_forces_the_panel_open(client):
+    """A rendered-HTML/CSS-text test cannot prove a selector actually paints
+
+    correctly in a browser engine - that needs a real one, and was checked
+    manually against headless Chromium (see the task report). What it CAN
+    prove is that the pieces the desktop override depends on are still in
+    app.css, so nobody can silently delete the escape hatch and leave only
+    the mobile-collapsed rule behind.
+    """
+    css = client.get("/static/app.css").text
+    assert ".controls__toggle-input:checked ~ .controls__body { display: block; }" in css
+
+    # Reuse the same breakpoint .controls__headline already switches on.
+    marker = "@media (min-width: 780px) {\n  .controls__toggle-input"
+    assert marker in css
+    block_start = css.index(marker)
+    block_end = css.index("\n}", block_start)
+    desktop_block = css[block_start:block_end]
+    assert ".controls__toggle-input, .controls__toggle { display: none; }" in desktop_block
+    assert ".controls__body { display: block" in desktop_block

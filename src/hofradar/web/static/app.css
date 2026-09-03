@@ -109,6 +109,56 @@ small { color: var(--ink-soft); }
 .controls__headline { display: grid; gap: 16px; grid-template-columns: 1fr; }
 @media (min-width: 780px) { .controls__headline { grid-template-columns: 1fr 1fr; } }
 
+/* Mobile: the panel is long enough to bury the first result off-screen, so it
+   starts collapsed behind a hidden-checkbox + <label> toggle. The two
+   headline figures stay readable in the label either way. At 780px - the
+   width where the two sliders already sit side by side - the body is shown
+   unconditionally and the toggle hidden, so desktop is unchanged.
+
+   A <details>/<summary> version of this was tried first and reverted: a
+   real-browser check showed that forcing closed <details> content open past
+   a breakpoint does not work - the UA hides that content on an internal
+   slot, not through a `display` rule an author stylesheet can override, so
+   the desktop panel rendered with zero height and no visible controls. A
+   checkbox's checked state and a plain sibling-shown <div> have no such
+   hidden mechanism, so the same "force it open above this width" override
+   is just ordinary CSS specificity, and it actually works. */
+.controls__toggle-input {
+  position: absolute;
+  width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.controls__toggle-input:focus-visible + .controls__toggle {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.controls__toggle {
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px 16px; flex-wrap: wrap;
+  font-weight: 600;
+  padding: 2px 0 10px;
+}
+.controls__toggle-label { display: inline-flex; align-items: center; gap: 6px; }
+.controls__toggle-icon { display: inline-block; transition: transform .15s ease; }
+.controls__toggle-input:checked ~ .controls__toggle .controls__toggle-icon { transform: rotate(90deg); }
+.controls__toggle-values {
+  display: flex; gap: 8px 14px; flex-wrap: wrap;
+  font-weight: 400; font-size: .85rem; color: var(--ink-soft);
+}
+.controls__toggle-values output {
+  font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent);
+}
+
+.controls__body { display: none; margin-top: 12px; }
+.controls__toggle-input:checked ~ .controls__body { display: block; }
+
+@media (min-width: 780px) {
+  .controls__toggle-input, .controls__toggle { display: none; }
+  .controls__body { display: block; margin-top: 0; }
+}
+
 .slider__top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .slider__top label { font-weight: 600; }
 .slider__top output { font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 700; color: var(--accent); }
