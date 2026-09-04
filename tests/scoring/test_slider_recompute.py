@@ -281,12 +281,14 @@ class TestRankedProperties:
         [
             ({"town": "Bad Feilnbach"}, 3),
             ({"town": "Nowhere"}, 0),
-            ({"min_land": 5_000}, 3),
-            ({"min_land": 7_000}, 0),
+            ({"min_land_sqm": 5_000}, 3),
+            ({"min_land_sqm": 7_000}, 0),
             ({"max_price": 500_000}, 2),
             ({"status": ListingStatus.ACTIVE}, 3),
             ({"status": ListingStatus.SOLD}, 0),
             ({"user_state": "shortlist"}, 0),
+            ({"verified_only": True}, 3),
+            ({"has_outbuildings": True}, 3),
             # only "pricey" pushes the all-in total past the 1.2M budget slider
             ({"flags": ["OVER_BUDGET"]}, 1),
             ({"flags": ["SANIERUNGSRISIKO"]}, 0),
@@ -297,6 +299,30 @@ class TestRankedProperties:
     ) -> None:
         rescore_all(session, wide)
         assert len(ranked_properties(session, wide, filters=filters)) == expected
+
+    def test_status_alive_means_not_gone_rather_than_a_status_named_alive(
+        self, session, estate, wide: SearchProfile
+    ) -> None:
+        """The control panel offers „Nur aktive"; no row ever carries that word."""
+        rescore_all(session, wide)
+        estate["far"].listing_status = ListingStatus.SOLD
+        session.commit()
+        assert len(ranked_properties(session, wide, filters={"status": "alive"})) == 2
+
+    def test_a_hidden_property_is_ranked_only_when_asked_for(
+        self, session, estate, wide: SearchProfile
+    ) -> None:
+        """Triage's archive is a reader-facing hide, not a scoring gate."""
+        rescore_all(session, wide)
+        estate["near"].user_state = "archived"
+        session.commit()
+
+        assert len(ranked_properties(session, wide)) == len(estate) - 1
+        assert len(ranked_properties(session, wide, include_hidden=True)) == len(estate)
+        # A triage verdict that is not a hide leaves the ranking alone.
+        estate["near"].user_state = "rejected"
+        session.commit()
+        assert len(ranked_properties(session, wide)) == len(estate)
 
     def test_an_unknown_filter_is_an_error(
         self, session, estate, wide: SearchProfile

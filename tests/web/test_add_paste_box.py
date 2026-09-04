@@ -75,3 +75,27 @@ def test_a_locatable_paste_does_not_cry_wolf(client: TestClient) -> None:
         response = client.post("/add", data={"url": "", "text": PASTED})
 
     assert "no location found" not in response.text
+
+
+#: A portal's bookmark widget, pasted whole - the page from issue #10. Every
+#: fact on it is "k. A."; what makes it refusable is the shape of the page,
+#: not how little was parsed out of it.
+PASTED_MERKLISTE = """<!DOCTYPE html>
+<html lang="de"><head><title>Merkliste - OVBimmo.de</title></head>
+<body><h1>Merkliste</h1>
+<p>Sie haben noch keine Objekte gemerkt.</p>
+<p>Kaufpreis: k. A.</p>
+<p>Wohnfläche: k. A.</p>
+</body></html>
+"""
+
+
+def test_a_pasted_portal_page_is_refused_and_says_why(client: TestClient, db_session) -> None:
+    """It saved, it got a public_id and it said nothing (issue #10). The paste
+    box must explain the refusal instead - and leave no property behind."""
+    with _offline():
+        response = client.post("/add", data={"url": "", "text": PASTED_MERKLISTE})
+
+    assert response.status_code == 200
+    assert "kein Inserat" in response.text
+    assert db_session.query(Property).count() == 0

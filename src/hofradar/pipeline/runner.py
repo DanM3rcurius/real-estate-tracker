@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -38,6 +38,15 @@ log = logging.getLogger(__name__)
 
 #: Sources whose silence proves nothing - never used to mark a listing removed.
 NON_VERIFYING_ROLES = {SourceRole.DISCOVERY}
+
+#: Why the crawl loop declined to remember a row it had already fetched. Every
+#: one of these used to be a bare ``continue``, so a source whose entire yield
+#: was discarded produced the same run summary as a source that found nothing
+#: (GitHub issue #10). They are counted per run and logged as one NORMALIZE
+#: entry, which /runs renders verbatim.
+REJECT_EXCLUSION_FLAGS = "exclusion_flags"
+REJECT_OUT_OF_RADIUS = "out_of_radius"
+REJECT_NOT_A_LISTING = "not_a_listing"
 
 
 class PipelineError(RuntimeError):
@@ -65,7 +74,13 @@ async def run_pipeline(
     from hofradar.costmodel import estimate_costs  # noqa: F401  (used via scoring)
     from hofradar.dedupe import find_duplicate  # noqa: F401  (used via lifecycle)
     from hofradar.geo import locate, within_air_radius
-    from hofradar.lifecycle import ImplausibleAbsence, apply_stale_rules, ingest, mark_missing
+    from hofradar.lifecycle import (
+        ImplausibleAbsence,
+        NotAListing,
+        apply_stale_rules,
+        ingest,
+        mark_missing,
+    )
     from hofradar.normalize import normalize_listing
     from hofradar.report import build_report, render_html, render_markdown
     from hofradar.scoring import rescore_all
@@ -102,6 +117,8 @@ async def run_pipeline(
             new_count = 0
             updated_count = 0
             price_changes = 0
+            #: reason -> how many rows the loop below threw away for it.
+            rejected: Counter[str] = Counter()
 
             for source in sources:
                 adapter = get_adapter(source)
@@ -120,6 +137,7 @@ async def run_pipeline(
 
                         # Cheap deterministic reject before any geocoding call.
                         if listing.exclusion_flags and not listing.building_features:
+                            rejected[REJECT_EXCLUSION_FLAGS] += 1
                             continue
 
                         geo = await locate(session, listing, profile)
@@ -127,14 +145,23 @@ async def run_pipeline(
                             geo.distance_air_km, profile
                         ):
                             # Outside the radius: remember nothing, spend nothing.
+                            rejected[REJECT_OUT_OF_RADIUS] += 1
                             continue
 
                         if dry_run:
                             continue
 
-                        prop, change = ingest(
-                            session, listing, run_id=run_id, source=source, geo=geo
-                        )
+                        try:
+                            prop, change = ingest(
+                                session, listing, run_id=run_id, source=source, geo=geo
+                            )
+                        except NotAListing as exc:
+                            # Not a source failure: the source did its job and
+                            # handed us a page. It just was not a listing, and
+                            # nothing was written for it.
+                            rejected[f"{REJECT_NOT_A_LISTING}:{exc.page_kind}"] += 1
+                            log.info("%s: refused %s - %s", source.key, exc.url, exc.reason)
+                            continue
                         seen_by_source[source.id].add(prop.id)
                         if change.kind == "first_seen":
                             new_count += 1
@@ -179,6 +206,15 @@ async def run_pipeline(
                 listings=listings_seen,
                 new=new_count,
                 updated=updated_count,
+            )
+            # Always logged, zero included: "nothing was rejected" and "nobody
+            # counted" have to be distinguishable in the run log.
+            _log_stage(
+                session,
+                run,
+                RunStage.NORMALIZE,
+                rejected=sum(rejected.values()),
+                reasons=dict(rejected),
             )
 
             # -- 3. disappearance detection -------------------------------- #
@@ -309,7 +345,12 @@ async def _llm_review(session: Session, profile: SearchProfile, *, run_id: int |
         candidates = [
             prop
             for prop, _score in ranked_properties(
-                session, profile, limit=profile.gates.llm_review_size
+                session,
+                profile,
+                limit=profile.gates.llm_review_size,
+                # Archived means the human is done with it; spending model
+                # budget on it is exactly what "hide" was asked to prevent.
+                include_hidden=False,
             )
         ]
         if not candidates:

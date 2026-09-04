@@ -8,7 +8,12 @@ from pathlib import Path
 import pytest
 
 from hofradar.config import load_keywords
-from hofradar.contracts import RawListing
+from hofradar.contracts import (
+    PAGE_KIND_INDEX,
+    PAGE_KIND_LISTING,
+    PAGE_KIND_UTILITY,
+    RawListing,
+)
 from hofradar.db.enums import PriceType
 from hofradar.normalize import normalize_listing
 
@@ -125,3 +130,42 @@ def test_exclusion_flags_generate_a_warning():
     result = normalize_listing(raw, KEYWORDS)
     assert "eigentumswohnung" in result.exclusion_flags
     assert any("exclusion" in w.lower() for w in result.warnings)
+
+
+def test_a_non_listing_page_carries_its_kind_and_says_so():
+    """Issue #10: the normaliser is where a load-bearing fact gets a warning
+    (decision 18), and "this was never a listing" is the most load-bearing
+    one there is - every field below it was scraped off a page that offers
+    nothing."""
+    raw = RawListing(
+        source_key="test_source",
+        url="https://ovbimmo.de/kaufen/rosenheim-kreis",
+        title="Immobilien in Rosenheim (Kreis) kaufen",
+        description="Bauernhaus 461 m² Grundstück 434 m² Wohnfläche 83071 Stephanskirchen",
+        page_kind=PAGE_KIND_INDEX,
+    )
+    result = normalize_listing(raw, KEYWORDS)
+
+    assert result.page_kind == PAGE_KIND_INDEX
+    assert any("Trefferliste" in w for w in result.warnings)
+
+
+def test_a_utility_page_says_what_it_is():
+    raw = RawListing(
+        source_key="test_source",
+        url="https://ovbimmo.de/merkliste",
+        title="Merkliste",
+        description="Sie haben noch keine Objekte gemerkt.",
+        page_kind=PAGE_KIND_UTILITY,
+    )
+    result = normalize_listing(raw, KEYWORDS)
+
+    assert result.page_kind == PAGE_KIND_UTILITY
+    assert any("Portalfunktion" in w for w in result.warnings)
+
+
+def test_an_ordinary_listing_is_not_warned_about():
+    result = normalize_listing(VIERSEITHOF_ROSENHEIM, KEYWORDS)
+
+    assert result.page_kind == PAGE_KIND_LISTING
+    assert not any("Seitentyp" in w for w in result.warnings)

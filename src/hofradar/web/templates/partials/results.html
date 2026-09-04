@@ -11,7 +11,11 @@
   <span>{{ results.total_matched | de_number }} von {{ results.total_in_db | de_number }} im Filter</span>
   {% if results.hidden_rejected %}
   <span>·</span>
-  <span>{{ results.hidden_rejected | de_number }} abgelehnte ausgeblendet</span>
+  <span>{{ results.hidden_rejected | de_number }} vom Bewertungs-Gate aussortiert</span>
+  {% endif %}
+  {% if results.hidden_archived %}
+  <span>·</span>
+  <span>{{ results.hidden_archived | de_number }} archivierte ausgeblendet</span>
   {% endif %}
 </p>
 

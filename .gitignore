@@ -55,3 +55,6 @@ backups/
 reports/weekly/*.md
 reports/weekly/*.html
 !.gitkeep
+
+# Harness-managed subagent worktrees
+.claude/worktrees/

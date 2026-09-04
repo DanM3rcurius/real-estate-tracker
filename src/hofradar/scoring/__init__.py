@@ -39,7 +39,7 @@ Public surface, per ``docs/MODULE_API.md``::
     confidence_score(prop) -> tuple[float, dict]
     rescore_all(session, profile, *, only_dirty=True) -> int
     ranked_properties(session, profile, *, limit=None, include_rejected=False,
-                      filters=None) -> list[tuple[Property, Score]]
+                      include_hidden=False, filters=None) -> list[tuple[Property, Score]]
 """
 
 from __future__ import annotations

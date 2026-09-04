@@ -100,3 +100,51 @@ async def test_fetch_detail_enriches_from_entry_link(make_source_config, read_fi
     assert listing is not None
     assert listing.title == "Hofstelle mit Scheune bei Feldkirchen-Westerham"
     assert listing.price_raw == "590.000 €"
+
+
+UTILITY_FEED = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Makler Feldkirchen</title>
+  <link>https://makler.example</link>
+  <description>Aktuelle Angebote</description>
+  <item>
+    <title>Resthof mit Scheune bei Feldkirchen</title>
+    <link>https://makler.example/objekt/1</link>
+    <guid>obj-1</guid>
+    <description>Schoener Resthof mit Nebengebaeuden.</description>
+  </item>
+  <item>
+    <title>Merkliste</title>
+    <link>https://makler.example/merkliste</link>
+    <guid>merkliste</guid>
+    <description>Ihre gemerkten Objekte.</description>
+  </item>
+</channel></rss>
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_utility_entry_is_skipped_without_changing_what_the_feed_proves(
+    make_source_config, search_profile, sample_keywords
+):
+    """Issue #10: a feed that syndicates the site's own bookmark page must not
+    turn it into a property. A feed proves nothing by its silence either way
+    (``enumerates`` is False), and skipping an entry must not change that.
+    """
+    cfg = make_source_config(
+        key="generic_rss",
+        adapter="generic_rss",
+        options={"feeds": ["https://makler.example/feed.xml"]},
+    )
+    adapter = GenericRssAdapter(cfg)
+
+    with respx.mock:
+        respx.get("https://makler.example/feed.xml").mock(
+            return_value=httpx.Response(
+                200, text=UTILITY_FEED, headers={"Content-Type": "application/rss+xml"}
+            )
+        )
+        results = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert {r.url for r in results} == {"https://makler.example/objekt/1"}
+    assert adapter.can_prove_absence is False

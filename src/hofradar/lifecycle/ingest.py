@@ -22,6 +22,14 @@ never set ``last_verified``, ``verification_status=VERIFIED`` or
 
 **4. Nothing is overwritten with NULL.** A crawl that failed to parse the land
 area has not proven the farm has no land.
+
+**5. A page that is not a listing is refused before anything is written.**
+Not even the observation: ``Observation`` is the history of what a source
+said about a *listing*, and a portal's result list or login form never was
+one. The refusal (:class:`NotAListing`) therefore happens ahead of
+``find_duplicate``, so a fetch that should never have reached this far leaves
+no row, no public_id and no trace in any count. See docs/DECISIONS.md entry
+19 and GitHub issue #10.
 """
 
 from __future__ import annotations
@@ -33,7 +41,14 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from hofradar.contracts import ChangeResult, GeoResult, NormalizedListing
+from hofradar.contracts import (
+    PAGE_KIND_INDEX,
+    PAGE_KIND_LISTING,
+    PAGE_KIND_UTILITY,
+    ChangeResult,
+    GeoResult,
+    NormalizedListing,
+)
 from hofradar.db.enums import ChangeKind, ListingStatus, SourceRole, VerificationStatus
 from hofradar.db.models import (
     Image,
@@ -51,6 +66,29 @@ from hofradar.lifecycle import _rules
 
 #: Smallest price movement that counts as a change rather than rounding noise.
 PRICE_CHANGE_MIN_ABS = 1.0
+
+#: Why a page of each kind is not something this database can remember.
+#: English, like every other developer-facing string here - the German the
+#: user reads is produced by ``hofradar.normalize`` and the web layer.
+_REFUSAL_REASONS: dict[str, str] = {
+    PAGE_KIND_INDEX: "a result list is many properties at once, not one",
+    PAGE_KIND_UTILITY: "a portal function (bookmarks, login, imprint) offers nothing",
+}
+
+
+class NotAListing(ValueError):
+    """The page handed to :func:`ingest` was never a listing.
+
+    Carries the classification and the URL so the caller can count refusals by
+    reason (``hofradar.pipeline.runner``) or explain one to a human
+    (``hofradar.web.routes.add``). Nothing was written when this is raised.
+    """
+
+    def __init__(self, *, url: str, page_kind: str, reason: str) -> None:
+        self.url = url
+        self.page_kind = page_kind
+        self.reason = reason
+        super().__init__(f"{url}: {reason} (page_kind={page_kind})")
 
 #: Scalar facts copied straight off the listing under the write rules.
 _FACT_FIELDS = (
@@ -95,8 +133,19 @@ def ingest(
     source: Source,
     geo: GeoResult | None = None,
 ) -> tuple[Property, ChangeResult]:
-    """Fold one normalised listing into the property table."""
+    """Fold one normalised listing into the property table.
+
+    Raises :class:`NotAListing` - having written nothing at all - when the
+    page behind ``listing`` was classified as something other than one advert.
+    """
     now = utcnow()
+
+    if listing.page_kind != PAGE_KIND_LISTING:
+        raise NotAListing(
+            url=listing.url,
+            page_kind=listing.page_kind,
+            reason=_REFUSAL_REASONS.get(listing.page_kind, "the page is not a listing"),
+        )
 
     verdict = find_duplicate(session, listing, geo=geo)
     prop: Property | None = None

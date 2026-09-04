@@ -282,7 +282,14 @@ class PropertySource(Base, TimestampMixin):
 
 
 class Observation(Base):
-    """Append-only crawl record. Never updated, never deleted."""
+    """Append-only crawl record: written once, and never rewritten by a crawl.
+
+    Two operations do touch it, both deliberate and both outside the crawl.
+    ``hofradar.dedupe.merge`` repoints ``property_id`` when two rows turn out to
+    be one farm - the history moves, it is not rewritten. And
+    ``hofradar.lifecycle.delete_property`` cascades, which is the whole reason
+    that function is guarded the way it is (docs/DECISIONS.md entry 20).
+    """
 
     __tablename__ = "observations"
 

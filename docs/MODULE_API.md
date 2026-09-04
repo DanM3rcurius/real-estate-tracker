@@ -5,6 +5,11 @@ Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
 GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
+`RawListing.page_kind` and `NormalizedListing.page_kind` are `PageKind`
+(`PAGE_KIND_LISTING` / `PAGE_KIND_INDEX` / `PAGE_KIND_UTILITY`, all defined in
+`hofradar.contracts`), defaulting to `"listing"` so a source that hands over
+one advert it already knows to be one says nothing. Only a `listing` may
+become a `Property`; see `docs/DECISIONS.md` entry 19.
 `CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
 `hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
 hard-reject a property on total cost; an "inferred" one only flags it.
@@ -21,7 +26,26 @@ A model validator rejects `enabled=True` unless both are set; see
 advertising window (a newspaper's fortnight), so `hofradar.lifecycle.mark_missing`
 reads its silence past that window as `ListingStatus.EXPIRED`, not `REMOVED`;
 see `docs/DECISIONS.md` entry 15.
-ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
+ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`, which also
+carries `HIDDEN_USER_STATES: frozenset[str]` — the `Property.user_state` values
+that take a property out of every reader-facing view (radar, exports, map,
+digest, LLM feed) while it keeps being crawled, rescored and observed. It lives
+there rather than in `hofradar.scoring` because the web layer applies it in its
+own filter pass, which must keep working when scoring cannot be imported.
+Deliberately not the triage verdict `"rejected"`, which is a judgement about the
+farm and stays visible — see `docs/DECISIONS.md` entry 20.
+
+```python
+# hofradar.db.backup - the snapshot before anything destructive
+def backup_database(url: str | None = None, *, into: Path | None = None) -> Path | None
+    # The path written, or None when there was nothing to copy (in-memory
+    # database, or no file yet). Raises BackupUnavailable for a database it
+    # cannot snapshot (a Postgres DSN) rather than returning None: a caller
+    # that reads "no backup" as "backed up" is the silent success this
+    # codebase keeps producing. `scripts/backup_db.py` is a wrapper around it.
+
+class BackupUnavailable(RuntimeError)
+```
 
 Schema handling is split deliberately (`docs/DECISIONS.md` entry 17):
 
@@ -65,6 +89,11 @@ five-digit run. A recovered location carries lower evidence confidence and says
 so in `warnings`; a listing with no recoverable location warns too, rather than
 leaving `town` silently `None`. See `docs/DECISIONS.md` entry 18.
 
+`normalize_listing` carries `raw.page_kind` through unchanged and, for anything
+other than `PAGE_KIND_LISTING`, prepends a German `warnings` line saying what
+the page actually was — the fact every other field below it depends on. It does
+not refuse: refusing is `hofradar.lifecycle.ingest`'s call (entry 19).
+
 `FeatureExtraction` is a dataclass with: `building_features, outbuildings,
 special_features, exclusion_flags, hidden_signals, is_foreclosure, is_monument,
 is_private_seller, is_off_market_signal` (lists of canonical lowercase tags / bools).
@@ -90,6 +119,9 @@ def merge_properties(session, keep: Property, drop: Property) -> Property
 ```python
 def ingest(session, listing: NormalizedListing, *, run_id: int | None = None,
            source: Source, geo: GeoResult | None = None) -> tuple[Property, ChangeResult]
+    # Raises NotAListing - writing nothing at all, not even the Observation -
+    # when listing.page_kind is not PAGE_KIND_LISTING. Checked before
+    # find_duplicate: docs/DECISIONS.md entry 19.
 def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
@@ -116,6 +148,35 @@ class ImplausibleAbsence(RuntimeError)
     # Raised by mark_missing when a run's absences are too broad to be
     # believed (see above). The caller decides what to do - the pipeline logs
     # it as a source failure and continues with the other sources.
+
+class NotAListing(ValueError)
+    # Raised by ingest for a page that is not one advert, carrying .url,
+    # .page_kind and a short English .reason. Not a source failure: the
+    # pipeline counts it by reason and carries on, the paste box turns it
+    # into a German sentence.
+
+def delete_property(session, prop: Property, *, backup: bool = True) -> DeletionReport
+    # The narrow escape hatch of docs/DECISIONS.md entry 20, for a mis-crawl or
+    # a duplicate dedupe cannot see. Takes a hofradar.db.backup snapshot first,
+    # then relies on the ORM cascade plus PRAGMA foreign_keys=ON for the one
+    # child table with no ORM relationship (verification_events). Commits.
+    # Writes nothing and raises when it will not proceed: ResurrectsMergedDuplicates
+    # while another row's merged_into_id points here (the column is ON DELETE
+    # SET NULL, so deleting a merge survivor would revive its duplicates), or
+    # BackupUnavailable when a snapshot was asked for and cannot be taken.
+    # "Get this off my radar" is user_state="archived", not this.
+
+def dependent_rows(session, prop: Property) -> dict[str, int]
+    # table name -> rows that would go with the property. Writes nothing; it is
+    # what `hofradar delete-property` prints in its default dry run.
+
+@dataclass(frozen=True)
+class DeletionReport:
+    public_id: str; title: str | None
+    children: dict[str, int]; backup_path: Path | None; dry_run: bool
+    .total -> int ; .summary() -> str
+
+class ResurrectsMergedDuplicates(RuntimeError)
 ```
 
 ## `hofradar.geo`
@@ -159,7 +220,22 @@ def freshness_score(prop, now) -> tuple[float, dict]
 def confidence_score(prop) -> tuple[float, dict]
 def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True) -> int
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
-                      include_rejected: bool = False, filters: dict | None = None) -> list[tuple[Property, Score]]
+                      include_rejected: bool = False, include_hidden: bool = False,
+                      filters: dict | None = None) -> list[tuple[Property, Score]]
+    # Two different facts wearing one German word. include_rejected is the
+    # machine's scoring gate (Score.rejected, recomputed per profile_hash);
+    # include_hidden is the human's triage (Property.user_state in
+    # HIDDEN_USER_STATES, surviving every re-run). A NULL user_state always
+    # passes. See docs/DECISIONS.md entry 20.
+
+SUPPORTED_FILTERS: frozenset[str]
+    # The `filters` keys ranked_properties accepts: town, min_land_sqm,
+    # max_price, status, user_state, verified_only, has_outbuildings, flags.
+    # These are exactly the names hofradar.web.deps.ResultFilters.as_scoring_filters()
+    # emits, and tests/web/test_filter_contract.py keeps the two equal: an
+    # unknown key raises, hofradar.web.lazy reports that as a missing module,
+    # and the radar answers with unscored rows instead of an error.
+    # `status="alive"` means "not REMOVED or SOLD"; no row carries that word.
 ```
 
 `rescore_all` writes `Score` rows keyed by `profile.profile_hash`, and is the
@@ -192,6 +268,28 @@ MAPPABLE_ENTRY_FIELDS: frozenset[str]
     # fields only: identity (external_id, url) and authority (contact_kind,
     # listing_visible) fields are not mappable, and a non-string value is
     # refused rather than coerced.
+
+# hofradar.sources.adapters._htmlutil - the shared full-page lift. Package
+# internal (adapters only), but every HTML adapter depends on it, so its
+# surface is pinned here:
+def raw_listing_from_html(source_key, url, html, *, http_status=None,
+                          extra=None) -> RawListing
+def extract_labeled_fields(text: str) -> dict[str, str]
+def listing_title(tree: HTMLParser, url: str) -> str | None
+    # JSON-LD name -> <h1> -> og:title -> <title>, with a trailing site name
+    # stripped only when it matches og:site_name or the URL's own host.
+def page_kind(tree: HTMLParser, url: str) -> PageKind
+    # listing | index | utility. Signals, in order: UTILITY_PATH_RE on the
+    # path; the page's own heading; schema.org @type (an index declaration
+    # outranks a listing one, because a portal makes both at once); many
+    # sibling result-card links. Unclassified is "listing", so a plain broker
+    # detail page that declares nothing still ingests. DECISIONS entry 19.
+def is_utility_url(url: str) -> bool
+UTILITY_PATH_RE: re.Pattern
+    # Whole path segments only (/merkliste, /suchagent, /login, /impressum,
+    # /suche, ...), so /suchergebnisse is not read as /suche. The generic
+    # sitemap and RSS adapters skip these URLs - AFTER recording them as
+    # enumerated, so invariant 4b / can_prove_absence are unaffected.
 ```
 
 ## `hofradar.report`
