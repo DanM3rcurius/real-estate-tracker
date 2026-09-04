@@ -9,16 +9,24 @@ never 500, because the value comes from a URL a human can edit.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from hofradar.config import SearchProfile
 from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus
+
+if TYPE_CHECKING:
+    # hofradar.web.query imports ResultFilters from this module, so importing
+    # ResultSet at runtime would be circular; the annotation-only import is safe
+    # because of ``from __future__ import annotations`` above.
+    from hofradar.web.query import ResultSet
 
 # --------------------------------------------------------------------------- #
 # Slider ranges. These are the UI contract; the model's own validators are
@@ -381,13 +389,11 @@ REMEMBERED_KEYS: frozenset[str] = frozenset(
 PROFILE_KEYS: frozenset[str] = frozenset({"air_km_max", "total_budget_max"})
 
 
-def has_control_params(params: Any) -> bool:
+def has_control_params(params: Mapping[str, str]) -> bool:
     return any(key in params for key in REMEMBERED_KEYS)
 
 
 def _parse_saved(raw: str | None) -> list[tuple[str, str]]:
-    from urllib.parse import parse_qsl
-
     if not raw or len(raw) > FILTER_COOKIE_MAX_LEN:
         return []
     pairs = [(k, v) for k, v in parse_qsl(raw, keep_blank_values=False) if k in REMEMBERED_KEYS]
@@ -395,8 +401,6 @@ def _parse_saved(raw: str | None) -> list[tuple[str, str]]:
 
 
 def saved_query(request: Request) -> str | None:
-    from urllib.parse import urlencode
-
     pairs = _parse_saved(request.cookies.get(FILTER_COOKIE))
     return urlencode(pairs) if pairs else None
 
@@ -405,7 +409,7 @@ def saved_profile_params(request: Request) -> dict[str, str]:
     return {k: v for k, v in _parse_saved(request.cookies.get(FILTER_COOKIE)) if k in PROFILE_KEYS}
 
 
-def remember_query(response: Any, results: Any) -> None:
+def remember_query(response: Response, results: ResultSet) -> None:
     value = results.filters.query_string(results.profile)
     response.set_cookie(
         FILTER_COOKIE, value, max_age=FILTER_COOKIE_MAX_AGE, path="/",
@@ -413,14 +417,12 @@ def remember_query(response: Any, results: Any) -> None:
     )
 
 
-def forget_query(response: Any) -> None:
+def forget_query(response: Response) -> None:
     response.delete_cookie(FILTER_COOKIE, path="/")
 
 
-def redirect_to_saved(request: Request):
+def redirect_to_saved(request: Request) -> RedirectResponse | None:
     """The 303 that makes a bare ``/`` show the remembered sliders, or None."""
-    from fastapi.responses import RedirectResponse
-
     if "reset" in request.query_params or has_control_params(request.query_params):
         return None
     saved = saved_query(request)

@@ -68,7 +68,8 @@ def api_results(request: Request, session: Session = Depends(get_db)):
     """The HTMX target. Returns the result-list partial, not a full page."""
     results = resolve(request, session)
     response = render(request, "partials/results.html", result_context(request, results))
-    remember_query(response, results)
+    if has_control_params(request.query_params):
+        remember_query(response, results)
     return response
 
 
