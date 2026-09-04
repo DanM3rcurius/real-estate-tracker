@@ -29,6 +29,7 @@ from hofradar.scoring._util import to_utc
 from hofradar.scoring.deal import deal_score
 from hofradar.scoring.fit import fit_score
 from hofradar.scoring.signals import confidence_score, freshness_score, hidden_score
+from hofradar.search import matches_search
 
 if TYPE_CHECKING:  # pragma: no cover
     from sqlalchemy.orm import Session
@@ -92,25 +93,6 @@ SUPPORTED_FILTERS: frozenset[str] = frozenset(
         "q",
     }
 )
-
-#: Fields a reader could plausibly type into the search box, in the order
-#: :func:`matches_search` joins them into one haystack.
-SEARCH_FIELDS: tuple[str, ...] = ("town", "postcode", "district", "canonical_title")
-
-
-def matches_search(prop: Property, needle: str) -> bool:
-    """Casefolded substring over the fields a reader would type (issue #14).
-
-    Done in Python, not SQL: SQLite's ``lower()`` folds ASCII only, so a
-    ``LIKE`` would miss every umlaut village - ``lower('Ödhof')`` never
-    matches a casefolded ``öd``.
-    """
-    wanted = needle.casefold().strip()
-    if not wanted:
-        return True
-    haystack = " ".join(str(getattr(prop, f, None) or "") for f in SEARCH_FIELDS).casefold()
-    return wanted in haystack
-
 
 # --------------------------------------------------------------------------- #
 # Scoring one property

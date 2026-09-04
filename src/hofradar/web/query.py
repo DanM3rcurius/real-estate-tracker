@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 from hofradar.config import SearchProfile
 from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus, VerificationStatus
 from hofradar.db.models import CostEstimate, Property, Score
+from hofradar.search import matches_search
 from hofradar.web import history, lazy
 from hofradar.web.deps import ResultFilters
 
@@ -183,14 +184,8 @@ def passes_filters(prop: Property, filters: ResultFilters) -> bool:
         return False
     if filters.user_state and (prop.user_state or "none") != filters.user_state:
         return False
-    if filters.town:
-        # Local import, not a module-level one: this module boots even when
-        # ``hofradar.scoring`` is missing (see the module docstring), and a
-        # top-level import here would take that guarantee away.
-        from hofradar.scoring.engine import matches_search
-
-        if not matches_search(prop, filters.town):
-            return False
+    if filters.town and not matches_search(prop, filters.town):
+        return False
     return True
 
 
