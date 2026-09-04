@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from hofradar.config import SearchProfile
-from hofradar.db.enums import ListingStatus
+from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus
 
 # --------------------------------------------------------------------------- #
 # Slider ranges. These are the UI contract; the model's own validators are
@@ -309,6 +309,10 @@ def filters_from_query(params: Any) -> ResultFilters:
         status = ""
     land = to_float(get("min_land_sqm"), 0.0) or 0.0
     limit = to_int(get("limit"), RESULT_LIMIT_DEFAULT) or RESULT_LIMIT_DEFAULT
+    user_state = (get("user_state") or "").strip().lower()[:24]
+    # Naming a hidden state is an explicit ask to see it; letting the default
+    # hide veto that would AND the two into an empty, unexplained result.
+    include_hidden = to_bool(get("include_hidden")) or user_state in HIDDEN_USER_STATES
     return ResultFilters(
         min_land_sqm=clamp(land, LAND_MIN, LAND_MAX) or None,
         status=status,
@@ -317,8 +321,8 @@ def filters_from_query(params: Any) -> ResultFilters:
         town=(get("q") or "").strip()[:120],
         sort=sort,
         include_rejected=to_bool(get("include_rejected")),
-        include_hidden=to_bool(get("include_hidden")),
-        user_state=(get("user_state") or "").strip().lower()[:24],
+        include_hidden=include_hidden,
+        user_state=user_state,
         limit=int(clamp(limit, 1, RESULT_LIMIT_MAX)),
         raw={k: v for k, v in dict(params).items() if isinstance(v, str)},
     )

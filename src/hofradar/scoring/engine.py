@@ -448,7 +448,8 @@ def ranked_properties(
     )
     if not include_rejected:
         stmt = stmt.where(Score.rejected.is_(False))
-    if not include_hidden:
+    if not include_hidden and filters.get("user_state") not in HIDDEN_USER_STATES:
+        # Naming a hidden state in ``filters`` is an explicit ask to see it.
         # An untriaged property has no ``user_state`` at all, and NULL NOT IN
         # (...) is NULL in SQL, so the common case needs saying explicitly.
         stmt = stmt.where(

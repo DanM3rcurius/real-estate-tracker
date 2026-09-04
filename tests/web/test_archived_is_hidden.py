@@ -70,3 +70,15 @@ def test_the_dossier_still_shows_an_archived_property(client, db, seeded):
     _archive(db, "HF-0001")
     response = client.get("/property/HF-0001")
     assert response.status_code == 200
+
+
+def test_asking_for_archived_by_name_is_not_answered_with_nothing(client, db, seeded):
+    """``user_state=archived`` is an explicit ask; the default hide may not veto it.
+
+    Otherwise the two clauses AND into an unsatisfiable query and the API
+    answers a confident, unexplained empty list - the silence this repo keeps
+    producing.
+    """
+    _archive(db, "HF-0001")
+    body = client.get("/api/properties.json?user_state=archived").json()
+    assert [row["public_id"] for row in body["properties"]] == ["HF-0001"]

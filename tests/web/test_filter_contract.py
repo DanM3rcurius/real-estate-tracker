@@ -61,3 +61,18 @@ def test_using_those_controls_does_not_degrade_the_radar(client, seeded):
     # The fallback path cannot score, so a scored row proves the engine answered.
     assert payload["properties"]
     assert payload["properties"][0]["scores"] is not None
+
+
+def test_an_explicit_hidden_user_state_overrides_the_default_hide(db, seeded, default_profile):
+    from sqlalchemy import select
+
+    from hofradar.db.models import Property
+
+    prop = db.scalar(select(Property).where(Property.public_id == "HF-0001"))
+    prop.user_state = "archived"
+    db.commit()
+    rescore_all(db, default_profile, only_dirty=False)
+    rows = ranked_properties(
+        db, default_profile, include_rejected=True, filters={"user_state": "archived"}
+    )
+    assert [prop.public_id for prop, _score in rows] == ["HF-0001"]
