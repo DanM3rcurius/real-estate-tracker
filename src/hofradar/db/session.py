@@ -17,6 +17,9 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DEFAULT_DB_PATH = Path(os.environ.get("HOFRADAR_DATA_DIR", "data")) / "hofradar.sqlite3"
 
+#: How long a SQLite writer waits for another writer before giving up.
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
 
 class Base(DeclarativeBase):
     pass
@@ -56,6 +59,10 @@ def _apply_sqlite_pragmas(engine: Engine) -> None:
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA foreign_keys=ON")
         cur.execute("PRAGMA journal_mode=WAL")
+        # The web app and the weekly scheduler are separate processes on one
+        # file. Without this a writer that meets another writer fails instantly
+        # instead of waiting the moment it takes the other to finish.
+        cur.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         cur.close()
 
 
@@ -80,7 +87,14 @@ def session_scope() -> Iterator[Session]:
 
 
 def init_db(engine: Engine | None = None) -> Engine:
-    """Create all tables. Alembic owns migrations; this is for tests and first boot."""
+    """Create all tables from the models. Never alters an existing table.
+
+    This is the throwaway-database path: tests, and a first boot that has
+    nothing to migrate. Anything opening the *persistent* database must call
+    ``hofradar.db.migrate.ensure_schema()`` instead - ``create_all()`` is a
+    no-op on a table that already exists, so on its own it will happily leave a
+    live database a column behind and report success (GitHub issue #7).
+    """
     from hofradar.db import models  # noqa: F401  (registers mappers)
 
     engine = engine or get_engine()

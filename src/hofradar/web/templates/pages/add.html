@@ -17,6 +17,18 @@
     {% if result.town %}({{ result.town }}){% endif %}
     – Änderung: <b>{{ result.change_kind or 'unbekannt' }}</b>{% if result.detail %}, {{ result.detail }}{% endif %}.
   </p>
+  {% if result.warnings %}
+  {# "It looked like it worked" was the actual complaint: a listing that saves
+     but can never be placed on the map must say so here, not stay silent. #}
+  <p class="notice notice--warn" role="status">
+    Beim Lesen des Textes blieb etwas unklar:
+  </p>
+  <ul class="notice notice--warn">
+    {% for warning in result.warnings %}
+    <li>{{ warning }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   {% endif %}
 
   <form method="post" action="/add" class="stack">

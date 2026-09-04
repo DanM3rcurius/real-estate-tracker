@@ -227,6 +227,9 @@ that no later work can repair.
 **Consequence.** `scripts/backup_db.py` runs before any migration, and
 `render_as_batch=True` is set because SQLite cannot ALTER a column in place.
 
+**Not enough on its own** — see decision 17. Writing the migration was half the
+work; nothing ran it, and the deployment carried on calling `create_all()`.
+
 ---
 
 ## 14. A source's yield is reported, and a source's terms gate its enablement
@@ -353,3 +356,89 @@ Vogtareuth trap the corroboration rule exists to avoid — three farms in one
 village share a town and a plausible title. A URL is not a similarity signal
 at all; it is an identifier, which is why it can be proof without loosening
 anything else.
+
+---
+
+## 17. The schema is migrated on boot, and the migrations ship in the package
+
+**Decision.** Every process that opens the persistent database calls
+`hofradar.db.migrate.ensure_schema()` before serving a request, and the
+migrations live in `src/hofradar/migrations/` rather than beside `alembic.ini`.
+`init_db()` keeps `create_all()` and is now explicitly the throwaway-database
+path that tests use.
+
+**Why.** Decision 13 declared `alembic upgrade head` the schema command and
+stopped there. No code path ever ran it: the container's `hofradar init-db &&
+hofradar serve` called `create_all()`, which is a no-op on an existing table,
+exited 0, and then failed every query touching the changed table with
+`no such column: sources.listing_ttl_days` (GitHub issue #7). The image did not
+COPY `migrations/` or `alembic.ini` either, so running the upgrade by hand
+inside the container was not possible. A schema command nobody invokes and
+cannot reach is not a migration framework; it is a file.
+
+**The three states.** A live volume can be at head, one revision behind, or
+older than Alembic itself and carrying no `alembic_version` at all. The third
+is the common one here, because the database predates decision 13. It is
+adopted by stamping the revision whose schema it *actually* has — read from the
+schema, not assumed — and then upgraded normally.
+
+**Failing loudly.** `ensure_schema` re-compares the database against the models
+afterwards and refuses to return if they still differ. A half-migrated database
+that boots is worse than one that does not: the mismatch surfaces later, deep
+inside an unrelated page, and `web/lazy.py` reported it as a *missing module*,
+which is not where anyone would look. That message now names the database.
+
+**One at a time.** The web app and the scheduler are separate containers on one
+database and `docker compose up` starts them together, so both migrate at once.
+Reading the revision, deciding and acting happen on different connections, so
+without a lock they interleave and the loser dies — "table alembic_version
+already exists", or "duplicate column name" once both get as far as the upgrade.
+Measured with six concurrent boots, not theorised. SQLite takes an OS file lock
+beside the database (`<db>.migrate-lock`, on the same volume the processes
+already share); Postgres takes a session advisory lock; the loser then finds the
+work done and reports `current`.
+
+**Consequence.** `hofradar migrate` (and `hofradar migrate --check`, which
+changes nothing and exits 1 when work is pending) exist for operators. Because
+the migrations are inside the package, `alembic.ini` at the repository root
+points at `src/hofradar/migrations` — there is one copy, not a synced pair. A
+`hofradar.sqlite3.migrate-lock` file appears next to the database; it holds no
+data and is safe to delete when nothing is running.
+
+---
+
+## 18. An unlabelled address is parsed, and an unplaceable listing says so
+
+**Decision.** When a source supplies no `location_raw`, `postcode` or `town`,
+`normalize_listing` recovers the address from the description, requiring a
+postcode *and* a town-shaped word. A listing that still has no town produces a
+warning, and `/add` shows it.
+
+**Why.** The paste box parsed `Label: value` lines only, so the shape a human
+actually copies out of an exposé — a bare `83569 Vogtareuth, Landkreis
+Rosenheim` — was dropped. The parser was never the problem: `parse_location`
+reads that string correctly and was simply never given it. One unparsed line
+then ended the property's life. No town, so nothing to geocode; no geocode, so
+neither distance; `geo_precision='none'` collapses the location-certainty term
+and the unrouted cap holds confidence at 65, below the shortlist gate of 70. The
+listing saved, got a `public_id`, and never appeared on the Radar — `appears on
+the radar: 0 of 1`, with nothing raised anywhere (GitHub issue #3).
+
+**In the normaliser, not the adapter.** `hofradar.normalize` owns parsing, and
+the RSS and sitemap detail pages have the same problem: an address in prose
+rather than in a field. Fixing it in one adapter would have fixed it once.
+
+**Strictly.** A wrong town is far worse than no town — it geocodes to a real
+place somewhere else, and no later stage can tell that it is wrong. So the
+shape is postcode plus town, never any five-digit run: `595.000` has
+separators, `95000 EUR` has no town after it. A recovered location carries
+lower evidence confidence than a stated one, because the field was inferred.
+
+**Not by lowering the gate.** The gate was behaving correctly; the input was
+impoverished. A listing that genuinely cannot be placed is still held off the
+shortlist — it just no longer does so silently.
+
+**Consequence.** Silence is the failure mode this codebase keeps producing:
+entry 17 is the same shape one layer down, and issue #2 was a third. Anything
+that quietly drops a load-bearing fact gets a `warnings` entry and a place in
+the UI.

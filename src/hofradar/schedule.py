@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from hofradar.config import reload_config
-from hofradar.db.session import init_db
+from hofradar.db.migrate import ensure_schema
 
 log = logging.getLogger("hofradar.schedule")
 
@@ -45,7 +45,7 @@ async def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
     )
-    init_db()
+    ensure_schema()
     scheduler = AsyncIOScheduler(timezone=os.environ.get("TZ", "Europe/Berlin"))
     scheduler.add_job(_job, CronTrigger.from_crontab(DEFAULT_CRON), id="weekly")
     scheduler.start()

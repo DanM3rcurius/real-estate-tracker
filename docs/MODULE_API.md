@@ -23,6 +23,22 @@ reads its silence past that window as `ListingStatus.EXPIRED`, not `REMOVED`;
 see `docs/DECISIONS.md` entry 15.
 ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
 
+Schema handling is split deliberately (`docs/DECISIONS.md` entry 17):
+
+```python
+# hofradar.db.session - throwaway databases only; never alters an existing table
+def init_db(engine: Engine | None = None) -> Engine: ...
+
+# hofradar.db.migrate - what every process opening the persistent database calls
+def ensure_schema(engine: Engine | None = None) -> SchemaState: ...   # raises SchemaError
+def schema_drift(engine: Engine) -> list[str]                         # [] == matches models
+def current_revision(engine: Engine) -> str | None
+def head_revision() -> str | None
+```
+
+`SchemaState` is a frozen dataclass: `action` (`"created" | "adopted" |
+"upgraded" | "current"`), `from_revision`, `to_revision`, `.changed`.
+
 ---
 
 ## `hofradar.normalize`
@@ -38,7 +54,16 @@ def text_hash(text: str | None) -> str
 def extract_features(text: str, keywords: KeywordConfig) -> FeatureExtraction
 def classify_property_type(title: str, description: str, keywords: KeywordConfig) -> str | None
 def parse_location(text: str | None) -> LocationParts   # .postcode .town .street .district
+def find_location_in_text(text: str | None) -> str | None  # unlabelled address out of prose
 ```
+
+`normalize_listing` falls back to `find_location_in_text(raw.description)` when
+a source gave no `location_raw`, `postcode` or `town` — an unlabelled address is
+not an absent one, and a listing with no town is un-geocodable and therefore
+invisible. The match must be a postcode *and* a town-shaped word, never a bare
+five-digit run. A recovered location carries lower evidence confidence and says
+so in `warnings`; a listing with no recoverable location warns too, rather than
+leaving `town` silently `None`. See `docs/DECISIONS.md` entry 18.
 
 `FeatureExtraction` is a dataclass with: `building_features, outbuildings,
 special_features, exclusion_flags, hidden_signals, is_foreclosure, is_monument,

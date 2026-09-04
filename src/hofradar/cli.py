@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 
 from hofradar.config import load_config, reload_config
-from hofradar.db.session import database_url, init_db, session_scope
+from hofradar.db.migrate import ensure_schema
+from hofradar.db.session import database_url, session_scope
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -25,21 +26,46 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def cmd_initdb(args: argparse.Namespace) -> int:
-    init_db()
+    state = ensure_schema()
     from hofradar.sources import sync_sources_to_db
 
     cfg = load_config()
     with session_scope() as session:
         sources = sync_sources_to_db(session, cfg.sources)
     print(f"database ready at {database_url()}")
+    print(f"schema {state.action}: {state.from_revision or 'empty'} -> {state.to_revision}")
     print(f"registered {len(sources)} sources")
+    return 0
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    """Apply pending migrations, or report them without touching anything."""
+    from hofradar.db.migrate import current_revision, head_revision, schema_drift
+    from hofradar.db.session import get_engine
+
+    engine = get_engine()
+    if args.check:
+        at, head = current_revision(engine), head_revision()
+        drift = schema_drift(engine)
+        print(f"database {database_url()}")
+        print(f"revision {at or 'unstamped'}, head {head}")
+        if at == head and not drift:
+            print("schema is current")
+            return 0
+        for item in drift:
+            print(f"  drift: {item}")
+        print("schema is NOT current - run `hofradar migrate`")
+        return 1
+
+    state = ensure_schema(engine)
+    print(f"schema {state.action}: {state.from_revision or 'empty'} -> {state.to_revision}")
     return 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
-    init_db()
+    ensure_schema()
     uvicorn.run(
         "hofradar.web.app:app",
         host=args.host,
@@ -53,7 +79,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     from hofradar.pipeline import run_pipeline
 
-    init_db()
+    ensure_schema()
     cfg = reload_config()
     run = asyncio.run(
         run_pipeline(
@@ -75,7 +101,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     from hofradar.report import build_report, render_markdown
     from hofradar.scoring import rescore_all
 
-    init_db()
+    ensure_schema()
     cfg = reload_config()
     with session_scope() as session:
         # Scores and cost estimates are profile-keyed, so a report for a
@@ -96,7 +122,7 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_rescore(args: argparse.Namespace) -> int:
     from hofradar.scoring import rescore_all
 
-    init_db()
+    ensure_schema()
     cfg = reload_config()
     profile = cfg.profile
     if args.air_km is not None:
@@ -122,7 +148,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     from hofradar.normalize import normalize_listing
     from hofradar.sources import get_adapter, sync_sources_to_db
 
-    init_db()
+    ensure_schema()
     cfg = reload_config()
 
     async def _run() -> int:
@@ -159,7 +185,7 @@ def cmd_repair(args: argparse.Namespace) -> int:
     from hofradar.lifecycle import repair_phantom_removals
     from hofradar.sources import get_adapter, sync_sources_to_db
 
-    init_db()
+    ensure_schema()
     cfg = reload_config()
     with session_scope() as session:
         sources = sync_sources_to_db(session, cfg.sources)
@@ -228,9 +254,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init-db", help="create tables and register sources").set_defaults(
+    sub.add_parser("init-db", help="migrate the schema and register sources").set_defaults(
         func=cmd_initdb
     )
+
+    p_migrate = sub.add_parser("migrate", help="apply pending schema migrations")
+    p_migrate.add_argument(
+        "--check", action="store_true", help="report pending work, change nothing (exit 1 if any)"
+    )
+    p_migrate.set_defaults(func=cmd_migrate)
 
     p_serve = sub.add_parser("serve", help="run the web UI")
     p_serve.add_argument("--host", default="0.0.0.0")

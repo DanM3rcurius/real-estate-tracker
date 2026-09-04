@@ -14,7 +14,7 @@ from hofradar.config import KeywordConfig
 from hofradar.contracts import Evidence, NormalizedListing, RawListing
 from hofradar.normalize.dates import parse_german_date
 from hofradar.normalize.features import classify_property_type, extract_features
-from hofradar.normalize.location import parse_location
+from hofradar.normalize.location import find_location_in_text, parse_location
 from hofradar.normalize.numbers import parse_area, parse_german_number, parse_price
 from hofradar.normalize.text import text_hash
 
@@ -26,6 +26,10 @@ _PARSE_CONFIDENCE = 0.8
 #: A year_built outside this range is almost certainly a mis-parse (a
 #: listing ID, a price fragment, ...) rather than a real construction year.
 _PLAUSIBLE_YEAR_RANGE = range(1000, 2101)
+
+#: A location read out of prose rather than from a labelled field. The parse
+#: itself is strict, but the *field* was inferred, and evidence should say so.
+_UNLABELLED_LOCATION_CONFIDENCE = 0.6
 
 
 def _add_numeric_evidence(
@@ -125,7 +129,17 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
         url=raw.url,
     )
 
-    location = parse_location(raw.location_raw)
+    # A source that labels its address gives us location_raw; plenty do not,
+    # and an unlabelled address is not an absent one. Recovering it from the
+    # description is what keeps a pasted exposé - the shape a human actually
+    # copies - from ending up un-geocodable and therefore invisible (issue #3).
+    location_raw = raw.location_raw
+    recovered = False
+    if not location_raw and not raw.postcode and not raw.town:
+        location_raw = find_location_in_text(raw.description)
+        recovered = location_raw is not None
+
+    location = parse_location(location_raw)
     listing.street = location.street
     listing.postcode = raw.postcode or location.postcode
     listing.town = raw.town or location.town
@@ -136,12 +150,26 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
             Evidence(
                 source=raw.source_key,
                 url=raw.url,
-                quote=raw.location_raw or raw.town,
-                confidence=_PARSE_CONFIDENCE if location.town else 0.6,
+                quote=location_raw or raw.town,
+                confidence=_UNLABELLED_LOCATION_CONFIDENCE
+                if recovered
+                else (_PARSE_CONFIDENCE if location.town else 0.6),
             ),
         )
-    elif raw.location_raw:
-        listing.warnings.append(f"town: could not determine a town from {raw.location_raw!r}")
+        if recovered:
+            listing.warnings.append(
+                f"town: no labelled location, read {location_raw!r} out of the description"
+            )
+    elif location_raw:
+        listing.warnings.append(f"town: could not determine a town from {location_raw!r}")
+    else:
+        # The silence that used to be total. Without a town there is nothing to
+        # geocode, so the property can never reach the map or the shortlist -
+        # which must be said out loud rather than discovered weeks later.
+        listing.warnings.append(
+            "town: no location found - the listing cannot be placed on the map "
+            "or reach the shortlist until one is added"
+        )
 
     listing.source_date = parse_german_date(raw.source_date_raw)
     if listing.source_date is None and raw.source_date_raw:

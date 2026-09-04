@@ -196,8 +196,8 @@ write_files:
     permissions: "0755"
     content: |
       #!/usr/bin/env bash
-      # Pull the branch and rebuild. Takes a backup first, because v0.1 has no
-      # migration framework on purpose (docs/DECISIONS.md ss10).
+      # Pull the branch and rebuild. The container migrates the schema on start
+      # (docs/DECISIONS.md ss17); the backup first is what makes that safe.
       set -euo pipefail
       cd /opt/hofradar/app
       /usr/local/bin/hofradar-backup || echo "warning: backup failed, continuing anyway" >&2

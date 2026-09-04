@@ -15,6 +15,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 #: Human-readable names for the notice text.
 MODULE_LABELS = {
     "hofradar.normalize": "Normalisierung",
@@ -42,8 +44,26 @@ class ModuleUnavailable(RuntimeError):
         return self.target.split(":", 1)[0]
 
     @property
+    def is_database_error(self) -> bool:
+        """Did the sibling fail because of the *database*, not its own code?
+
+        ``call()`` deliberately catches everything, which means a schema that is
+        a migration behind arrives here looking exactly like a half-written
+        module. It is not one, and saying so sent a real report (GitHub issue
+        #7) looking for a missing package for far too long.
+        """
+        return isinstance(self.original, SQLAlchemyError)
+
+    @property
     def user_message(self) -> str:
         label = MODULE_LABELS.get(self.module_name, self.module_name)
+        if self.is_database_error:
+            return (
+                f"Die Datenbank passt nicht zum Programm – {type(self.original).__name__} "
+                f"bei „{label}“. Vermutlich fehlt eine Schema-Migration: "
+                "`hofradar migrate` ausführen (der Container macht das beim Start "
+                "selbst). Die Seite läuft solange im eingeschränkten Modus."
+            )
         return (
             f"Modul „{label}“ ({self.module_name}) ist noch nicht verfügbar – "
             f"{type(self.original).__name__}. Die Seite läuft im eingeschränkten Modus."

@@ -55,11 +55,18 @@ def build_templates() -> Jinja2Templates:
 
 
 def _default_session_factory() -> sessionmaker[Session]:
-    """Boot against the configured database, creating tables on first use."""
-    from hofradar.db.session import get_engine, init_db
+    """Boot against the configured database, migrating it to the current schema.
+
+    Serving a database that is a migration behind is worse than not booting:
+    every page that touches the changed table fails deep inside a route, and
+    the lazy-import layer reports it as a *missing module*, which is not where
+    anybody would look (GitHub issue #7).
+    """
+    from hofradar.db.migrate import ensure_schema
+    from hofradar.db.session import get_engine
 
     engine = get_engine()
-    init_db(engine)
+    ensure_schema(engine)
     return sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 

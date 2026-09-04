@@ -44,3 +44,17 @@ jobs:
           hofradar config
           hofradar run --dry-run
           python -c "from hofradar.web.app import app; print('web app imports OK')"
+
+      # Booting against an EXISTING database is the deployment's actual shape,
+      # and the one the smoke test above cannot see: `create_all()` is a no-op
+      # on a table that already exists, so a missing migration only shows up
+      # against a database that predates it (GitHub issue #7).
+      - name: Smoke - boot against a database one revision behind
+        env:
+          HOFRADAR_OFFLINE: "1"
+          HOFRADAR_DATABASE_URL: sqlite:///${{ runner.temp }}/existing.sqlite3
+        run: |
+          alembic -c alembic.ini upgrade a78c19944d2d
+          hofradar migrate --check && { echo "expected pending migrations"; exit 1; }
+          hofradar init-db
+          hofradar migrate --check

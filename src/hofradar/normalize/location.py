@@ -87,3 +87,39 @@ def parse_location(text: str | None) -> LocationParts:
         parts.district = parts.town
 
     return parts
+
+
+#: German postcodes run 01067-99998, so a leading "00" is never one. Requiring
+#: five digits *and* a town-shaped word after them is what keeps this from
+#: matching a price: "595.000" has separators, and "95000 EUR" fails the town
+#: test below.
+_POSTCODE_TOWN_RE = re.compile(
+    r"\b(?!00)(\d{5})\s+"
+    r"([A-ZÄÖÜ][a-zäöüß]+(?:[-\s][A-ZÄÖÜ][a-zäöüß]+)*)"
+    r"(\s*[,(]?\s*(?:Landkreis|Lkr\.?|Kreis)\s+[A-ZÄÖÜ][a-zäöüß]+\)?)?"
+)
+
+#: Words that are shaped like a town but are plainly not one. The capitalised
+#: word requires a lowercase tail, which already rules out EUR, VB and m2; this
+#: catches the handful that would otherwise slip through.
+_NOT_A_TOWN = frozenset(
+    {"euro", "quadratmeter", "zimmer", "hektar", "kaufpreis", "baujahr", "wohnflaeche"}
+)
+
+
+def find_location_in_text(text: str | None) -> str | None:
+    """Recover an unlabelled location from free text, or ``None``.
+
+    Returns a fragment ``parse_location`` can read. Deliberately strict: a
+    wrong town is far worse than no town, because it geocodes to a real place
+    somewhere else and nothing downstream can tell that it is wrong. Anything
+    this cannot identify with confidence is left for the caller to warn about.
+    """
+    if not text:
+        return None
+    for match in _POSTCODE_TOWN_RE.finditer(text):
+        postcode, town, district = match.group(1), match.group(2), match.group(3)
+        if town.split()[0].casefold() in _NOT_A_TOWN:
+            continue
+        return f"{postcode} {town}{district.rstrip() if district else ''}"
+    return None

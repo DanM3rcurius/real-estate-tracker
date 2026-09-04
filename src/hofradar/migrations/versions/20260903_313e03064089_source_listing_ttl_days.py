@@ -4,11 +4,11 @@ Revision ID: 313e03064089
 Revises: a78c19944d2d
 Create Date: 2026-09-03 20:19:51.825503
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '313e03064089'
 down_revision = 'a78c19944d2d'
