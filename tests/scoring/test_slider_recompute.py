@@ -292,6 +292,8 @@ class TestRankedProperties:
             # only "pricey" pushes the all-in total past the 1.2M budget slider
             ({"flags": ["OVER_BUDGET"]}, 1),
             ({"flags": ["SANIERUNGSRISIKO"]}, 0),
+            ({"q": "Feilnbach"}, 3),
+            ({"q": "Nowhere"}, 0),
         ],
     )
     def test_filters(
