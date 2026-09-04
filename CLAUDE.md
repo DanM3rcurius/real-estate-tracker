@@ -91,3 +91,48 @@ Do **not** run the suite with `HOFRADAR_OFFLINE=1` in the environment. That
 variable short-circuits the very geo code paths those tests exercise, and 12
 tests fail for a reason that has nothing to do with the code. Only the tests
 that want the gazetteer set it, and they set it themselves.
+
+## Known ground, as of the #7/#3 session
+
+Things a fresh session would otherwise rediscover the hard way.
+
+**The recurring bug in this codebase is silence that looks like success.**
+Issues #2, #3, #7 and #10 are all one shape: a stage produces a confident
+result from an input it should have rejected or a fact it quietly dropped, and
+nothing errors. When something here goes wrong, suspect a missing warning
+before a wrong calculation. Anything that drops a load-bearing fact gets a
+`NormalizedListing.warnings` entry and a place in the UI - see decision 18.
+
+**The suite cannot see schema drift on its own.** Every fixture builds its
+database from the models with `create_all()`, where a missing migration is
+invisible. `tests/db/test_migrations.py` builds one from the migrations alone
+and compares - that is the test that would have caught #7, so do not weaken it.
+
+**CI has never run.** All 44 workflow runs to date fail in 2-4 seconds with no
+step logs and a 404 on the job log: the job never reaches a runner (Actions
+billing / repo settings, not the code). Green locally is currently the only
+verification that exists. Do not read a red check on a PR as a real failure
+without opening the run first.
+
+**`pipeline/runner.py` has no `commit()` at all.** The whole run is one
+`session_scope()` transaction, so the `SearchRun(status="running")` row and
+every `_log_stage` entry stay invisible to other connections until the run
+finishes - which is why `/runs` shows no progress and why killing a run mid-way
+loses all of it. `POST /api/run` also has no guard against starting a second
+concurrent run, and `_execute` swallows every exception with a bare `return`.
+Fixing the visibility means deciding what a crashed run should leave behind;
+that is a design call, not a patch.
+
+**Local development needs no Docker.** `hofradar init-db && hofradar serve`
+against the venv is the whole loop; the `/opt/hofradar`, `hofradar-update` and
+`hofradar.service` commands in `deploy/hetzner/` only exist on a provisioned
+box. `scripts/repair_pastes.py` repairs manual pastes stored before #3 in place
+(dry run by default) - it re-ingests under the original url so dedupe updates
+the row instead of creating a second one.
+
+**Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
+`primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing
+it must not be able to mark a listing verified. `init-db` syncs the YAML, so
+primary wins in production - which lets the paste box set
+`verification_status=verified`. That is invariant 4 territory and needs a
+ruling, not a quiet edit to whichever side is easier to change.
