@@ -249,13 +249,21 @@ class ResultFilters:
     outbuildings_only: bool = False
     town: str = ""
     sort: str = "score"
+    #: The machine's scoring gate (``Score.rejected``), recomputed per profile.
     include_rejected: bool = False
+    #: The human's triage (``Property.user_state``), which survives every re-run.
+    include_hidden: bool = False
     user_state: str = ""
     limit: int = RESULT_LIMIT_DEFAULT
     raw: dict[str, str] = field(default_factory=dict)
 
     def as_scoring_filters(self) -> dict[str, Any]:
-        """The dict handed to ``hofradar.scoring.ranked_properties(filters=...)``."""
+        """The dict handed to ``hofradar.scoring.ranked_properties(filters=...)``.
+
+        Every key here must be in ``hofradar.scoring.engine.SUPPORTED_FILTERS``;
+        one that is not makes ``_apply_filters`` raise, which the lazy loader
+        reports as a missing module and the radar answers with unscored rows.
+        """
         payload: dict[str, Any] = {}
         if self.min_land_sqm:
             payload["min_land_sqm"] = self.min_land_sqm
@@ -285,6 +293,7 @@ class ResultFilters:
             "q": self.town,
             "sort": self.sort,
             "include_rejected": int(self.include_rejected),
+            "include_hidden": int(self.include_hidden),
         }
         values.update(overrides)
         return urlencode({k: v for k, v in values.items() if v not in ("", None)})
@@ -308,6 +317,7 @@ def filters_from_query(params: Any) -> ResultFilters:
         town=(get("q") or "").strip()[:120],
         sort=sort,
         include_rejected=to_bool(get("include_rejected")),
+        include_hidden=to_bool(get("include_hidden")),
         user_state=(get("user_state") or "").strip().lower()[:24],
         limit=int(clamp(limit, 1, RESULT_LIMIT_MAX)),
         raw={k: v for k, v in dict(params).items() if isinstance(v, str)},

@@ -505,3 +505,73 @@ adapters also skip `UTILITY_PATH_RE` URLs, so the fetch is never made — but
 only *after* `record_enumerated_url`, because invariant 4b is about what the
 site still offers and it plainly still offers that URL. Not fetching it is a
 routing decision, exactly like the `options.pattern` filter beside it.
+
+---
+
+## 20. Hiding is a triage state; deleting is a guarded, cascading, backed-up act
+
+**Decision.** "Get this off my radar" and "this was never a property" are two
+different requests and get two different mechanisms. The first is a triage
+state, `user_state="archived"` (the set is `hofradar.db.enums.HIDDEN_USER_STATES`):
+the property is left out of every *reader-facing* view — radar, JSON, CSV, map,
+weekly digest, LLM feed — while it keeps being crawled, rescored and observed.
+The second is `hofradar.lifecycle.delete_property`, reachable from the dossier's
+danger zone and from `hofradar delete-property`, which removes the row and every
+child table with it after taking a snapshot.
+
+**Why hiding is the default.** The database remembering what it has seen is the
+product (entry 2). A farm the user is done with is still evidence: its price
+history is a data point about the market, and a property deleted today is a
+property re-announced as `FIRST_SEEN` the next time a source carries it, which
+invariant 2 forbids. Hiding costs one indexed column read and loses nothing.
+
+**Why "rejected" is not a hide.** The dossier already offered 🚫 *Abgelehnt* and
+the radar already offered "auch abgelehnte zeigen", and they were unrelated:
+the first is `Property.user_state`, a human verdict that survives every re-run;
+the second is `Score.rejected`, the machine's gate, recomputed for every
+`profile_hash`. One German word for two facts is why a stored triage verdict
+looked ignored (GitHub issue #9). The verdict stays visible — a rejected farm is
+one you decided about, not one you want to stop seeing — and the UI now says
+*„Abgelehnt (bleibt sichtbar)"* against *„Archiviert – nicht mehr anzeigen"*,
+with the gate's own switch renamed to *„vom Bewertungs-Gate aussortierte zeigen"*.
+Should the owner later rule that a rejected farm should vanish too, that is one
+word added to `HIDDEN_USER_STATES` and nothing else.
+
+**Hiding is never silent.** `ResultSet.hidden_archived` counts what triage took
+off the screen and the status line prints it, for the same reason entry 18 ends
+the way it does: a row that disappears with no number beside it is the failure
+this codebase keeps producing. The counter is its own query, so it is right on
+the degraded path too.
+
+**Deleting is guarded three ways.** It is typed out (the `public_id` has to be
+entered back, in the form and on the command line the command is a dry run
+without `--apply`); it takes a backup first (entry 13's snapshot, moved into
+`hofradar.db.backup` so a request handler and an installed wheel can both reach
+it); and it refuses outright while another row's `merged_into_id` points at the
+property. That last one is not theoretical: the column is `ON DELETE SET NULL`,
+so deleting the survivor of a merge would turn every duplicate merged into it
+back into a visible property — the opposite of what was asked for. The caller
+deletes the duplicates first or not at all.
+
+**On foreign keys.** Eight of the nine child tables are cascaded by the ORM's
+`delete-orphan`; `verification_events` has no ORM relationship and depends on
+`ON DELETE CASCADE` being *enforced*, which SQLite only does under
+`PRAGMA foreign_keys=ON`. `hofradar.db.session` sets it on every connection, but
+every test fixture in this repository builds its engine with a bare
+`create_engine` and therefore does not — a delete test written on the usual
+fixture would have passed while leaving an audit trail behind for a property
+that no longer exists. `tests/lifecycle/test_delete.py` builds its engine
+through `get_engine` and asserts the pragma before it asserts anything else.
+
+**Alternatives rejected.** A `deleted_at` tombstone column: it is `archived`
+with a migration attached, and it would have to be honoured by every query in
+the codebase rather than by the one filter pass that already exists. Deleting
+from the radar list: the dossier is where the evidence for the decision is, and
+a destructive control belongs next to it.
+
+**Consequence.** On a Postgres deployment the web delete refuses, because the
+snapshot is the operator's job there; `hofradar delete-property --apply
+--no-backup` is the documented escape hatch for someone who has taken their own
+dump. And `hofradar.db.enums.HIDDEN_USER_STATES` — not `hofradar.scoring` — owns
+the vocabulary, because the web layer applies it in its own filter pass, which
+must keep working when the scoring package cannot be imported (`web/lazy.py`).

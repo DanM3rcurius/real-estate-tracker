@@ -8,6 +8,18 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+#: ``Property.user_state`` values that take a property out of every
+#: reader-facing view - radar, exports, map, digest, LLM feed - while it keeps
+#: being crawled, rescored and remembered. Deliberately NOT the triage verdict
+#: ``"rejected"``: that is a judgement about the farm and stays visible, which
+#: is the collision GitHub issue #9 reported. An owner ruling that a rejected
+#: farm should vanish too is one word added here. See docs/DECISIONS.md entry 20.
+#:
+#: It lives here rather than in ``hofradar.scoring`` because the web layer
+#: applies it in its own filtering pass, which must keep working when the
+#: scoring package is not importable (see ``hofradar.web.lazy``).
+HIDDEN_USER_STATES: frozenset[str] = frozenset({"archived"})
+
 
 class SourceRole(StrEnum):
     """Priority class of a source.

@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from hofradar.config import SearchProfile
-from hofradar.db.enums import ListingStatus, VerificationStatus
+from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus, VerificationStatus
 from hofradar.db.models import CostEstimate, Property, Score
 from hofradar.web import history, lazy
 from hofradar.web.deps import ResultFilters
@@ -53,17 +53,25 @@ class ResultSet:
     rescored: int | None
     total_matched: int
     total_in_db: int
+    #: Held back by the machine's scoring gate (``Score.rejected``).
     hidden_rejected: int
+    #: Held back by the human's triage (``Property.user_state``). Two different
+    #: facts, so two counters - the status line names both rather than letting
+    #: a property vanish without a number saying it did.
+    hidden_archived: int = 0
     degraded: list[lazy.Degraded] = field(default_factory=list)
 
     @property
     def status_line(self) -> str:
         """The little "system is re-thinking" line under the sliders."""
         rescored = "–" if self.rescored is None else str(self.rescored)
-        return (
+        line = (
             f"Profil {self.profile_hash} · {rescored} Objekte neu bewertet · "
             f"{self.total_matched} von {self.total_in_db} im Filter"
         )
+        if self.hidden_archived:
+            line += f" · {self.hidden_archived} archivierte ausgeblendet"
+        return line
 
 
 # --------------------------------------------------------------------------- #
@@ -146,7 +154,21 @@ def passes_profile(prop: Property, cost: CostEstimate | None, profile: SearchPro
     return True
 
 
+def is_hidden(prop: Property, filters: ResultFilters) -> bool:
+    """Did triage take this property off the screen?
+
+    Not the same question as ``Score.rejected``: this one is the human's, it
+    survives every re-run and every profile change, and it changes nothing
+    about what the crawler and the scorer keep doing with the property.
+    """
+    if filters.include_hidden:
+        return False
+    return (prop.user_state or "") in HIDDEN_USER_STATES
+
+
 def passes_filters(prop: Property, filters: ResultFilters) -> bool:
+    if is_hidden(prop, filters):
+        return False
     if filters.min_land_sqm:
         if prop.land_sqm is None or prop.land_sqm < filters.min_land_sqm:
             return False
@@ -203,14 +225,20 @@ def _eager(stmt):
 
 
 def _fallback_pairs(
-    session: Session, profile: SearchProfile, *, include_rejected: bool
+    session: Session, profile: SearchProfile, *, include_rejected: bool, include_hidden: bool
 ) -> list[tuple[Property, Score | None]]:
     """Used when ``hofradar.scoring`` is unavailable.
 
     Shows the facts we do have rather than an error page: unscored properties
-    still have a town, a price and a distance, and that is already useful.
+    still have a town, a price and a distance, and that is already useful. A
+    degraded radar still honours triage - losing the scorer is no reason to put
+    an archived property back on the screen.
     """
     stmt = _eager(select(Property).where(Property.merged_into_id.is_(None)))
+    if not include_hidden:
+        stmt = stmt.where(
+            (Property.user_state.is_(None)) | (Property.user_state.not_in(HIDDEN_USER_STATES))
+        )
     props = list(session.scalars(stmt).unique())
     pairs: list[tuple[Property, Score | None]] = []
     for prop in props:
@@ -267,6 +295,7 @@ def build_results(
         session,
         profile,
         include_rejected=filters.include_rejected,
+        include_hidden=filters.include_hidden,
         filters=filters.as_scoring_filters(),
     )
     if rank_degraded is not None:
@@ -274,7 +303,12 @@ def build_results(
             degraded.append(rank_degraded)
         pairs = None
     if pairs is None:
-        pairs = _fallback_pairs(session, profile, include_rejected=filters.include_rejected)
+        pairs = _fallback_pairs(
+            session,
+            profile,
+            include_rejected=filters.include_rejected,
+            include_hidden=filters.include_hidden,
+        )
 
     normalised: list[tuple[Property, Score | None]] = []
     for item in pairs:
@@ -287,6 +321,22 @@ def build_results(
                 (s for s in (prop.scores or []) if s.profile_hash == profile.profile_hash), None
             )
         normalised.append((prop, score))
+
+    # Counted with its own query rather than in the loop below: both the ranking
+    # and the degraded fallback drop archived rows before they ever get here, and
+    # a hidden property with no number beside it is the failure mode this
+    # codebase keeps producing.
+    hidden_archived = 0
+    if not filters.include_hidden:
+        hidden_archived = (
+            session.scalar(
+                select(func.count(Property.id)).where(
+                    Property.merged_into_id.is_(None),
+                    Property.user_state.in_(HIDDEN_USER_STATES),
+                )
+            )
+            or 0
+        )
 
     hidden_rejected = 0
     kept: list[tuple[Property, Score | None]] = []
@@ -327,6 +377,7 @@ def build_results(
         total_matched=total_matched,
         total_in_db=total_in_db,
         hidden_rejected=hidden_rejected,
+        hidden_archived=hidden_archived,
         degraded=degraded,
     )
 

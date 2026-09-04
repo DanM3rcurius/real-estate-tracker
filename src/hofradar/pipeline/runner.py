@@ -345,7 +345,12 @@ async def _llm_review(session: Session, profile: SearchProfile, *, run_id: int |
         candidates = [
             prop
             for prop, _score in ranked_properties(
-                session, profile, limit=profile.gates.llm_review_size
+                session,
+                profile,
+                limit=profile.gates.llm_review_size,
+                # Archived means the human is done with it; spending model
+                # budget on it is exactly what "hide" was asked to prevent.
+                include_hidden=False,
             )
         ]
         if not candidates:
