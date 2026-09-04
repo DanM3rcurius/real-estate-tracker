@@ -227,6 +227,48 @@ async def test_every_sitemap_url_is_recorded_even_when_the_pattern_skips_it(
     assert adapter.enumeration_complete is True
 
 
+UTILITY_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://broker.example/immobilien/hofstelle-feldkirchen</loc></url>
+  <url><loc>https://broker.example/merkliste</loc></url>
+</urlset>
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_utility_url_is_skipped_but_still_counts_as_enumerated(
+    make_source_config, search_profile, sample_keywords
+):
+    """Issue #10: with no ``options.pattern`` configured this adapter fetches
+    every URL a sitemap offers, which is how a bookmark page becomes a
+    property. Skipping it must not cost the run its enumeration: invariant 4b
+    is about what the site still offers, and it plainly still offers this URL.
+    So the skip happens after ``record_enumerated_url``, exactly where the
+    pattern filter's does.
+    """
+    cfg = make_source_config(
+        key="generic_sitemap",
+        adapter="generic_sitemap",
+        options={"sites": ["https://broker.example/sitemap-utility.xml"]},
+    )
+    adapter = GenericSitemapAdapter(cfg)
+
+    with respx.mock:
+        respx.get("https://broker.example/sitemap-utility.xml").mock(
+            return_value=httpx.Response(200, text=UTILITY_SITEMAP)
+        )
+        respx.get("https://broker.example/immobilien/hofstelle-feldkirchen").mock(
+            return_value=httpx.Response(200, text=DETAIL_HTML.format(title="Hofstelle"))
+        )
+        # /merkliste is deliberately left unmocked: if it is fetched anyway,
+        # respx raises and this test fails loudly.
+        results = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert {r.url for r in results} == {"https://broker.example/immobilien/hofstelle-feldkirchen"}
+    assert "https://broker.example/merkliste" in adapter.enumerated_urls
+    assert adapter.enumeration_complete is True
+
+
 @pytest.mark.asyncio
 async def test_discover_without_sites_configured_cannot_prove_absence(
     make_source_config, search_profile, sample_keywords

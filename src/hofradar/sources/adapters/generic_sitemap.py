@@ -32,7 +32,7 @@ from selectolax.parser import HTMLParser
 
 from hofradar.config import KeywordConfig, SearchProfile
 from hofradar.contracts import RawListing
-from hofradar.sources.adapters._htmlutil import raw_listing_from_html
+from hofradar.sources.adapters._htmlutil import is_utility_url, raw_listing_from_html
 from hofradar.sources.base import SourceAdapter
 from hofradar.sources.exceptions import SourceDiscoveryError
 
@@ -111,9 +111,17 @@ class GenericSitemapAdapter(SourceAdapter):
                     if budget <= 0:
                         self.mark_enumeration_incomplete(f"max_pages={max_pages} reached")
                         break
-                    # Recorded before the pattern filter: examined this run
-                    # whether or not it was fetched. See the module docstring.
+                    # Recorded before every filter: examined this run whether
+                    # or not it was fetched. See the module docstring.
                     self.record_enumerated_url(url)
+                    if is_utility_url(url):
+                        # A sitemap lists the site, not its inventory: with no
+                        # options.pattern configured, /merkliste and /impressum
+                        # are fetched and ingested exactly like an advert
+                        # (GitHub issue #10). Skipping them is a routing
+                        # decision like the pattern below, which is why it
+                        # happens after the URL was recorded as enumerated.
+                        continue
                     if pattern is not None and not pattern.search(url):
                         continue
                     try:

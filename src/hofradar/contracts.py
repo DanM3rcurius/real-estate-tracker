@@ -16,7 +16,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+
+#: What a fetched page turned out to be. Only ``listing`` may become a
+#: ``Property``: a portal's result list and its bookmark/login machinery are
+#: pages the crawler passed through, not things that are for sale. The
+#: vocabulary lives here rather than in ``hofradar.sources`` because the
+#: classifier (adapters), the warning (normalize) and the refusal (lifecycle)
+#: all have to agree on it. See docs/DECISIONS.md entry 19.
+PAGE_KIND_LISTING = "listing"
+PAGE_KIND_INDEX = "index"
+PAGE_KIND_UTILITY = "utility"
+
+PageKind = Literal["listing", "index", "utility"]
 
 
 @dataclass(slots=True)
@@ -65,6 +77,10 @@ class RawListing:
     listing_visible: bool = True
     http_status: int | None = None
     fetched_at: datetime | None = None
+    #: Defaults to "listing" so a source that hands over one advert it already
+    #: knows to be one (a CSV row, a feed entry, a hand-typed exposé) says
+    #: nothing; only a full-page lift has to classify what it fetched.
+    page_kind: PageKind = PAGE_KIND_LISTING
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -115,6 +131,7 @@ class NormalizedListing:
     listing_visible: bool = True
     http_status: int | None = None
     fetched_at: datetime | None = None
+    page_kind: PageKind = PAGE_KIND_LISTING
 
     text_hash: str | None = None
     evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
