@@ -227,6 +227,9 @@ that no later work can repair.
 **Consequence.** `scripts/backup_db.py` runs before any migration, and
 `render_as_batch=True` is set because SQLite cannot ALTER a column in place.
 
+**Not enough on its own** — see decision 17. Writing the migration was half the
+work; nothing ran it, and the deployment carried on calling `create_all()`.
+
 ---
 
 ## 14. A source's yield is reported, and a source's terms gate its enablement
@@ -353,3 +356,39 @@ Vogtareuth trap the corroboration rule exists to avoid — three farms in one
 village share a town and a plausible title. A URL is not a similarity signal
 at all; it is an identifier, which is why it can be proof without loosening
 anything else.
+
+---
+
+## 17. The schema is migrated on boot, and the migrations ship in the package
+
+**Decision.** Every process that opens the persistent database calls
+`hofradar.db.migrate.ensure_schema()` before serving a request, and the
+migrations live in `src/hofradar/migrations/` rather than beside `alembic.ini`.
+`init_db()` keeps `create_all()` and is now explicitly the throwaway-database
+path that tests use.
+
+**Why.** Decision 13 declared `alembic upgrade head` the schema command and
+stopped there. No code path ever ran it: the container's `hofradar init-db &&
+hofradar serve` called `create_all()`, which is a no-op on an existing table,
+exited 0, and then failed every query touching the changed table with
+`no such column: sources.listing_ttl_days` (GitHub issue #7). The image did not
+COPY `migrations/` or `alembic.ini` either, so running the upgrade by hand
+inside the container was not possible. A schema command nobody invokes and
+cannot reach is not a migration framework; it is a file.
+
+**The three states.** A live volume can be at head, one revision behind, or
+older than Alembic itself and carrying no `alembic_version` at all. The third
+is the common one here, because the database predates decision 13. It is
+adopted by stamping the revision whose schema it *actually* has — read from the
+schema, not assumed — and then upgraded normally.
+
+**Failing loudly.** `ensure_schema` re-compares the database against the models
+afterwards and refuses to return if they still differ. A half-migrated database
+that boots is worse than one that does not: the mismatch surfaces later, deep
+inside an unrelated page, and `web/lazy.py` reported it as a *missing module*,
+which is not where anyone would look. That message now names the database.
+
+**Consequence.** `hofradar migrate` (and `hofradar migrate --check`, which
+changes nothing and exits 1 when work is pending) exist for operators. Because
+the migrations are inside the package, `alembic.ini` at the repository root
+points at `src/hofradar/migrations` — there is one copy, not a synced pair.

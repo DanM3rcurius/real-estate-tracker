@@ -100,7 +100,8 @@ scp hofradar@<ip>:/var/backups/hofradar/hofradar-*.sqlite3.gz .
 - Configuration lives in `/opt/hofradar/app/.env` (mode 0600). `app.env` in
   `/opt/hofradar` is only the seed for first boot and is not read again.
 - `HOFRADAR_SECRET_KEY` is generated once at boot so restarts do not log you out.
-- **Take a backup before pulling a schema change.** v0.1 has no migration
-  framework on purpose — see `docs/DECISIONS.md` §10.
+- **Schema changes migrate themselves** on the next start, `hofradar-update`
+  included — see `docs/DECISIONS.md` §17. It backs the database up first, which
+  is the part not to skip.
 - Off-site copies are your job. A Hetzner volume snapshot or an `scp` from a
   cron job on your own machine both work; the whole database is one file.

@@ -71,9 +71,15 @@ tests/           mirrors src/, one directory per package
 After editing anything in `config/`, run `python scripts/sync_config_defaults.py`
 so the copies bundled into the package stay identical. CI fails if they drift.
 
+`hofradar init-db` migrates the schema before registering sources, so a
+database from an older revision is brought up to date on every boot. Add a
+migration with `alembic -c alembic.ini revision --autogenerate -m "..."`; it
+lands in `src/hofradar/migrations/versions/` so the installed wheel carries it.
+
 ```bash
 pip install -e ".[dev,pdf,images]"
 hofradar init-db && hofradar serve
+hofradar migrate --check          # pending schema work? (exit 1 if so)
 PYTHONPATH=src python -m pytest -q
 ruff check src tests
 ```

@@ -23,6 +23,22 @@ reads its silence past that window as `ListingStatus.EXPIRED`, not `REMOVED`;
 see `docs/DECISIONS.md` entry 15.
 ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
 
+Schema handling is split deliberately (`docs/DECISIONS.md` entry 17):
+
+```python
+# hofradar.db.session - throwaway databases only; never alters an existing table
+def init_db(engine: Engine | None = None) -> Engine: ...
+
+# hofradar.db.migrate - what every process opening the persistent database calls
+def ensure_schema(engine: Engine | None = None) -> SchemaState: ...   # raises SchemaError
+def schema_drift(engine: Engine) -> list[str]                         # [] == matches models
+def current_revision(engine: Engine) -> str | None
+def head_revision() -> str | None
+```
+
+`SchemaState` is a frozen dataclass: `action` (`"created" | "adopted" |
+"upgraded" | "current"`), `from_revision`, `to_revision`, `.changed`.
+
 ---
 
 ## `hofradar.normalize`

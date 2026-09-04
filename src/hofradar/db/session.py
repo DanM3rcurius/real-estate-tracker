@@ -80,7 +80,14 @@ def session_scope() -> Iterator[Session]:
 
 
 def init_db(engine: Engine | None = None) -> Engine:
-    """Create all tables. Alembic owns migrations; this is for tests and first boot."""
+    """Create all tables from the models. Never alters an existing table.
+
+    This is the throwaway-database path: tests, and a first boot that has
+    nothing to migrate. Anything opening the *persistent* database must call
+    ``hofradar.db.migrate.ensure_schema()`` instead - ``create_all()`` is a
+    no-op on a table that already exists, so on its own it will happily leave a
+    live database a column behind and report success (GitHub issue #7).
+    """
     from hofradar.db import models  # noqa: F401  (registers mappers)
 
     engine = engine or get_engine()

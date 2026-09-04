@@ -164,5 +164,24 @@ On the Hetzner box this already runs nightly — `hofradar-backup`, landing in
 `/var/backups/hofradar`.
 
 On Fly: `fly ssh console` then the same, or snapshot the volume
-(`fly volumes snapshots list`). Do this before changing the schema — v0.1 has
-no migration framework on purpose (see `docs/DECISIONS.md` §10).
+(`fly volumes snapshots list`). Do this before changing the schema.
+
+## Schema migrations
+
+The container migrates itself. `hofradar init-db`, which the image runs before
+`hofradar serve`, brings the database to the current schema first — including a
+database old enough to predate Alembic, which is adopted and then upgraded. A
+plain `docker compose up -d --build` is therefore all a schema change needs.
+
+Take a backup first anyway (above). `render_as_batch` makes SQLite rebuild the
+whole table, and a rebuild is not a thing to have no copy of.
+
+To look before you leap, or to migrate without starting the app:
+
+```bash
+docker compose run --rm --no-deps hofradar hofradar migrate --check   # exits 1 if pending
+docker compose run --rm --no-deps hofradar hofradar migrate
+```
+
+If the UI shows *„Die Datenbank passt nicht zum Programm“*, the schema is behind
+the code — that is what these commands fix.
