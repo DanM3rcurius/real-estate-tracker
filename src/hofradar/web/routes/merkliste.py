@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from hofradar.web.deps import (
+    PROFILE_KEYS,
     filters_from_query,
     get_db,
     profile_from_query,
@@ -26,7 +27,12 @@ router = APIRouter(tags=["merkliste"])
 
 @router.get("/merkliste")
 def merkliste(request: Request, session: Session = Depends(get_db)):
-    params = dict(request.query_params) or saved_profile_params(request)
+    # The saved cookie is the base; only the two slider keys in the query
+    # string may override it. Any other query param (``limit``, a tracking
+    # parameter, ...) must not suppress the saved sliders - this page has no
+    # control panel of its own to have set them in the first place.
+    params = dict(saved_profile_params(request))
+    params.update({k: v for k, v in request.query_params.items() if k in PROFILE_KEYS})
     profile = profile_from_query(params, session=session)
     filters = filters_from_query({})
     filters.shortlisted_only = True

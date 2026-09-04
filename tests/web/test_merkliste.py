@@ -50,35 +50,57 @@ def test_merkliste_ignores_the_saved_search_but_keeps_the_sliders(client, db, se
     # HF-0002 sits at 61 km, so 70 km must still admit it - the point is that
     # the *sliders* (air_km_max/total_budget_max) from the saved cookie do
     # apply, while the *view* filter (q="Nirgendwo", which would exclude
-    # every seeded town) is dropped.
+    # every seeded town) is dropped. The default profile's own air_km_max is
+    # 80 km, so a bare "HF-0002 is present" assertion would pass even if the
+    # saved cookie were never read at all - pin the exact rendered slider
+    # value (de_km(0) of 70) so the cookie is actually proven to be in play.
     client.post("/property/HF-0002/merken")
     client.get("/?air_km_max=70&total_budget_max=700000&q=Nirgendwo")
     response = client.get("/merkliste", follow_redirects=False)
     assert response.status_code == 200
     assert "HF-0002" in response.text
     assert "0 Treffer" not in response.text
+    assert "70 km" in response.text
 
 
-def test_merkliste_shows_a_gate_rejected_row_but_not_an_archived_one(
-    client, db, seeded, default_profile
-):
-    from tests.web.conftest import add_score
+def test_merkliste_shows_a_gate_rejected_row_but_not_an_archived_one(client, db, seeded):
+    """The score gate (``Score.rejected``) is bypassed on the Merkliste; an
+    archived property is still hidden (and still counted), same as the radar.
 
-    add_score(
-        db,
-        seeded["pricey"],
-        default_profile.profile_hash,
-        rejected=True,
-        reject_reasons=["PRICE_OVER_HARD_MAX"],
-    )
+    ``build_results`` recomputes the score for any property missing one for
+    the active profile hash, so a hand-written ``Score(rejected=True)`` row
+    gets overwritten before this test ever reads it back - the gate has to be
+    tripped for real. ``REJECT_LISTING_GONE`` fires on ``listing_status`` and
+    is not one of ``passes_profile``'s own checks (distance, price, total
+    cost), so it isolates the score gate from the web layer's unconditional
+    slider filter: HF-0004 (well inside the default sliders) is rejected by
+    the *scorer* alone.
+    """
+    from hofradar.db.enums import ListingStatus
+
+    seeded["pricey"].listing_status = ListingStatus.SOLD
+    db.commit()
+
     client.post("/property/HF-0004/merken")
     client.post("/property/HF-0002/merken")
     client.post("/property/HF-0002/triage", data={"user_state": "archived"})
 
-    html = client.get("/merkliste").text
-    assert "HF-0004" in html
-    assert "HF-0002" not in html
-    assert "1 archivierte ausgeblendet" in html
+    radar_html = client.get("/").text
+    assert "HF-0004" not in radar_html  # score-gate rejected, hidden from the radar
+
+    merkliste_html = client.get("/merkliste").text
+    assert "HF-0004" in merkliste_html
+    assert "HF-0002" not in merkliste_html
+    assert "1 archivierte ausgeblendet" in merkliste_html
+
+
+def test_merkliste_view_only_params_do_not_suppress_the_saved_sliders(client, db, seeded):
+    """A stray query param (``limit``, a tracking parameter, ...) must not
+    reset the sliders to the default profile - only air_km_max/total_budget_max
+    may override the saved cookie."""
+    client.get("/?air_km_max=70&total_budget_max=700000")
+    response = client.get("/merkliste?limit=20")
+    assert "70 km" in response.text
 
 
 def test_legacy_shortlist_triage_value_lands_on_the_merkliste(client, db, seeded):
