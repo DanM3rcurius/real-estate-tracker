@@ -130,6 +130,13 @@ box. `scripts/repair_pastes.py` repairs manual pastes stored before #3 in place
 (dry run by default) - it re-ingests under the original url so dedupe updates
 the row instead of creating a second one.
 
+**Two facts, one German word — check before you reuse „abgelehnt".** The radar's
+score gate (`Score.rejected`, per `profile_hash`) and the dossier's triage
+verdict (`Property.user_state`) are unrelated and collided in the UI copy until
+issue #9. Hiding a property from readers is `user_state="archived"`
+(`db/enums.HIDDEN_USER_STATES`), never deletion; `lifecycle.delete_property` is
+the narrow, backed-up, cascade-checked exception. See decision 20.
+
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing
 it must not be able to mark a listing verified. `init-db` syncs the YAML, so

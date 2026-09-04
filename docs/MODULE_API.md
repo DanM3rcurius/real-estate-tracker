@@ -21,7 +21,26 @@ A model validator rejects `enabled=True` unless both are set; see
 advertising window (a newspaper's fortnight), so `hofradar.lifecycle.mark_missing`
 reads its silence past that window as `ListingStatus.EXPIRED`, not `REMOVED`;
 see `docs/DECISIONS.md` entry 15.
-ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
+ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`, which also
+carries `HIDDEN_USER_STATES: frozenset[str]` — the `Property.user_state` values
+that take a property out of every reader-facing view (radar, exports, map,
+digest, LLM feed) while it keeps being crawled, rescored and observed. It lives
+there rather than in `hofradar.scoring` because the web layer applies it in its
+own filter pass, which must keep working when scoring cannot be imported.
+Deliberately not the triage verdict `"rejected"`, which is a judgement about the
+farm and stays visible — see `docs/DECISIONS.md` entry 20.
+
+```python
+# hofradar.db.backup - the snapshot before anything destructive
+def backup_database(url: str | None = None, *, into: Path | None = None) -> Path | None
+    # The path written, or None when there was nothing to copy (in-memory
+    # database, or no file yet). Raises BackupUnavailable for a database it
+    # cannot snapshot (a Postgres DSN) rather than returning None: a caller
+    # that reads "no backup" as "backed up" is the silent success this
+    # codebase keeps producing. `scripts/backup_db.py` is a wrapper around it.
+
+class BackupUnavailable(RuntimeError)
+```
 
 Schema handling is split deliberately (`docs/DECISIONS.md` entry 17):
 
@@ -116,6 +135,29 @@ class ImplausibleAbsence(RuntimeError)
     # Raised by mark_missing when a run's absences are too broad to be
     # believed (see above). The caller decides what to do - the pipeline logs
     # it as a source failure and continues with the other sources.
+
+def delete_property(session, prop: Property, *, backup: bool = True) -> DeletionReport
+    # The narrow escape hatch of docs/DECISIONS.md entry 20, for a mis-crawl or
+    # a duplicate dedupe cannot see. Takes a hofradar.db.backup snapshot first,
+    # then relies on the ORM cascade plus PRAGMA foreign_keys=ON for the one
+    # child table with no ORM relationship (verification_events). Commits.
+    # Writes nothing and raises when it will not proceed: ResurrectsMergedDuplicates
+    # while another row's merged_into_id points here (the column is ON DELETE
+    # SET NULL, so deleting a merge survivor would revive its duplicates), or
+    # BackupUnavailable when a snapshot was asked for and cannot be taken.
+    # "Get this off my radar" is user_state="archived", not this.
+
+def dependent_rows(session, prop: Property) -> dict[str, int]
+    # table name -> rows that would go with the property. Writes nothing; it is
+    # what `hofradar delete-property` prints in its default dry run.
+
+@dataclass(frozen=True)
+class DeletionReport:
+    public_id: str; title: str | None
+    children: dict[str, int]; backup_path: Path | None; dry_run: bool
+    .total -> int ; .summary() -> str
+
+class ResurrectsMergedDuplicates(RuntimeError)
 ```
 
 ## `hofradar.geo`
@@ -159,7 +201,22 @@ def freshness_score(prop, now) -> tuple[float, dict]
 def confidence_score(prop) -> tuple[float, dict]
 def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True) -> int
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
-                      include_rejected: bool = False, filters: dict | None = None) -> list[tuple[Property, Score]]
+                      include_rejected: bool = False, include_hidden: bool = False,
+                      filters: dict | None = None) -> list[tuple[Property, Score]]
+    # Two different facts wearing one German word. include_rejected is the
+    # machine's scoring gate (Score.rejected, recomputed per profile_hash);
+    # include_hidden is the human's triage (Property.user_state in
+    # HIDDEN_USER_STATES, surviving every re-run). A NULL user_state always
+    # passes. See docs/DECISIONS.md entry 20.
+
+SUPPORTED_FILTERS: frozenset[str]
+    # The `filters` keys ranked_properties accepts: town, min_land_sqm,
+    # max_price, status, user_state, verified_only, has_outbuildings, flags.
+    # These are exactly the names hofradar.web.deps.ResultFilters.as_scoring_filters()
+    # emits, and tests/web/test_filter_contract.py keeps the two equal: an
+    # unknown key raises, hofradar.web.lazy reports that as a missing module,
+    # and the radar answers with unscored rows instead of an error.
+    # `status="alive"` means "not REMOVED or SOLD"; no row carries that word.
 ```
 
 `rescore_all` writes `Score` rows keyed by `profile.profile_hash`, and is the
