@@ -36,7 +36,7 @@ import feedparser
 
 from hofradar.config import KeywordConfig, SearchProfile
 from hofradar.contracts import RawListing
-from hofradar.sources.adapters._htmlutil import raw_listing_from_html
+from hofradar.sources.adapters._htmlutil import is_utility_url, raw_listing_from_html
 from hofradar.sources.base import SourceAdapter
 from hofradar.sources.exceptions import SourceDiscoveryError
 
@@ -189,8 +189,18 @@ class GenericRssAdapter(SourceAdapter):
                 except Exception as exc:  # noqa: BLE001 - one malformed entry must not stop the feed
                     logger.warning("%s: skipping malformed entry in %s: %s", self.key, feed_url, exc)
                     continue
-                if listing is not None:
-                    yield listing
+                if listing is None:
+                    continue
+                if is_utility_url(listing.url):
+                    # Feeds syndicate whatever the CMS publishes, the site's
+                    # own bookmark and search pages included (GitHub issue
+                    # #10). Nothing is recorded as enumerated here because
+                    # this adapter enumerates nothing: a feed carries the
+                    # latest N items and proves nothing by its silence either
+                    # way, so skipping an entry cannot change what it proves.
+                    logger.debug("%s: skipping utility URL %s", self.key, listing.url)
+                    continue
+                yield listing
 
         if not any_readable:
             raise SourceDiscoveryError(

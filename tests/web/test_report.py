@@ -197,3 +197,19 @@ def test_report_generation_through_the_web(client, seeded):
     response = client.post("/report")
     assert response.status_code == 200
     assert "Report erzeugt und gespeichert" in response.text
+
+
+def test_an_archived_property_is_not_in_the_digest(db, seeded, default_profile):
+    """Archiving is a reader-facing hide, and the digest is a reader."""
+    from sqlalchemy import select
+
+    from hofradar.db.models import Property
+
+    prop = db.scalar(select(Property).where(Property.public_id == "HF-0001"))
+    prop.user_state = "archived"
+    db.commit()
+
+    data = build_report(db, default_profile, since=since_week(), now=NOW)
+    assert "HF-0001" not in [entry.public_id for entry in data.entries]
+    # It is hidden, not forgotten: the tracked total still counts it.
+    assert data.counts.tracked_total == 4

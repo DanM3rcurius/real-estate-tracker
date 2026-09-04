@@ -7,7 +7,10 @@ preventing them:
   prevented structurally in :func:`~hofradar.lifecycle.ingest.ingest`, where
   ``FIRST_SEEN`` can only be produced by the branch that just inserted the row;
 * five listings of one farm becoming five properties - prevented by routing
-  every write through ``hofradar.dedupe.find_duplicate`` before a row is made.
+  every write through ``hofradar.dedupe.find_duplicate`` before a row is made;
+* a portal's search page or bookmark widget becoming a property at all -
+  prevented by :class:`~hofradar.lifecycle.ingest.NotAListing`, raised before
+  anything is written.
 
 Public API (see docs/MODULE_API.md)::
 
@@ -21,20 +24,35 @@ Public API (see docs/MODULE_API.md)::
     repair_phantom_removals(session, *, non_reporting_source_keys,
                             dry_run=True) -> RepairReport
     ImplausibleAbsence(RuntimeError)  # raised by mark_missing, nothing written
+    NotAListing(ValueError)           # raised by ingest, nothing written
+    delete_property(session, prop, *, backup=True) -> DeletionReport
+    dependent_rows(session, prop) -> dict[str, int]
+    ResurrectsMergedDuplicates(RuntimeError)  # raised by delete_property
 """
 
 from __future__ import annotations
 
 from hofradar.lifecycle.absence import ImplausibleAbsence, apply_stale_rules, mark_missing
 from hofradar.lifecycle.changes import changes_since
-from hofradar.lifecycle.ingest import ingest
+from hofradar.lifecycle.delete import (
+    DeletionReport,
+    ResurrectsMergedDuplicates,
+    delete_property,
+    dependent_rows,
+)
+from hofradar.lifecycle.ingest import NotAListing, ingest
 from hofradar.lifecycle.repair import RepairReport, repair_phantom_removals
 
 __all__ = [
+    "DeletionReport",
     "ImplausibleAbsence",
+    "NotAListing",
     "RepairReport",
+    "ResurrectsMergedDuplicates",
     "apply_stale_rules",
     "changes_since",
+    "delete_property",
+    "dependent_rows",
     "ingest",
     "mark_missing",
     "repair_phantom_removals",

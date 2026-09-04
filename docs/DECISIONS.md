@@ -442,3 +442,136 @@ shortlist — it just no longer does so silently.
 entry 17 is the same shape one layer down, and issue #2 was a third. Anything
 that quietly drops a load-bearing fact gets a `warnings` entry and a place in
 the UI.
+
+---
+
+## 19. A fetched page must prove it is a listing before it becomes a property
+
+**Decision.** Every full-page lift classifies what it fetched —
+`_htmlutil.page_kind()` returns `listing`, `index` or `utility` — the kind
+rides along on `RawListing`/`NormalizedListing` as `page_kind`, and
+`hofradar.lifecycle.ingest` raises `NotAListing` for anything that is not a
+`listing`, **before** `find_duplicate` and before the observation. A refused
+page leaves no row of any kind.
+
+**Why.** A property titled *„Merkliste"* — a portal's bookmark widget, every
+fact `k. A.` — reached the radar with a `public_id`, a geocode and a score
+(GitHub issue #10). Two independent gaps produced it: the title chain
+preferred `og:title`, which on a portal is the page's marketing name rather
+than the property's; and nothing anywhere asked whether the fetched page was
+an advert at all. A crawler reaches `/merkliste`, `/suche` and a login form on
+exactly the same code path as a real exposé.
+
+**Page shape, not fact count.** The obvious gate — "no price, no area, no
+year, no location: drop it" — does not work, and it is worth saying why in
+writing so nobody re-proposes it. `extract_labeled_fields` scans the whole
+page, so the real OVB search capture in `tests/fixtures/html` yields a
+complete, plausible set of facts assembled from *different result cards*:
+`property_type bauernhaus`, `land_sqm 461`, `living_sqm 434`, `town
+Stephanskirchen 83071` — four adverts wearing one coat. A fact-count gate
+passes exactly the page it has to reject. A page that lists twenty properties
+is not a poorly-described property; it is a different kind of page.
+
+**The signals, weakest last.** The URL naming a portal function
+(`UTILITY_PATH_RE`, whole path segments only, so `/suchergebnisse` is not
+`/suche`); the page's own headline being one („Merkliste" — the signal that
+survives a paste with no URL, which is how the reported one arrived);
+schema.org `@type`; and finally many sibling links of one URL shape (20 under
+`/immobilien/*` on the search capture, against 5 in the related-ads rail of a
+detail page). An index declaration outranks a listing one, because a portal
+makes both at once: that same capture declares `SearchResultsPage` *and* a
+`Product` named after the page whose `offers` is an `AggregateOffer` over all
+186 results. Anything unclassified is a listing — a small broker's detail page
+states nothing about itself, and refusing those would be worse than the bug.
+
+**No observation for a refused page.** `Observation` is append-only and is the
+history of what a source said about a *listing*. A search page never was one,
+so admitting it there would make every count, every yield statistic and the
+whole change feed read from a table with portal chrome in it. Invariant 1 is
+untouched: `ingest` is still the only writer of `Property` rows; a refusal
+simply writes nothing.
+
+**Refusals are counted, never silent** — the lesson of entries 17 and 18
+applied to a rejection rather than a fact. `normalize_listing` adds a German
+`warnings` line so `/add` can explain it, the paste box turns the refusal into
+a sentence instead of a saved property, and `pipeline.runner` counts every
+discarded row by reason and logs one `NORMALIZE` entry (`rejected=N` plus the
+breakdown) that `/runs` renders. That entry is written even when nothing was
+rejected: "nothing was thrown away" and "nobody counted" must stay
+distinguishable.
+
+**Defence in depth, and where it is *not*.** The generic sitemap and RSS
+adapters also skip `UTILITY_PATH_RE` URLs, so the fetch is never made — but
+only *after* `record_enumerated_url`, because invariant 4b is about what the
+site still offers and it plainly still offers that URL. Not fetching it is a
+routing decision, exactly like the `options.pattern` filter beside it.
+
+---
+
+## 20. Hiding is a triage state; deleting is a guarded, cascading, backed-up act
+
+**Decision.** "Get this off my radar" and "this was never a property" are two
+different requests and get two different mechanisms. The first is a triage
+state, `user_state="archived"` (the set is `hofradar.db.enums.HIDDEN_USER_STATES`):
+the property is left out of every *reader-facing* view — radar, JSON, CSV, map,
+weekly digest, LLM feed — while it keeps being crawled, rescored and observed.
+The second is `hofradar.lifecycle.delete_property`, reachable from the dossier's
+danger zone and from `hofradar delete-property`, which removes the row and every
+child table with it after taking a snapshot.
+
+**Why hiding is the default.** The database remembering what it has seen is the
+product (entry 2). A farm the user is done with is still evidence: its price
+history is a data point about the market, and a property deleted today is a
+property re-announced as `FIRST_SEEN` the next time a source carries it, which
+invariant 2 forbids. Hiding costs one indexed column read and loses nothing.
+
+**Why "rejected" is not a hide.** The dossier already offered 🚫 *Abgelehnt* and
+the radar already offered "auch abgelehnte zeigen", and they were unrelated:
+the first is `Property.user_state`, a human verdict that survives every re-run;
+the second is `Score.rejected`, the machine's gate, recomputed for every
+`profile_hash`. One German word for two facts is why a stored triage verdict
+looked ignored (GitHub issue #9). The verdict stays visible — a rejected farm is
+one you decided about, not one you want to stop seeing — and the UI now says
+*„Abgelehnt (bleibt sichtbar)"* against *„Archiviert – nicht mehr anzeigen"*,
+with the gate's own switch renamed to *„vom Bewertungs-Gate aussortierte zeigen"*.
+Should the owner later rule that a rejected farm should vanish too, that is one
+word added to `HIDDEN_USER_STATES` and nothing else.
+
+**Hiding is never silent.** `ResultSet.hidden_archived` counts what triage took
+off the screen and the status line prints it, for the same reason entry 18 ends
+the way it does: a row that disappears with no number beside it is the failure
+this codebase keeps producing. The counter is its own query, so it is right on
+the degraded path too.
+
+**Deleting is guarded three ways.** It is typed out (the `public_id` has to be
+entered back, in the form and on the command line the command is a dry run
+without `--apply`); it takes a backup first (entry 13's snapshot, moved into
+`hofradar.db.backup` so a request handler and an installed wheel can both reach
+it); and it refuses outright while another row's `merged_into_id` points at the
+property. That last one is not theoretical: the column is `ON DELETE SET NULL`,
+so deleting the survivor of a merge would turn every duplicate merged into it
+back into a visible property — the opposite of what was asked for. The caller
+deletes the duplicates first or not at all.
+
+**On foreign keys.** Eight of the nine child tables are cascaded by the ORM's
+`delete-orphan`; `verification_events` has no ORM relationship and depends on
+`ON DELETE CASCADE` being *enforced*, which SQLite only does under
+`PRAGMA foreign_keys=ON`. `hofradar.db.session` sets it on every connection, but
+every test fixture in this repository builds its engine with a bare
+`create_engine` and therefore does not — a delete test written on the usual
+fixture would have passed while leaving an audit trail behind for a property
+that no longer exists. `tests/lifecycle/test_delete.py` builds its engine
+through `get_engine` and asserts the pragma before it asserts anything else.
+
+**Alternatives rejected.** A `deleted_at` tombstone column: it is `archived`
+with a migration attached, and it would have to be honoured by every query in
+the codebase rather than by the one filter pass that already exists. Deleting
+from the radar list: the dossier is where the evidence for the decision is, and
+a destructive control belongs next to it.
+
+**Consequence.** On a Postgres deployment the web delete refuses, because the
+snapshot is the operator's job there; `hofradar delete-property --apply
+--no-backup` is the documented escape hatch for someone who has taken their own
+dump. And `hofradar.db.enums.HIDDEN_USER_STATES` — not `hofradar.scoring` — owns
+the vocabulary, because the web layer applies it in its own filter pass, which
+must keep working when the scoring package cannot be imported (`web/lazy.py`).

@@ -11,7 +11,13 @@ a raw value was present but could not be turned into something trustworthy.
 from __future__ import annotations
 
 from hofradar.config import KeywordConfig
-from hofradar.contracts import Evidence, NormalizedListing, RawListing
+from hofradar.contracts import (
+    PAGE_KIND_INDEX,
+    PAGE_KIND_UTILITY,
+    Evidence,
+    NormalizedListing,
+    RawListing,
+)
 from hofradar.normalize.dates import parse_german_date
 from hofradar.normalize.features import classify_property_type, extract_features
 from hofradar.normalize.location import find_location_in_text, parse_location
@@ -30,6 +36,22 @@ _PLAUSIBLE_YEAR_RANGE = range(1000, 2101)
 #: A location read out of prose rather than from a labelled field. The parse
 #: itself is strict, but the *field* was inferred, and evidence should say so.
 _UNLABELLED_LOCATION_CONFIDENCE = 0.6
+
+#: What a page that is not one listing gets told about itself. Every typed
+#: value below it was scraped off a page that offers nothing - on a portal's
+#: result list from several different adverts at once (issue #10) - so the
+#: warning is about the whole listing, not about one field that failed.
+#: German, because these lines are shown to the user on /add.
+_PAGE_KIND_WARNINGS: dict[str, str] = {
+    PAGE_KIND_INDEX: (
+        "Seitentyp: Diese Seite ist eine Trefferliste, kein einzelnes Inserat - "
+        "gefundene Angaben können aus mehreren Objekten stammen."
+    ),
+    PAGE_KIND_UTILITY: (
+        "Seitentyp: Diese Seite ist eine Portalfunktion (z. B. Merkliste, "
+        "Login, Impressum) und kein Inserat."
+    ),
+}
 
 
 def _add_numeric_evidence(
@@ -73,7 +95,14 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
         listing_visible=raw.listing_visible,
         http_status=raw.http_status,
         fetched_at=raw.fetched_at,
+        page_kind=raw.page_kind,
     )
+
+    # Said first, because it is the fact every other one below depends on: a
+    # page that is not a listing is not a listing with missing fields.
+    page_kind_warning = _PAGE_KIND_WARNINGS.get(raw.page_kind)
+    if page_kind_warning is not None:
+        listing.warnings.append(page_kind_warning)
 
     combined_text = " ".join(t for t in (raw.title, raw.description) if t)
     listing.text_hash = text_hash(combined_text)

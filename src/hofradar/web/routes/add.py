@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from hofradar.contracts import PAGE_KIND_INDEX, PAGE_KIND_UTILITY
 from hofradar.db.enums import SourceRole
 from hofradar.db.models import Source
 from hofradar.web import lazy
@@ -25,6 +26,25 @@ from hofradar.web.deps import get_db, profile_from_query, render
 router = APIRouter(tags=["add"])
 
 MANUAL_SOURCE_KEY = "manual"
+
+#: What a human is told about a page the lifecycle refused. Split by kind
+#: because the remedy differs: a result list needs the advert opened first, a
+#: portal function needs a different paste altogether. Issue #10 was a
+#: "Merkliste" that saved silently, so saying nothing is not an option, and
+#: saying "Fehler" would be wrong - nothing failed, the page was refused.
+INGEST_REFUSAL_NOTICES: dict[str, str] = {
+    PAGE_KIND_INDEX: (
+        "Die eingefügte Seite ist kein Inserat, sondern eine Trefferliste mit "
+        "mehreren Objekten. Es wurde nichts gespeichert – bitte das einzelne "
+        "Inserat öffnen und dieses einfügen."
+    ),
+    PAGE_KIND_UTILITY: (
+        "Die eingefügte Seite ist kein Inserat, sondern eine Portalseite "
+        "(z. B. Merkliste, Suchagent oder Login). Es wurde nichts gespeichert."
+    ),
+}
+
+INGEST_REFUSAL_FALLBACK = "Die eingefügte Seite ist kein Inserat. Es wurde nichts gespeichert."
 
 #: `get_adapter` reads the adapter name out of `Source.config`, which is where
 #: `sync_sources_to_db` writes it. A row created here has to carry it too, or
@@ -207,9 +227,36 @@ async def add_submit(
                 )
             )
 
-        prop, change = lazy.call(
-            "hofradar.lifecycle:ingest", session, listing, source=source, geo=geo
-        )
+        # Not `lazy.call`: it translates *every* exception into
+        # ModuleUnavailable, which would report a deliberate refusal as a
+        # missing package. Everything else is re-wrapped exactly as lazy.call
+        # would, so a stale schema still gets its own notice (issue #7).
+        ingest = lazy.load("hofradar.lifecycle:ingest")
+        not_a_listing = lazy.load("hofradar.lifecycle:NotAListing")
+        try:
+            prop, change = ingest(session, listing, source=source, geo=geo)
+        except not_a_listing as exc:
+            session.rollback()
+            degraded.append(
+                lazy.Degraded(
+                    INGEST_REFUSAL_NOTICES.get(exc.page_kind, INGEST_REFUSAL_FALLBACK)
+                )
+            )
+            return render(
+                request,
+                "pages/add.html",
+                {
+                    "profile": profile,
+                    "degraded": degraded,
+                    "result": None,
+                    "url_value": url,
+                    "text_value": text,
+                },
+            )
+        except lazy.ModuleUnavailable:
+            raise
+        except BaseException as exc:  # noqa: BLE001 - see hofradar.web.lazy
+            raise lazy.ModuleUnavailable("hofradar.lifecycle:ingest", exc) from exc
         session.commit()
         result = {
             "public_id": getattr(prop, "public_id", None),

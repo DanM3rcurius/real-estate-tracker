@@ -18,12 +18,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from hofradar.contracts import CostResult, ScoreResult
 from hofradar.costmodel import estimate_costs
-from hofradar.db.enums import CapitalRisk, ListingStatus
+from hofradar.db.enums import HIDDEN_USER_STATES, CapitalRisk, ListingStatus, VerificationStatus
 from hofradar.db.models import CostEstimate, Property, PropertySource, Score
 from hofradar.scoring._util import to_utc
 from hofradar.scoring.deal import deal_score
@@ -74,9 +74,22 @@ GONE_STATUSES: frozenset[str] = frozenset({ListingStatus.REMOVED, ListingStatus.
 #: merely flagged for a human to look at.
 FLAG_EXCLUSION_OVERRIDDEN = "EXCLUSION_OVERRIDDEN_BY_SUBSTANCE"
 
-#: ``filters`` keys accepted by :func:`ranked_properties`.
+#: ``filters`` keys accepted by :func:`ranked_properties`. These are exactly the
+#: names ``hofradar.web.deps.ResultFilters.as_scoring_filters`` emits: it sent
+#: three this set had never heard of, ``_apply_filters`` raised, and the radar
+#: silently fell back to unscored rows whenever those controls were touched.
+#: ``tests/web/test_filter_contract.py`` keeps the two vocabularies equal.
 SUPPORTED_FILTERS: frozenset[str] = frozenset(
-    {"town", "min_land", "max_price", "status", "user_state", "flags"}
+    {
+        "town",
+        "min_land_sqm",
+        "max_price",
+        "status",
+        "user_state",
+        "verified_only",
+        "has_outbuildings",
+        "flags",
+    }
 )
 
 
@@ -365,6 +378,12 @@ def rescore_all(session: Session, profile: SearchProfile, *, only_dirty: bool = 
 # --------------------------------------------------------------------------- #
 
 
+#: ``status`` value meaning "everything the market has not taken away". The
+#: control panel offers it beside the real ``ListingStatus`` names, and matching
+#: it literally against the column returned nothing at all.
+STATUS_ALIVE = "alive"
+
+
 def _apply_filters(stmt, filters: dict[str, Any]):
     unknown = set(filters) - SUPPORTED_FILTERS
     if unknown:
@@ -372,16 +391,22 @@ def _apply_filters(stmt, filters: dict[str, Any]):
     if (town := filters.get("town")) is not None:
         towns = [town] if isinstance(town, str) else list(town)
         stmt = stmt.where(func.lower(Property.town).in_([t.casefold() for t in towns]))
-    if (min_land := filters.get("min_land")) is not None:
+    if (min_land := filters.get("min_land_sqm")) is not None:
         stmt = stmt.where(Property.land_sqm.is_not(None), Property.land_sqm >= min_land)
     if (max_price := filters.get("max_price")) is not None:
         stmt = stmt.where(Property.price.is_not(None), Property.price <= max_price)
     if (status := filters.get("status")) is not None:
         statuses = [status] if isinstance(status, str) else list(status)
-        stmt = stmt.where(Property.listing_status.in_(statuses))
+        if STATUS_ALIVE in statuses:
+            stmt = stmt.where(Property.listing_status.not_in(GONE_STATUSES))
+            statuses = [s for s in statuses if s != STATUS_ALIVE]
+        if statuses:
+            stmt = stmt.where(Property.listing_status.in_(statuses))
     if (user_state := filters.get("user_state")) is not None:
         states = [user_state] if isinstance(user_state, str) else list(user_state)
         stmt = stmt.where(Property.user_state.in_(states))
+    if filters.get("verified_only"):
+        stmt = stmt.where(Property.verification_status == VerificationStatus.VERIFIED)
     return stmt
 
 
@@ -391,6 +416,7 @@ def ranked_properties(
     *,
     limit: int | None = None,
     include_rejected: bool = False,
+    include_hidden: bool = False,
     filters: dict[str, Any] | None = None,
 ) -> list[tuple[Property, Score]]:
     """Property + Score for this profile, best first.
@@ -399,9 +425,17 @@ def ranked_properties(
     ``gates.min_confidence_for_shortlist`` (the same rule that produced the
     ``SHORTLIST_BLOCKED`` flag) sorts behind every shortlistable one, so it can
     never occupy a place in the top ten.
+
+    ``include_rejected`` and ``include_hidden`` are two different facts wearing
+    one German word. The first is the machine's scoring gate (``Score.rejected``,
+    recomputed for every ``profile_hash``); the second is the human's triage
+    (``Property.user_state`` in :data:`~hofradar.db.enums.HIDDEN_USER_STATES`,
+    which survives every re-run). A hidden property is still crawled, still
+    rescored and still in the history - it is only kept off the reader's screen.
     """
     filters = dict(filters or {})
     wanted_flags = filters.pop("flags", None)
+    wanted_outbuildings = filters.pop("has_outbuildings", None)
 
     blocked = case(
         (Score.confidence_score < profile.gates.min_confidence_for_shortlist, 1), else_=0
@@ -414,9 +448,23 @@ def ranked_properties(
     )
     if not include_rejected:
         stmt = stmt.where(Score.rejected.is_(False))
+    if not include_hidden and filters.get("user_state") not in HIDDEN_USER_STATES:
+        # Naming a hidden state in ``filters`` is an explicit ask to see it.
+        # An untriaged property has no ``user_state`` at all, and NULL NOT IN
+        # (...) is NULL in SQL, so the common case needs saying explicitly.
+        stmt = stmt.where(
+            or_(
+                Property.user_state.is_(None),
+                Property.user_state.not_in(HIDDEN_USER_STATES),
+            )
+        )
     stmt = _apply_filters(stmt, filters)
 
     rows: list[tuple[Property, Score]] = [tuple(row) for row in session.execute(stmt).all()]
+
+    if wanted_outbuildings:
+        # A JSON list column; emptiness is not portably testable in SQL.
+        rows = [row for row in rows if list(row[0].outbuildings or [])]
 
     if wanted_flags:
         # Flags live in a JSON column; filtering them in Python keeps the query
