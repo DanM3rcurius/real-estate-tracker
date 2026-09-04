@@ -40,11 +40,18 @@ CSV/JSON/map permalinks. No JS, no localStorage, no server-side table.
 - `GET /` and `GET /api/results` set the cookie whenever the request carries
   at least one known control parameter (the keys `query_string` emits).
   `max_age` one year, `path=/`, `samesite=lax`, `httponly`.
-- `GET /`, `GET /map` and `GET /merkliste` with **no** known control parameter
-  and a non-empty cookie answer `303` to the same path with the cookie's query
-  string appended. The address bar therefore always shows the real state, the
+- `GET /` and `GET /map` with **no** known control parameter and a non-empty
+  cookie answer `303` to the same path with the cookie's query string
+  appended. The address bar therefore always shows the real state, the
   existing `syncUrl` in `app.js` keeps working, and the dossier's `← Radar`
   crumb and the top-nav links need no change.
+- The saved state is **two things**, and the helper keeps them apart:
+  the *profile* (`air_km_max`, `total_budget_max` - what the scores depend
+  on) and the *view filters* (search box, status, sort, switches). The
+  Merkliste page (section 2) applies only the profile half, and never
+  redirects: a saved `q=Miesbach` must not empty the reader's own list.
+  `saved_query(request)` returns the whole string; `saved_profile_params(
+  request)` returns just the two slider keys.
 - `GET /?reset=1` deletes the cookie and renders the defaults. The controls
   panel gets a link `↺ Filter zurücksetzen` next to the map/CSV/JSON links.
 - Guard rails: the cookie is only honoured if it is ≤ 1 000 characters and
@@ -77,6 +84,20 @@ lesson - one word, one fact. Note that `report/data.py` also says "shortlist"
 for the digest's top ten; that is the scorer's pick, not the reader's, and it
 keeps its name. The reader's list is **Merkliste** everywhere in UI copy.
 
+Two places would otherwise lose the mark silently, the shape of bug this
+codebase keeps producing:
+
+- **A stale tab.** A triage form rendered before the deploy still posts
+  `user_state=shortlist`; coercing that to "kein Status" with a green
+  "Gespeichert" is a lie. The triage route treats the legacy value as
+  "put it on the Merkliste": `shortlisted_at` is set if null, `user_state`
+  becomes null, and the response says `Gespeichert: ⭐ gemerkt`. Every other
+  unknown value keeps today's behaviour (cleared, no 500).
+- **A merge.** `dedupe/merge.py` copies a fixed list of scalar fields onto
+  the survivor. `shortlisted_at` joins that list with "either side marked →
+  survivor marked (earliest timestamp)", so absorbing a duplicate never
+  un-marks a farm. One test pins it.
+
 **Writes.** `POST /property/{public_id}/merken` toggles: null → now, set →
 null. Only route that writes `shortlisted_at`. It renders
 `partials/merken_button.html` for HTMX (`hx-swap="outerHTML"`), and answers
@@ -101,8 +122,9 @@ Karte. It calls the radar's `resolve()` with `shortlisted_only=True` and
 gate; archived rows stay hidden and counted, exactly as on the radar). It
 renders `pages/merkliste.html`: a heading with the count, the shared
 `partials/results.html`, and - when empty - "Noch nichts gemerkt. Auf einem
-Dossier oder einer Karte ☆ Merken drücken." No control panel; the profile
-comes from the query string / cookie like everywhere else.
+Dossier oder einer Karte ☆ Merken drücken." No control panel. The profile
+comes from the query string, else from `saved_profile_params()` (section 1);
+view filters are never applied here and the page never redirects.
 
 **Exports.** `row_to_dict` gains `shortlisted_at` (ISO or null). The CSV gets a
 `Merkliste` column (`1`/empty).
@@ -195,10 +217,15 @@ too; the `kind` of a folded entry is `observations`.
 ## 7. Issue #14: the search box
 
 - `ResultFilters.as_scoring_filters()` emits `q` (not `town`) for the box.
-- `scoring.engine.SUPPORTED_FILTERS` gains `q`: casefolded substring over
-  `town`, `postcode`, `district`, `canonical_title` -
-  `or_(*[func.lower(col).like(f"%{needle}%") for col in ...])`. `town` keeps
-  its exact-list semantics for programmatic callers.
+- `scoring.engine.SUPPORTED_FILTERS` gains `q`. It is applied in Python
+  after the SQL, exactly like `flags` and `has_outbuildings` already are, not
+  as a `LIKE`: SQLite's `lower()` is ASCII-only, so `lower('Ödhof')` never
+  matches a casefolded `öd`, and the radar would be wrong for every umlaut
+  village. One function `matches_search(prop, needle)` (casefolded substring
+  over `town`, `postcode`, `district`, `canonical_title`) lives in
+  `scoring/engine.py` and `web.query.passes_filters` calls the same one, so
+  the ranked path and the degraded path cannot drift again. `town` keeps its
+  exact-list semantics for programmatic callers.
 - `partials/results.html`: when `filters.town` is set and there are no rows,
   the empty state reads `0 Treffer für „{{ filters.town }}“.`; the statusline
   gains `· Suche „…“` while a search is active.
@@ -214,6 +241,32 @@ too; the `kind` of a folded entry is `observations`.
   and cookie in the web section.
 - `CLAUDE.md`: known-ground note that `USER_STATES` no longer has
   `shortlist` and where the list lives.
+
+## Execution order (from the premortem)
+
+The work is cut by file ownership so agents can run in isolated worktrees
+without colliding:
+
+- **Wave 1, parallel, disjoint files.**
+  A filter memory: `deps.py` (new helpers only), `radar.py`, `map_view.py`,
+  `controls.html`.
+  C German dossier + tier + collapsed breakdown: `dossier.py`, `dossier.html`,
+  `estimator.py`, `filters.py`, `macros.html`, `app.css`, `test_costmodel.py`.
+  D Verlauf: `history.py` and its tests.
+  E issue #14: `engine.py` (`q`, `matches_search`), `query.py`, the
+  `as_scoring_filters` line in `deps.py`, `results.html`.
+  A and E both touch `deps.py` in different functions; the merge resolves it.
+- **Wave 2, after wave 1 is merged.** B Merkliste: models, migration,
+  `merge.py`, `engine.py` (`shortlisted`), `deps.py` (`ResultFilters`),
+  `query.py`, `dossier.py`/`dossier.html` (header button, `USER_STATES`),
+  `result_card.html`, `app.py` nav, the new route and templates, exports,
+  `test_filter_contract.py`, `test_triage_and_settings.py`,
+  `test_slider_recompute.py`.
+- **Wave 3.** Docs (`DECISIONS.md` 21, `MODULE_API.md`, `CLAUDE.md`).
+
+Test hygiene for the cookie: a `TestClient` keeps cookies, so a test must
+not assert default sliders on a bare `/` after it has requested `/` with
+parameters in the same client. New tests use a fresh client per case.
 
 ## Testing strategy
 
