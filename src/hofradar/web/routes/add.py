@@ -26,6 +26,12 @@ router = APIRouter(tags=["add"])
 
 MANUAL_SOURCE_KEY = "manual"
 
+#: `get_adapter` reads the adapter name out of `Source.config`, which is where
+#: `sync_sources_to_db` writes it. A row created here has to carry it too, or
+#: the paste box cannot build its own adapter and silently falls back to
+#: storing the text unparsed (GitHub issue #3).
+MANUAL_ADAPTER_CONFIG = {"adapter": "manual", "options": {}}
+
 
 def manual_source(session: Session) -> Source:
     """The pseudo-source every hand-entered listing is attributed to.
@@ -42,10 +48,15 @@ def manual_source(session: Session) -> Source:
             reliability=0.8,
             enabled=True,
             notes="Von Hand eingefügte Inserate und Exposé-Texte.",
+            config=dict(MANUAL_ADAPTER_CONFIG),
         )
         session.add(source)
         session.commit()
         session.refresh(source)
+    elif not (source.config or {}).get("adapter"):
+        # A row written by an earlier version of this function, or by hand.
+        source.config = {**(source.config or {}), **MANUAL_ADAPTER_CONFIG}
+        session.commit()
     return source
 
 
@@ -56,12 +67,21 @@ async def _maybe_await(value: Any) -> Any:
 
 
 def _get_adapter(source: Source) -> Any:
-    """``get_adapter`` takes a Source per the contract; tolerate a key too."""
+    """Build the manual adapter for this source row.
+
+    ``get_adapter`` takes a ``Source`` or a ``SourceConfig`` and reads the
+    adapter name from it - never a bare key, which the previous fallback here
+    passed and which failed with the same error it was catching. If the row is
+    unusable, fall back to the registry's own manual entry rather than to
+    nothing: the paste box is the one source that must always work.
+    """
     get_adapter = lazy.load("hofradar.sources:get_adapter")
     try:
         return get_adapter(source)
-    except Exception:  # noqa: BLE001 - a key-based build is equally plausible
-        return get_adapter(MANUAL_SOURCE_KEY)
+    except Exception:  # noqa: BLE001 - fall back to the configured definition
+        configs = lazy.call("hofradar.config:load_config").sources
+        manual = next(cfg for cfg in configs if cfg.key == MANUAL_SOURCE_KEY)
+        return get_adapter(manual)
 
 
 @router.get("/add")
@@ -120,6 +140,29 @@ async def add_submit(
             fetched_at=datetime.now(UTC),
         )
 
+        # The adapter is what knows how to read an exposé: "Kaufpreis: ...",
+        # "Wohnfläche: ...", and the HTML case. Building the RawListing here by
+        # hand meant a pasted text arrived with every one of those fields empty
+        # - the paste box parsed nothing at all (GitHub issue #3). The
+        # hand-built listing above stays as the fallback for when the adapter
+        # cannot be loaded, because this form must never eat a paste.
+        if text:
+            try:
+                parsed = _get_adapter(source).ingest_text(raw.url, text)
+            except lazy.ModuleUnavailable as exc:
+                degraded.append(lazy.Degraded(exc.user_message))
+            except Exception as exc:  # noqa: BLE001 - fall back to the raw text
+                degraded.append(
+                    lazy.Degraded(
+                        "Der Text konnte nicht strukturiert gelesen werden – er wird "
+                        f"unverändert gespeichert. ({type(exc).__name__})"
+                    )
+                )
+            else:
+                if parsed is not None:
+                    parsed.description = parsed.description or text
+                    raw = parsed
+
         if url:
             try:
                 adapter = _get_adapter(source)
@@ -174,6 +217,10 @@ async def add_submit(
             "town": getattr(prop, "town", None),
             "change_kind": getattr(change, "kind", None),
             "detail": getattr(change, "detail", None),
+            # The complaint behind issue #3 was not "parsing is wrong", it was
+            # "it looked like it worked". Anything the normaliser could not
+            # make sense of belongs on the confirmation page.
+            "warnings": list(getattr(listing, "warnings", []) or []),
         }
     except lazy.ModuleUnavailable as exc:
         session.rollback()

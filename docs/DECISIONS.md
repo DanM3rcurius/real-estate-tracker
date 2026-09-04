@@ -392,3 +392,41 @@ which is not where anyone would look. That message now names the database.
 changes nothing and exits 1 when work is pending) exist for operators. Because
 the migrations are inside the package, `alembic.ini` at the repository root
 points at `src/hofradar/migrations` — there is one copy, not a synced pair.
+
+---
+
+## 18. An unlabelled address is parsed, and an unplaceable listing says so
+
+**Decision.** When a source supplies no `location_raw`, `postcode` or `town`,
+`normalize_listing` recovers the address from the description, requiring a
+postcode *and* a town-shaped word. A listing that still has no town produces a
+warning, and `/add` shows it.
+
+**Why.** The paste box parsed `Label: value` lines only, so the shape a human
+actually copies out of an exposé — a bare `83569 Vogtareuth, Landkreis
+Rosenheim` — was dropped. The parser was never the problem: `parse_location`
+reads that string correctly and was simply never given it. One unparsed line
+then ended the property's life. No town, so nothing to geocode; no geocode, so
+neither distance; `geo_precision='none'` collapses the location-certainty term
+and the unrouted cap holds confidence at 65, below the shortlist gate of 70. The
+listing saved, got a `public_id`, and never appeared on the Radar — `appears on
+the radar: 0 of 1`, with nothing raised anywhere (GitHub issue #3).
+
+**In the normaliser, not the adapter.** `hofradar.normalize` owns parsing, and
+the RSS and sitemap detail pages have the same problem: an address in prose
+rather than in a field. Fixing it in one adapter would have fixed it once.
+
+**Strictly.** A wrong town is far worse than no town — it geocodes to a real
+place somewhere else, and no later stage can tell that it is wrong. So the
+shape is postcode plus town, never any five-digit run: `595.000` has
+separators, `95000 EUR` has no town after it. A recovered location carries
+lower evidence confidence than a stated one, because the field was inferred.
+
+**Not by lowering the gate.** The gate was behaving correctly; the input was
+impoverished. A listing that genuinely cannot be placed is still held off the
+shortlist — it just no longer does so silently.
+
+**Consequence.** Silence is the failure mode this codebase keeps producing:
+entry 17 is the same shape one layer down, and issue #2 was a third. Anything
+that quietly drops a load-bearing fact gets a `warnings` entry and a place in
+the UI.
