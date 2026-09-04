@@ -274,7 +274,7 @@ class ResultFilters:
         if self.outbuildings_only:
             payload["has_outbuildings"] = True
         if self.town:
-            payload["town"] = self.town
+            payload["q"] = self.town
         if self.user_state:
             payload["user_state"] = self.user_state
         return payload

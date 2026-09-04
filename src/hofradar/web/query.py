@@ -184,11 +184,12 @@ def passes_filters(prop: Property, filters: ResultFilters) -> bool:
     if filters.user_state and (prop.user_state or "none") != filters.user_state:
         return False
     if filters.town:
-        needle = filters.town.casefold()
-        haystack = " ".join(
-            str(x or "") for x in (prop.town, prop.postcode, prop.district, prop.canonical_title)
-        ).casefold()
-        if needle not in haystack:
+        # Local import, not a module-level one: this module boots even when
+        # ``hofradar.scoring`` is missing (see the module docstring), and a
+        # top-level import here would take that guarantee away.
+        from hofradar.scoring.engine import matches_search
+
+        if not matches_search(prop, filters.town):
             return False
     return True
 

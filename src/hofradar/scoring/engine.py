@@ -89,8 +89,27 @@ SUPPORTED_FILTERS: frozenset[str] = frozenset(
         "verified_only",
         "has_outbuildings",
         "flags",
+        "q",
     }
 )
+
+#: Fields a reader could plausibly type into the search box, in the order
+#: :func:`matches_search` joins them into one haystack.
+SEARCH_FIELDS: tuple[str, ...] = ("town", "postcode", "district", "canonical_title")
+
+
+def matches_search(prop: Property, needle: str) -> bool:
+    """Casefolded substring over the fields a reader would type (issue #14).
+
+    Done in Python, not SQL: SQLite's ``lower()`` folds ASCII only, so a
+    ``LIKE`` would miss every umlaut village - ``lower('Ödhof')`` never
+    matches a casefolded ``öd``.
+    """
+    wanted = needle.casefold().strip()
+    if not wanted:
+        return True
+    haystack = " ".join(str(getattr(prop, f, None) or "") for f in SEARCH_FIELDS).casefold()
+    return wanted in haystack
 
 
 # --------------------------------------------------------------------------- #
@@ -436,6 +455,7 @@ def ranked_properties(
     filters = dict(filters or {})
     wanted_flags = filters.pop("flags", None)
     wanted_outbuildings = filters.pop("has_outbuildings", None)
+    wanted_search = filters.pop("q", None)
 
     blocked = case(
         (Score.confidence_score < profile.gates.min_confidence_for_shortlist, 1), else_=0
@@ -461,6 +481,10 @@ def ranked_properties(
     stmt = _apply_filters(stmt, filters)
 
     rows: list[tuple[Property, Score]] = [tuple(row) for row in session.execute(stmt).all()]
+
+    if wanted_search:
+        # A casefolded Python substring, not a SQL LIKE - see matches_search.
+        rows = [row for row in rows if matches_search(row[0], wanted_search)]
 
     if wanted_outbuildings:
         # A JSON list column; emptiness is not portably testable in SQL.
