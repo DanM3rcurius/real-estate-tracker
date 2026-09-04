@@ -630,9 +630,11 @@ query, exactly like `flags` and `has_outbuildings` already are, not as a SQL
 `LIKE`. SQLite's `lower()` is ASCII-only, so `lower('Ödhof')` never matches a
 casefolded `öd` — and the radar would be wrong for every umlaut village. One
 function `hofradar.search.matches_search(prop, needle)` (casefolded substring
-over `town`, `postcode`, `district`, `canonical_title`) lives in both
-`scoring/engine.py` and `web/query.py` (the second imports the first), so the
-ranked path and the degraded path cannot drift.
+over `town`, `postcode`, `district`, `canonical_title`) lives in the neutral
+module `hofradar/search.py`, and both `scoring/engine.py` and `web/query.py`
+import it from there: the web layer must keep working when the scoring package
+is missing (`web/lazy.py`), and the engine must never import the web package.
+So the ranked path and the degraded path cannot drift.
 
 **Consequence.** A test must not assert defaults on a bare `/` after it has
 requested `/` with parameters in the same `TestClient` — cookies are kept across
