@@ -140,6 +140,15 @@ issue #9. Hiding a property from readers is `user_state="archived"`
 (`db/enums.HIDDEN_USER_STATES`), never deletion; `lifecycle.delete_property` is
 the narrow, backed-up, cascade-checked exception. See decision 20.
 
+**The Merkliste and filter memory.** `USER_STATES` no longer has a `shortlist`
+entry; the reader's bookmarks live in `Property.shortlisted_at` (a timestamp or
+null), written only by `POST /property/{id}/merken`. Filter memory (all sliders
+and search parameters) is the `hofradar_radar` cookie plus a `303` redirect from
+a bare `/` — no localStorage, no server table, no Javascript. A test must not
+assert defaults on `GET /` after it has requested `GET /?...` in the same
+`TestClient`, because cookies are preserved and the second request may redirect.
+See decision 21.
+
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing
 it must not be able to mark a listing verified. `init-db` syncs the YAML, so

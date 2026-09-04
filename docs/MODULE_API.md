@@ -230,12 +230,15 @@ def ranked_properties(session, profile: SearchProfile, *, limit: int | None = No
 
 SUPPORTED_FILTERS: frozenset[str]
     # The `filters` keys ranked_properties accepts: town, min_land_sqm,
-    # max_price, status, user_state, verified_only, has_outbuildings, flags.
-    # These are exactly the names hofradar.web.deps.ResultFilters.as_scoring_filters()
-    # emits, and tests/web/test_filter_contract.py keeps the two equal: an
-    # unknown key raises, hofradar.web.lazy reports that as a missing module,
-    # and the radar answers with unscored rows instead of an error.
+    # max_price, status, user_state, verified_only, has_outbuildings, flags, q,
+    # shortlisted. These are exactly the names hofradar.web.deps.
+    # ResultFilters.as_scoring_filters() emits, and tests/web/test_filter_contract.py
+    # keeps the two equal: an unknown key raises, hofradar.web.lazy reports that as
+    # a missing module, and the radar answers with unscored rows instead of an error.
     # `status="alive"` means "not REMOVED or SOLD"; no row carries that word.
+    # `q` is the search box (matched by hofradar.search.matches_search in Python,
+    # not SQL, so casefolding works for umlauts). `shortlisted` is the Merkliste
+    # filter (Property.shortlisted_at is not None).
 ```
 
 `rescore_all` writes `Score` rows keyed by `profile.profile_hash`, and is the
@@ -339,4 +342,52 @@ observations over the same window) - see docs/coverage.md.
 ```python
 async def run_pipeline(profile: SearchProfile, *, trigger: str = "manual",
                        source_keys: list[str] | None = None, dry_run: bool = False) -> SearchRun
+```
+
+## `hofradar.search`
+
+```python
+def matches_search(prop: Property, needle: str) -> bool
+    # Casefolded substring match over town, postcode, district, canonical_title,
+    # using casefold() for complete Unicode normalization. Returns False if
+    # needle is empty or None. Applied in Python (not SQL LIKE) because SQLite's
+    # lower() is ASCII-only and would miss umlaut villages. Shared by
+    # hofradar.scoring.engine._apply_filters (ranked path) and
+    # hofradar.web.query.passes_filters (degraded path) so the two cannot drift.
+```
+
+## `hofradar.web`
+
+```python
+# hofradar.web.deps - cookie and redirect helpers
+FILTER_COOKIE: str = "hofradar_radar"
+PROFILE_KEYS: frozenset[str]                       # the two sliders only
+REMEMBERED_KEYS: frozenset[str]                    # all keys the cookie holds
+
+def saved_query(request: Request) -> str | None    # the full cookie as query string
+def saved_profile_params(request: Request) -> dict[str, str]    # sliders only
+def remember_query(response: Response, results: ResultSet) -> None
+    # Sets the cookie from results.filters.query_string() with max_age one year,
+    # httponly, samesite=lax.
+def forget_query(response: Response) -> None       # delete the cookie
+def redirect_to_saved(request: Request) -> RedirectResponse | None
+    # Returns a 303 to the same path with the saved query string appended,
+    # or None if the request already carries known parameters or reset=1 is set.
+
+# Routes
+GET /merkliste
+    # The Merkliste page. Applies only saved_profile_params() (the two sliders),
+    # never the view filters from the query string. Renders all shortlisted
+    # properties (Property.shortlisted_at is not None), including score-rejected
+    # ones but excluding archived ones. Counted in the status line.
+
+POST /property/{public_id}/merken
+    # Toggles Property.shortlisted_at: None ↔ now. The only writer of that
+    # column (see docs/DECISIONS.md entry 21). Renders
+    # partials/merken_button.html for HTMX (hx-swap="outerHTML"), or redirects
+    # with 303 for a plain form post.
+
+GET /?reset=1
+    # Deletes the filter cookie and renders defaults. No longer supported: the
+    # cookie is forgotten, the response is 200 not 303.
 ```
