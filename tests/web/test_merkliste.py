@@ -94,6 +94,42 @@ def test_merkliste_shows_a_gate_rejected_row_but_not_an_archived_one(client, db,
     assert "1 archivierte ausgeblendet" in merkliste_html
 
 
+def test_merkliste_keeps_a_mark_outside_the_sliders(client, db, seeded):
+    """Decision 21: the Merkliste is the human's list, not subject to the
+    machine's profile gate. HF-0002 sits at 61 km, outside a 30 km radius, so
+    it must still show up marked, and the page must not claim nothing was
+    marked."""
+    client.post("/property/HF-0002/merken")
+    client.get("/?air_km_max=30&total_budget_max=700000")
+    html = client.get("/merkliste").text
+    assert "HF-0002" in html
+    assert "Noch nichts gemerkt" not in html
+
+
+def test_merkliste_archived_count_is_scoped_to_marked_rows(client, db, seeded):
+    """Archiving an unmarked property must not appear in the Merkliste's own
+    counts - its 'archivierte ausgeblendet' figure is over the marked set,
+    not the whole database. An empty Merkliste keeps saying nothing was
+    marked, never the radar's 'nothing passes the sliders' copy."""
+    client.post("/property/HF-0003/triage", data={"user_state": "archived"})
+    html = client.get("/merkliste").text
+    assert "archivierte ausgeblendet" not in html
+    assert "Noch nichts gemerkt" in html
+    assert "Kein Objekt passt zu diesen Reglern" not in html
+
+
+def test_merkliste_all_marked_archived_is_an_honest_message(client, db, seeded):
+    """Mark and archive the same property: the Merkliste is not empty of
+    marks, it is empty of *visible* marks - a different sentence from 'you
+    marked nothing'."""
+    client.post("/property/HF-0002/merken")
+    client.post("/property/HF-0002/triage", data={"user_state": "archived"})
+    html = client.get("/merkliste").text
+    assert "1 archivierte ausgeblendet" in html
+    assert "Alle gemerkten Objekte sind archiviert" in html
+    assert "Noch nichts gemerkt" not in html
+
+
 def test_merkliste_view_only_params_do_not_suppress_the_saved_sliders(client, db, seeded):
     """A stray query param (``limit``, a tracking parameter, ...) must not
     reset the sliders to the default profile - only air_km_max/total_budget_max

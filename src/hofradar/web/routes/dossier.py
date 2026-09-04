@@ -335,7 +335,9 @@ def triage(
 
 @router.post("/property/{public_id}/merken")
 def merken(public_id: str, request: Request, session: Session = Depends(get_db)):
-    """The Merkliste toggle. The only writer of ``Property.shortlisted_at``."""
+    """The Merkliste toggle. The only route that writes ``Property.
+    shortlisted_at`` on a reader's action - the legacy-triage branch above and
+    ``dedupe.merge`` also set it (docs/DECISIONS.md entry 21)."""
     prop = load_property(session, public_id)
     if prop is None:
         return render(

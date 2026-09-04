@@ -1,9 +1,14 @@
-"""The Merkliste - what the reader marked, under the reader's own sliders.
+"""The Merkliste - what the reader marked, scored by the reader's own sliders.
 
-It is the human's list, so the score gate does not apply (``include_rejected``
-is forced on); archiving still hides, and still counts, exactly as on the
-radar. The saved *view* filters are deliberately not applied: a remembered
-search for one village must not empty a list of farms in another.
+It is the human's list, so neither machine gate applies to the marks
+themselves: the score gate does not apply (``include_rejected`` is forced
+on), and ``build_results`` skips the slider filter entirely for a shortlisted
+query (decision 21) - a farm outside the radius or budget is still the
+reader's farm. The sliders still set the profile the cards are scored and
+labelled under. Archiving still hides a marked property, and still counts,
+exactly as on the radar. The saved *view* filters are deliberately not
+applied: a remembered search for one village must not empty a list of farms
+in another.
 """
 
 from __future__ import annotations

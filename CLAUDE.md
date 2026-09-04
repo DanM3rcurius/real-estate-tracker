@@ -142,7 +142,10 @@ the narrow, backed-up, cascade-checked exception. See decision 20.
 
 **The Merkliste and filter memory.** `USER_STATES` no longer has a `shortlist`
 entry; the reader's bookmarks live in `Property.shortlisted_at` (a timestamp or
-null), written only by `POST /property/{id}/merken`. Filter memory (all sliders
+null). `POST /property/{id}/merken` is the only route that writes it on a
+reader's action; it is also set by the legacy-triage branch (a pre-Merkliste
+form still posting `user_state=shortlist`) and by `dedupe.merge` (carrying the
+earlier mark across a merge). Filter memory (all sliders
 and search parameters) is the `hofradar_radar` cookie plus a `303` redirect from
 a bare `/` — no localStorage, no server table, no Javascript. A test must not
 assert defaults on `GET /` after it has requested `GET /?...` in the same

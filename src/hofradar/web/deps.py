@@ -282,8 +282,6 @@ class ResultFilters:
 
     def query_string(self, profile: SearchProfile, **overrides: Any) -> str:
         """Rebuild a canonical query string (used for export/permalinks)."""
-        from urllib.parse import urlencode
-
         values: dict[str, Any] = {
             "air_km_max": profile.radius.air_km_max,
             "total_budget_max": profile.budget.total_budget_max,

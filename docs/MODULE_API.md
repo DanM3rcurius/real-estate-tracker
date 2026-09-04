@@ -349,8 +349,9 @@ async def run_pipeline(profile: SearchProfile, *, trigger: str = "manual",
 ```python
 def matches_search(prop: Property, needle: str) -> bool
     # Casefolded substring match over town, postcode, district, canonical_title,
-    # using casefold() for complete Unicode normalization. Returns False if
-    # needle is empty or None. Applied in Python (not SQL LIKE) because SQLite's
+    # using casefold() for complete Unicode normalization. An empty needle
+    # matches everything; None is not accepted. Applied in Python (not SQL LIKE)
+    # because SQLite's
     # lower() is ASCII-only and would miss umlaut villages. Shared by
     # hofradar.scoring.engine._apply_filters (ranked path) and
     # hofradar.web.query.passes_filters (degraded path) so the two cannot drift.
@@ -376,18 +377,22 @@ def redirect_to_saved(request: Request) -> RedirectResponse | None
 
 # Routes
 GET /merkliste
-    # The Merkliste page. Applies only saved_profile_params() (the two sliders),
-    # never the view filters from the query string. Renders all shortlisted
-    # properties (Property.shortlisted_at is not None), including score-rejected
-    # ones but excluding archived ones. Counted in the status line.
+    # The Merkliste page. Uses saved_profile_params() (the two sliders) only to
+    # score and label the cards - never to filter them (decision 21): a mark
+    # outside the radius or budget still appears. Never applies the view
+    # filters from the query string either. Renders all shortlisted properties
+    # (Property.shortlisted_at is not None), including score-rejected ones but
+    # excluding archived ones. total_in_db and the archived count in the status
+    # line are scoped to the marked set, not the whole database.
 
 POST /property/{public_id}/merken
-    # Toggles Property.shortlisted_at: None ↔ now. The only writer of that
-    # column (see docs/DECISIONS.md entry 21). Renders
+    # Toggles Property.shortlisted_at: None ↔ now. The only route that writes
+    # that column on a reader's action; the legacy-triage branch and
+    # dedupe.merge also set it (see docs/DECISIONS.md entry 21). Renders
     # partials/merken_button.html for HTMX (hx-swap="outerHTML"), or redirects
     # with 303 for a plain form post.
 
 GET /?reset=1
-    # Deletes the filter cookie and renders defaults. No longer supported: the
-    # cookie is forgotten, the response is 200 not 303.
+    # Deletes the filter cookie and renders the default profile and filters
+    # directly, with a 200 - no redirect happens here.
 ```

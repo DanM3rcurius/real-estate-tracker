@@ -281,7 +281,13 @@ def build_results(
     degraded: list[lazy.Degraded] = []
     now = now or history.now_utc()
 
-    total_in_db = session.scalar(select(func.count(Property.id))) or 0
+    # The Merkliste's numbers are scoped to the marked set (decision 21): a
+    # bookmarked farm outside the sliders must still be counted, not folded
+    # into "how many properties exist in total".
+    total_in_db_stmt = select(func.count(Property.id))
+    if filters.shortlisted_only:
+        total_in_db_stmt = total_in_db_stmt.where(Property.shortlisted_at.is_not(None))
+    total_in_db = session.scalar(total_in_db_stmt) or 0
 
     rescored, rescore_degraded = _rescore(session, profile)
     if rescore_degraded is not None:
@@ -326,15 +332,13 @@ def build_results(
     # codebase keeps producing.
     hidden_archived = 0
     if not filters.include_hidden:
-        hidden_archived = (
-            session.scalar(
-                select(func.count(Property.id)).where(
-                    Property.merged_into_id.is_(None),
-                    Property.user_state.in_(HIDDEN_USER_STATES),
-                )
-            )
-            or 0
+        hidden_archived_stmt = select(func.count(Property.id)).where(
+            Property.merged_into_id.is_(None),
+            Property.user_state.in_(HIDDEN_USER_STATES),
         )
+        if filters.shortlisted_only:
+            hidden_archived_stmt = hidden_archived_stmt.where(Property.shortlisted_at.is_not(None))
+        hidden_archived = session.scalar(hidden_archived_stmt) or 0
 
     hidden_rejected = 0
     kept: list[tuple[Property, Score | None]] = []
@@ -342,7 +346,13 @@ def build_results(
         if prop.merged_into_id is not None:
             continue
         cost = prop.cost_estimate
-        if not passes_profile(prop, cost, profile) or not passes_filters(prop, filters):
+        # The Merkliste is the human's list, not the machine's: a mark is not
+        # subject to the profile's slider gate (decision 21), the same ruling
+        # that already forces include_rejected on for it. passes_filters -
+        # archiving, the search box, triage - still applies unconditionally.
+        if not filters.shortlisted_only and not passes_profile(prop, cost, profile):
+            continue
+        if not passes_filters(prop, filters):
             continue
         if score is not None and score.rejected and not filters.include_rejected:
             hidden_rejected += 1

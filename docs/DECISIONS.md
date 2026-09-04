@@ -581,9 +581,15 @@ must keep working when the scoring package cannot be imported (`web/lazy.py`).
 ## 21. The Merkliste is a flag, not a triage state; the radar remembers by redirecting
 
 **Decision.** The reader's bookmarked properties (the *Merkliste*) are stored in
-`Property.shortlisted_at: DateTime(timezone=True) | None`, written only by
-`POST /property/{public_id}/merken` (which toggles it null ↔ now) and read by
-`ResultFilters.shortlisted_only: bool` (query key `merkliste=1`). Filter memory —
+`Property.shortlisted_at: DateTime(timezone=True) | None`. `POST /property/
+{public_id}/merken` (which toggles it null ↔ now) is the only route that writes
+it on a reader's action; the legacy-triage branch and `dedupe.merge` also set it
+(see "Legacy silence" below). It is read by `ResultFilters.shortlisted_only: bool`
+(query key `merkliste=1`), which the radar and the Merkliste both honour, but the
+Merkliste never applies the profile's slider gate to a mark - the sliders only
+score and label it, they do not filter it - and its counts (`total_in_db`,
+`hidden_archived`) are taken over the marked set, not the whole database. Filter
+memory —
 every slider, search box term and sort preference — lives in a single cookie
 `hofradar_radar`, the canonical query string of `ResultFilters.query_string()`.
 A bare `GET /` (or `GET /map`) with no query parameters and a non-empty cookie
