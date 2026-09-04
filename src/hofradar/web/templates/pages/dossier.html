@@ -224,5 +224,25 @@
     {% include "partials/triage.html" %}
   </section>
 
+  <section class="dossier__section dossier__section--danger">
+    <h2>Endgültig löschen</h2>
+    <p>
+      Löscht dieses Objekt mit seiner gesamten Beobachtungshistorie – Preisverlauf,
+      Statusverlauf, Quellen, Bewertungen. Das lässt sich aus keiner Quelle
+      zurückholen. Wer es nur nicht mehr sehen will, wählt oben
+      <b>📦 Archiviert</b>: dann bleibt alles erhalten und der Radar zeigt es nicht mehr.
+    </p>
+    <form class="danger" method="post" action="/property/{{ prop.public_id }}/delete"
+          hx-post="/property/{{ prop.public_id }}/delete"
+          hx-confirm="{{ prop.public_id }} wird mit der gesamten Historie gelöscht. Wirklich?">
+      <label class="field">
+        <span>Zur Bestätigung die ID <b>{{ prop.public_id }}</b> eintippen</span>
+        <input type="text" name="confirm_public_id" autocomplete="off"
+               placeholder="{{ prop.public_id }}" required>
+      </label>
+      <button class="btn btn--danger" type="submit">Objekt löschen</button>
+    </form>
+  </section>
+
 </article>
 {% endblock %}

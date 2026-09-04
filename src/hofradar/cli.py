@@ -199,6 +199,49 @@ def cmd_repair(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_delete_property(args: argparse.Namespace) -> int:
+    """Delete one property and everything hanging off it. Dry run unless --apply.
+
+    Same shape as ``repair-removals``, and for a stronger reason: on the other
+    side of this command is append-only history no source can re-supply.
+    """
+    from sqlalchemy import select
+
+    from hofradar.db.backup import BackupUnavailable
+    from hofradar.db.models import Property
+    from hofradar.lifecycle import (
+        DeletionReport,
+        ResurrectsMergedDuplicates,
+        delete_property,
+        dependent_rows,
+    )
+
+    ensure_schema()
+    with session_scope() as session:
+        prop = session.scalar(select(Property).where(Property.public_id == args.public_id))
+        if prop is None:
+            print(f"no property with public_id {args.public_id}", file=sys.stderr)
+            return 1
+        if not args.apply:
+            report = DeletionReport(
+                public_id=prop.public_id,
+                title=prop.canonical_title,
+                children=dependent_rows(session, prop),
+                backup_path=None,
+                dry_run=True,
+            )
+            print(report.summary())
+            print("\nnothing was written. re-run with --apply to delete it.")
+            return 0
+        try:
+            report = delete_property(session, prop, backup=not args.no_backup)
+        except (ResurrectsMergedDuplicates, BackupUnavailable) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(report.summary())
+    return 0
+
+
 def cmd_hash_password(args: argparse.Namespace) -> int:
     """Print a PBKDF2 hash to put in HOFRADAR_PASSWORD_HASH.
 
@@ -297,6 +340,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="actually write; default is a dry run"
     )
     p_repair.set_defaults(func=cmd_repair)
+
+    p_delete = sub.add_parser(
+        "delete-property",
+        help="delete one property and everything hanging off it (GitHub issue #9)",
+    )
+    p_delete.add_argument("public_id", help="the public_id shown on the dossier")
+    p_delete.add_argument(
+        "--apply", action="store_true", help="actually delete; default is a dry run"
+    )
+    p_delete.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="skip the snapshot (for a Postgres deployment, where the dump is your job)",
+    )
+    p_delete.set_defaults(func=cmd_delete_property)
 
     p_hash = sub.add_parser(
         "hash-password", help="print a PBKDF2 hash for HOFRADAR_PASSWORD_HASH"
