@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -30,6 +30,9 @@ from hofradar.config import KeywordConfig, SearchProfile, load_config
 from hofradar.db.enums import RunStage, SourceRole
 from hofradar.db.models import Property, PropertySource, SearchRun, Source
 from hofradar.db.session import session_scope
+
+if TYPE_CHECKING:
+    from hofradar.sources.base import SourceAdapter
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +65,7 @@ async def run_pipeline(
     from hofradar.costmodel import estimate_costs  # noqa: F401  (used via scoring)
     from hofradar.dedupe import find_duplicate  # noqa: F401  (used via lifecycle)
     from hofradar.geo import locate, within_air_radius
-    from hofradar.lifecycle import apply_stale_rules, ingest, mark_missing
+    from hofradar.lifecycle import ImplausibleAbsence, apply_stale_rules, ingest, mark_missing
     from hofradar.normalize import normalize_listing
     from hofradar.report import build_report, render_html, render_markdown
     from hofradar.scoring import rescore_all
@@ -139,6 +142,15 @@ async def run_pipeline(
                             updated_count += 1
                         if change.kind == "price_change":
                             price_changes += 1
+                    # A pre-filter that skips a detail fetch (see e.g.
+                    # DenkmalboerseAdapter's Bezirk/radius gates) never yields
+                    # a RawListing for the URL it skipped, so the "record
+                    # seen before any filter" step above never runs for it
+                    # either. That is not the source withdrawing the listing
+                    # - the row was still examined this run - so any such URL
+                    # a property is already on record under also counts as
+                    # seen, exactly like a yielded one does.
+                    _mark_enumerated_as_seen(session, source, adapter, seen_by_source[source.id])
                     source.last_run_at = datetime.now(UTC)
                     source.consecutive_failures = 0
                     source.last_error = None
@@ -175,13 +187,34 @@ async def run_pipeline(
                 for source in sources:
                     if source.role in NON_VERIFYING_ROLES:
                         continue  # a discovery source's silence is not evidence
-                    changes = mark_missing(
-                        session,
-                        seen_by_source.get(source.id, set()),
-                        source=source,
-                        run_id=run_id,
-                        enumeration_complete=enumeration_complete.get(source.id, False),
-                    )
+                    try:
+                        changes = mark_missing(
+                            session,
+                            seen_by_source.get(source.id, set()),
+                            source=source,
+                            run_id=run_id,
+                            enumeration_complete=enumeration_complete.get(source.id, False),
+                        )
+                    except ImplausibleAbsence as exc:
+                        # One source's absences are not believed - recorded as
+                        # a source failure, same posture as a crawl exception
+                        # above, so the run continues for every other source.
+                        # consecutive_failures escalates it: a source stuck in
+                        # permanent refusal must not stay invisible just
+                        # because the run itself still finishes "ok". Note it
+                        # gets pinned at 1, not accumulated - the crawl above
+                        # already reset it to 0 on its own success, since a
+                        # phantom-parser run is by definition a *successful*
+                        # crawl. Nothing reads this counter today; if that
+                        # changes, this reset is the thing to revisit.
+                        log.error("absence detection refused for %s: %s", source.key, exc)
+                        source.consecutive_failures += 1
+                        source.last_error = str(exc)
+                        _log_stage(
+                            session, run, RunStage.CHANGE_DETECTION,
+                            source=source.key, error=str(exc),
+                        )
+                        continue
                     removed += sum(1 for c in changes if c.kind == "removed")
                 # Sources that will never mention a listing again must not put
                 # their properties on the "we stopped hearing" clock - nobody
@@ -245,6 +278,26 @@ def _known_property_id(session: Session, source_id: int, url: str) -> int | None
             PropertySource.source_id == source_id, PropertySource.url == url
         )
     )
+
+
+def _mark_enumerated_as_seen(
+    session: Session, source: Source, adapter: SourceAdapter, seen: set[int]
+) -> None:
+    """Credit a pre-filtered-but-examined row the same as a yielded one.
+
+    ``adapter.enumerated_urls`` holds every URL discover() looked at this run,
+    including ones a pre-filter chose not to (re-)fetch - see
+    :attr:`hofradar.sources.base.SourceAdapter.enumerated_urls`. Without this,
+    a property whose listing a pre-filter skipped this run - still live, just
+    not re-checked - is indistinguishable from one the source actually
+    stopped carrying, and :func:`hofradar.lifecycle.mark_missing` would write
+    a false REMOVED into append-only history the next time absence detection
+    runs for this source.
+    """
+    for url in adapter.enumerated_urls:
+        known_id = _known_property_id(session, source.id, url)
+        if known_id is not None:
+            seen.add(known_id)
 
 
 async def _llm_review(session: Session, profile: SearchProfile, *, run_id: int | None) -> int:

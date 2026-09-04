@@ -29,8 +29,9 @@ can never make something look current.
 | `manual` | Paste a URL or a whole exposé into the web UI. Never blocked. The fastest path to value on day one. |
 | `csv_import` | Bulk-load anything you already have in a spreadsheet. |
 | `zvg_bayern` | The official public foreclosure register. High signal, public by design, and exactly the kind of listing a normal search misses. |
-| `generic_rss` | Regional brokers who publish a feed. Add their URLs to `options.feeds`. |
+| `generic_rss` | Regional brokers who publish a feed. `options.feeds` ships pre-populated with ovbimmo.de's four per-Landkreis Atom feeds - see below. Add individual broker URLs the same way. |
 | `generic_sitemap` | Small broker sites with a `sitemap.xml`. Polite, capped, robots-respecting. |
+| `ovbimmo` | Regional newspaper portal for Lkr. Rosenheim/Mühldorf/West-Traunstein — brokers plus the papers' own classified ads, including private Chiffre sellers. See below. |
 
 `gemeindeblatt_pdf` ships enabled-capable but empty: it needs a list of your
 municipalities' bulletin index pages in `options.bulletins`. This is where
@@ -60,6 +61,419 @@ The better long-term answer for portal coverage is their official partner/API
 access, or simply pasting the handful of listings you actually care about into
 the paste box — which is one click and produces a fully-tracked property with
 full history.
+
+## Denkmalbörse (BLfD): terms check complete, source enabled
+
+`hofradar.sources.adapters.denkmalboerse.DenkmalboerseAdapter` is written and
+tested against a fixture (see the note on that fixture below). `denkmalboerse`
+is enabled in `config/sources.yaml` (`enabled: true`, `terms_checked_at:
+2026-09-03`) - the registry entry's `terms_excerpt` carries the same finding
+recorded here.
+
+Terms check status: **DONE (2026-09-03)**. A human on a networked machine ran:
+
+```bash
+curl -s https://www.blfd.bayern.de/robots.txt
+curl -s https://www.blfd.bayern.de/blfd/impressum/index.html
+```
+
+The first got back **`HTTP/1.1 404 Not Found` (Server: CERN httpd)** - no
+`robots.txt` exists on the host, so there are no crawl directives to honour or
+violate. The second returned the Impressum, which carries a
+"Nutzungsbedingungen" section. Its operative sentence:
+
+> "Als Privatperson dürfen Sie urheberrechtlich geschütztes Material zum
+> privaten und sonstigen eigenen Gebrauch im Rahmen des § 53
+> Urheberrechtsgesetz (UrhG) verwenden. Eine Vervielfältigung oder Verwendung
+> dieser Seiten oder Teilen davon in anderen elektronischen oder gedruckten
+> Publikationen und deren Veröffentlichung ist nur mit unserer Einwilligung
+> gestattet."
+
+Private and own use is explicitly permitted under § 53 UrhG. Republication -
+reproducing these pages or parts of them in other electronic or printed
+publications - requires BLfD's consent. **Neither the robots.txt (which does
+not exist) nor the Impressum's Nutzungsbedingungen restricts automated
+retrieval, crawling or machine access** - that is a claim about the two pages
+actually read, not about the whole site; a separate Datenschutz or
+Nutzungsordnung page was not fetched and could carry something different. A
+separate "Haftungsausschluss" section disclaims any warranty of the accuracy,
+completeness or currency of the published information.
+
+This private-use reading holds **only while the web UI's password gate is
+configured** (`HOFRADAR_PASSWORD` / `HOFRADAR_PASSWORD_HASH` - see
+`src/hofradar/web/app.py`, invariant 8). The gate is opt-in: with no password
+set, the auth middleware is not installed at all and the UI is open to
+anyone who can reach it. Running it that way, while Denkmalbörse listings
+flow through it, serves BLfD material to the public with no household
+boundary left standing - which is republication in substance, breaching the
+very clause this reading depends on. Deploying without the password gate
+configured is outside the permitted use BLfD grants; it is not this
+document's or the registry's call to make on an operator's behalf, so it is
+stated here as a hard condition, not a default assumption. That boundary
+(permitted: private use behind the password gate; not permitted:
+republication, or an unauthenticated deployment that amounts to the same
+thing) is recorded in the registry entry's `notes:` as well, so it stays
+visible next to the config that could violate it.
+
+Evidence gathered from a networked machine on 2026-09-03, which does **not**
+by itself close the terms check above:
+
+- `https://www.blfd.bayern.de/information-service/denkmalboerse/objekte/005816/index.html`
+  returns HTTP 200, served by a `CERN httpd` static server.
+- The real page carries `<div class="immo-inhalt">` and an "Eigentümer des
+  Anwesens" block with a direct `mailto:` link - confirming
+  `contact_kind="private"` is the right reading for this source.
+- An Exposé PDF is published under
+  `/mam/information_und_service/denkmal_boerse/oberbayern/`.
+
+`tests/fixtures/html/denkmalboerse_object_005816.html` is now a real page
+captured from `www.blfd.bayern.de` on 2026-09-03 (see the provenance comment
+at the top of the fixture and `tests/sources/adapters/test_denkmalboerse.py`).
+
+**The search CGI's response shape is now verified.** A real capture of
+`/cgi-bin/fts_search_verkauf.pl` on 2026-09-03
+(`tests/fixtures/html/denkmalboerse_search_cgi.html`, 300 KB, HTTP 200) shows
+one response holds the entire catalogue: **237 rows, 237 unique object ids,
+no pagination** ("Weiter" appears once on the page, in unrelated site
+navigation, never as a paginator). Each row is a `<tr>` with the object's
+title/link, its `PLZ Ort` address, and a final `<td>` naming its
+Regierungsbezirk. Distribution across the seven: Oberbayern 43, Unterfranken
+45, Mittelfranken 38, Oberfranken 34, Schwaben 28, Niederbayern 27, Oberpfalz
+22.
+
+Because the shape is now known, `discover()` row-scans this table (rather than
+scanning every anchor on the page) and, per invariant 4b, leaves
+`enumeration_complete` true only when the walk actually succeeded: a non-200
+response, a parse that yields zero object rows (indistinguishable from a
+template change), or any detail fetch that failed all call
+`mark_enumeration_incomplete` with a specific reason instead of the old
+unconditional call. A healthy walk over the real fixture now genuinely leaves
+`can_prove_absence` true.
+
+**Regierungsbezirk is now the primary pre-filter, checked before the
+gazetteer.** `discover()` reads the row's last `<td>` and skips the detail
+fetch for any row whose Bezirk is recognised as one of Bavaria's seven and is
+not in the configured in-scope set (`options.regierungsbezirke`) - an empty,
+missing, or unrecognised Bezirk value still falls through and fetches, the
+same rule the gazetteer pre-filter already follows for an unknown town.
+Matching is case-insensitive (an operator typo like `"oberbayern"` must still
+line up with the row value `"Oberbayern"`), and a configured value that
+matches none of the seven at all - not a case variant, just wrong - falls
+back to the default with a logged warning rather than silently fetching
+nothing. An explicit empty list (`regierungsbezirke: []`) *is* honoured as
+"nothing in scope"; only the key being absent entirely means "use the
+default". The gazetteer stays in place as a second, narrower gate for the
+in-Bezirk towns it does recognise.
+
+The default in-scope set is **`Oberbayern`, `Niederbayern`, `Schwaben`** -
+not Oberbayern alone. It is tied to the default profile's `air_km_max`
+(80 km), not to "near the origin": by this project's own `haversine_km`,
+Landshut (Niederbayern) is 73.8 km from the profile origin and Landsberg am
+Lech (Schwaben) is 73.1 km, both inside that radius. An operator who raises
+`air_km_max` well past 80 km should widen `options.regierungsbezirke` to
+match - the constant does not derive itself from the profile at runtime. On
+the real 2026-09-03 capture that default set covers 98 of the 237 rows
+(Oberbayern 43, Niederbayern 27, Schwaben 28); the Bezirk column skips the
+other **139** with certainty, before any gazetteer lookup runs. The gazetteer
+pre-filter alone would have skipped zero of those 98 - of the towns it
+recognises inside the default set, none are known-and-outside the radius.
+
+**Decision 14's yield gate is met, on a real snapshot, with margin - and this
+figure was re-derived after `hofradar.geo.gazetteer.lookup()` was fixed to
+anchor matches on token boundaries instead of matching substrings.** That fix
+changed the number below; see the Fürstenfeldbruck note further down for why.
+Decision 14 requires 5 in-radius objects across the Denkmalbörse's first four
+runs. Scoring the 43 Oberbayern rows from the 2026-09-03 capture through this
+project's own gazetteer and `haversine_km`, against the real search profile
+(origin 47.907, 11.84; `air_km_max` 80.0 km), yields **10 gazetteer-confirmed
+in-radius objects**: Kirchseeon (20.6 km), Rosenheim (22.3 km), Vaterstetten
+(23.1 km), Rohrdorf (27.8 km), Prien am Chiemsee (38.1 km, via its postcode
+83209), Kiefersfelden (42.2 km), Reit im Winkl (53.2 km), Mühldorf am Inn
+(63.4 km, two distinct objects - 008637 and 007505, both via postcode 84453),
+and Niedertaufkirchen - Arbing (71.3 km, via its postcode 84494 resolving to
+the gazetteer's Neumarkt-Sankt Veit entry - a real PLZ match). That clears
+the gate twice over.
+
+This is a **gazetteer-confirmed count, and it is a lower bound on the true
+in-radius yield, not the true figure itself**: **33 of the 43** Oberbayern
+towns in this capture are unknown to the bundled offline gazetteer (it only
+covers the Landkreise immediately around the search origin), so those rows
+fall through `town_in_radius` as `None` - correctly, since a hamlet the
+gazetteer has never heard of is exactly where a farmstead lives - and are
+never scored either way. A real geocoder would very likely place more of
+them inside the radius; today the code simply cannot say which. Method:
+Regierungsbezirk = Oberbayern subset of the real capture, town read via the
+adapter's own `_town_from_row` (each row's `PLZ Ort` address paragraph,
+falling back to the title heuristic only for rows with no address paragraph
+at all - this is the extraction the shipped adapter performs, not a
+title/address union), looked up in `hofradar.geo.gazetteer.lookup()`,
+distance via `hofradar.geo.distance.haversine_km` against the profile
+center - the same offline path `town_in_radius` uses, not a live Nominatim
+run.
+
+**Fürstenfeldbruck is why the confirmed count moved from 11 to 10, and it
+illustrates exactly why the count is a floor.** Before the anchoring fix,
+`gazetteer.lookup("82256 Fürstenfeldbruck")` substring-matched the unrelated
+entry "Bruck" (Landkreis Ebersberg) and returned a fabricated 18.3 km,
+which the previous version of this document manually corrected to
+Fürstenfeldbruck's real ~52.9 km (real coordinates 48.1772, 11.2547;
+`haversine_km` from the profile origin) rather than removing the object.
+That correction is no longer needed, because the entry is no longer there
+to correct: with the fix merged, `lookup("82256 Fürstenfeldbruck")` and
+`lookup("Fürstenfeldbruck")` both return `None` - "Bruck" no longer matches
+inside the longer word, and there is no separate gazetteer entry for
+Fürstenfeldbruck itself - so the object now falls into the gazetteer-unknown
+33, not the confirmed 10. Fürstenfeldbruck is **genuinely** inside the 80 km
+radius (~52.9 km, real coordinates above); it just cannot be confirmed by
+this offline path any more, because the path that used to place it there
+was wrong. Nothing about the object changed - only the matcher's honesty
+about what it actually knows.
+
+The gazetteer-confirmed count went *down* by exactly one object between the
+substring-matching code and the fixed code (11 -> 10), and the
+gazetteer-unknown count went *up* by exactly the same one (32 -> 33) -
+Fürstenfeldbruck is the only row either fixed value moved. Every other row
+in the confirmed list resolves identically before and after the fix, since
+none of the other nine matches ever depended on substring behaviour: six
+are exact or word-boundary town-name matches, and three (Prien am Chiemsee,
+one of the two Mühldorf objects, and Niedertaufkirchen - Arbing) resolve
+through `lookup()`'s postcode fallback, which the boundary-anchoring fix
+does not touch.
+
+## OVBimmo (OVB Heimatzeitungen): terms check complete, source enabled
+
+`hofradar.sources.adapters.ovbimmo.OvbimmoAdapter` is written and tested
+against a real search-results capture. `ovbimmo` is enabled in
+`config/sources.yaml` (`enabled: true`, `role: local`, `terms_checked_at:
+2026-09-03`) - the registry entry's `terms_excerpt` carries the same finding
+recorded here.
+
+Terms check status: **DONE (2026-09-03)**, by a human on a networked
+machine, per Ruling 1 in the plan's shared context (the container's own
+egress to `ovbimmo.de` was blocked when the terms were checked; it was
+opened later in the same session to capture the detail page below). Two
+pages were read for the terms check:
+
+- `https://ovbimmo.de/robots.txt`: `User-agent: *` carries **no blanket
+  `Disallow`**. Only `*/2823228/`, `/_widget/*` and `/search-widget/*` are
+  excluded - none of which this adapter touches. `/immobilien/*` is
+  explicitly `Allow`ed, and a sitemap is advertised. `/kaufen/...` (the
+  faceted search this adapter uses) is not disallowed.
+- `https://www.rosenheim24.de/ueber-uns/agb/` (linked by ovbimmo's own footer
+  as its AGB; publisher OVB24 GmbH, Stand April 2024) has three parts: (I)
+  AGB für Online-Werbung, which defers to `ovb24.de/agb/`; (II) AGB für
+  Shop-Produkte, covering purchase, delivery, payment and Widerruf for
+  **purchased** products (E-Books, paid article access) - its §6
+  "Nutzungsrecht bei digitalen Produkten" governs those purchased products,
+  not the public listing pages this adapter reads; (III)
+  Teilnahmebedingungen für Gewinnspiele. **No clause anywhere in it restricts
+  automated retrieval, crawling or scraping.**
+
+Both findings are scoped to the two pages actually read; neither is a claim
+about the whole site. Search-result rendering was also confirmed
+server-side: the real capture at
+`tests/fixtures/html/ovbimmo_search_rosenheim.html` has the result cards in
+the HTML, not injected by JavaScript.
+
+**Pagination.** A single search page carries a small fraction of the total
+result count - the real capture shows 20 of 186 results for one facet, with
+`<link rel="next" href="...?page=2" />` in `<head>`. `discover()` follows
+that trail per municipality/property-type facet, capped at
+`options.max_pages_per_search` (module default
+`ovbimmo.DEFAULT_MAX_PAGES_PER_SEARCH = 5`). Per invariant 4b, any run that
+stops before the trail runs out - the cap, a bad page, a failed fetch, or no
+municipalities configured at all, or a listed id's own detail fetch fails
+(a 4xx/5xx or transport error) - calls `mark_enumeration_incomplete` with
+the reason, so this source's silence is never misread as "removed" for a
+run that saw only page one of ten, nor for a single listing whose detail
+page 500'd once inside its 14-day `listing_ttl_days` window.
+
+**The detail page, against a real capture.**
+`tests/fixtures/html/ovbimmo_detail.html` is a real page captured from
+`ovbimmo.de` on 2026-09-03 (see the provenance comment at the top of the
+fixture and `tests/sources/adapters/test_ovbimmo.py`). It confirms the
+structure expected going in: a `dataLayer` JSON blob carrying `listing_id`
+(the same 6-char code as the URL), `property_price` **in cents**, `rooms`,
+`area`, `postal_code`, `locality`, `geo_hierarchy_*`; and the headline price/
+rooms/area figures rendered as three `eps-item` blocks, e.g. `<div
+class="eps-item eps-item-price col-4">690.000,00 €<br> <span
+class="eps-item-unit">Kaufpreis</span></div>` (value first, label in a
+nested span). The page also carries `col-label`/`col-value` divs, but those
+are unrelated sidebar widgets (Umzugsrechner, Immobilienwert, Kredit) - not
+where the Objektdaten figures live.
+
+Exactly two of those structured fields are parsed by this adapter, and only
+because nothing else on the page carries them: `postal_code` and `locality`,
+lifted verbatim (as strings, unconverted) into `RawListing.postcode` and
+`RawListing.town` by `_datalayer_location`. Without them an OVB listing has
+no location at all — `hofradar.geo.locate._build_geocode_queries` returns
+`[]`, nothing is geocoded, `distance_air_km` stays NULL, and the whole OVB
+inventory is invisible to both the report's in-radius yield column and its
+per-Gemeinde coverage map. Reading a site-specific structured field is what a
+*dedicated* adapter is for; the generic adapters stay generic (see the
+`generic_rss` note below, which solves the same problem through
+configuration).
+
+Everything else in the blob stays unread — the rest of it is numbers, and
+`property_price` is in **cents**, so converting any of them here would be
+`hofradar.normalize`'s job done in the wrong place. For those, `fetch_detail`
+uses only `_htmlutil`'s generic, markup-agnostic HTML fallback - and against
+the real page, that gets:
+
+- **title** and **image_urls** cleanly, via `og:title` / `og:image`;
+- **description**, the full visible body text - which means the price,
+  room count and phrases like "Provision für Käufer" all reach it as plain
+  text, so the `hidden_score` keyword vocabulary still fires on them;
+- **nothing** for `price_raw`/`rooms_raw`/`living_raw`/`land_raw`/etc.
+  `extract_labeled_fields` wants a single "Label: value" line, and this
+  page's `eps-item` blocks render the value *before* its label, each on its
+  own line after the body text is flattened ("690.000,00 €" then
+  "Kaufpreis", never "Kaufpreis: 690.000,00 €") - so it genuinely extracts
+  nothing here. This is a real limitation: reading the `eps-item` blocks (or
+  the dataLayer's cent-denominated `property_price`) into typed raw fields
+  would need a purpose-built extension to this adapter — or to `_htmlutil` —
+  that does not exist yet.
+- `external_id` always comes from the **URL**, never the page - the same
+  6-char code the dataLayer also carries, but reading it from the URL needs
+  no parser at all and survives a broker rewriting the title.
+
+`contact_kind` is deliberately left `None` rather than hardcoded. The one
+real detail page captured so far is a **broker** listing ("Provision für
+Käufer", Robert Schlamp Immobilien e. K.) - not representative of the
+private/Chiffre inventory this source exists to reach. One capture is one
+page; guessing either way would corrupt the `hidden_score` signal.
+
+**Coverage.** `ovbimmo` covers Lkr. Rosenheim, Mühldorf and western
+Traunstein. It does **not** cover Lkr. Miesbach or Ebersberg — those are
+Ippen/Münchner Merkur titles with a different portal. Until an Ippen source
+exists, those municipalities are served only by `gemeindeblatt_pdf`. See
+`docs/coverage.md`.
+
+**URL slug vs. town name - a deliberate asymmetry.** `options.municipalities`
+in the registry uses OVB's own URL slugs (`feldkirchen-westerham`,
+`bad-aibling`, `wasserburg-a-inn`, ...), verified live against all 12
+configured facets (6 municipalities × 2 property types): 10 return 200 with
+real result cards, and the other two (`wasserburg-am-inn`, the gazetteer's
+own spelling) 301-redirect to `wasserburg-a-inn`. `docs/coverage.md` and
+`config/search.yaml`'s `coverage.municipalities` instead use **"Wasserburg
+am Inn"**, because that is the name the gazetteer and the normalizer
+produce. These are two different namespaces, each correct in its own place -
+do not "fix" one to match the other.
+
+## generic_rss: ovbimmo.de's per-Landkreis Atom feeds
+
+`options.feeds` on `generic_rss` ships pre-populated with four of ovbimmo.de's
+own `suchergebnisse.atom` search-result feeds - `de.rosenheim-kreis`,
+`de.traunstein`, `de.miesbach`, `de.ebersberg` - a URL shape taken from a real
+`<link rel="alternate" type="application/atom+xml">` on a captured ovbimmo
+search page. This is the "convert OVB's aggregation into config for adapters
+that already exist" idea, done with no new code: `GenericRssAdapter` already
+handled Atom via `feedparser` before this task.
+
+Verified live 2026-09-03, entries per request: Rosenheim 100, Traunstein 75,
+Miesbach 14, Ebersberg 14. A fifth candidate, `de.muehldorf-am-inn`, rendered
+an empty feed title and zero entries - the wrong area id for Lkr. Mühldorf -
+and was deliberately left out rather than shipped with a silently-broken URL.
+
+**This does not contradict `ovbimmo`'s own "does not cover Lkr. Miesbach or
+Ebersberg" note above.** That claim is about the *newspaper* (OVB
+Heimatzeitungen and its Amtsblatt arrangement); `de.miesbach`/`de.ebersberg`
+returning entries is the *portal* aggregating brokers who list there
+independent of which paper covers the area. See `docs/coverage.md` for the
+full breakdown, including the caveat that 14 entries is thin, Landkreis-wide
+rather than Gemeinde-attributed, and unverified as containing any farmstead.
+
+**Confirmed against a real capture, not just a live check.**
+`tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom` (100 entries,
+provenance comment at the top) is parsed correctly end-to-end by
+`GenericRssAdapter.discover()` in
+`tests/sources/test_generic_rss_ovbimmo_feeds.py`: `feedparser` handles the
+`classmarkets` `cm:`/`cms:` namespaces alongside the plain Atom elements the
+adapter actually reads (`<title>`, `<id>`, `<link>`, `<updated>`,
+`<summary>`) without choking on the two `<link>` elements per entry (one bare,
+one explicit `rel="alternate"`), and 100/100 entries come through as
+`RawListing`s. `_entry_image_urls` also reads `media:thumbnail`
+(`http://search.yahoo.com/mrss/`, a standard Media RSS element this feed
+happens to carry, not a classmarkets vendor extension) alongside the
+`enclosure`/`media:content` shapes it already read, so every entry's image
+survives too - pinned in the same test by asserting the real thumbnail URL
+from entry one.
+
+**`role`, `rate_limit_seconds` and `listing_ttl_days` are set to match
+`ovbimmo`, not this adapter's previous per-source defaults**, because every
+feed configured here today is that same host reached a second way: `role:
+local` (not `primary`) so a listing seen by both routes doesn't let the
+generic, less-structured route outrank the dedicated `ovbimmo` adapter as
+the property's primary source in `dedupe._primary_sort_key`;
+`rate_limit_seconds: 5.0` (not `2.0`) so the generic route doesn't poll
+ovbimmo.de faster than the entry that deliberately chose to go slow;
+`listing_ttl_days: 14` (not unset) so the same paid-advert-window inventory
+reads as EXPIRED rather than REMOVED regardless of which route saw it
+(`docs/DECISIONS.md` entry 15). See the reasoning recorded in `generic_rss`'s
+own `notes:` in `config/sources.yaml`, including what to do if a genuine
+broker-own-site feed (not an ovbimmo re-aggregation) is ever added alongside
+these four.
+
+**What the `cm:`/`cms:` classmarkets namespace does and does not give up to
+`feedparser`.** Reading a feed's own vendor namespace still does not belong
+in this adapter's *code* — it is the adapter meant to work for any broker's
+feed. The element names come from **configuration** instead:
+`options.entry_field_map` maps a feedparser entry key to one of
+`generic_rss.MAPPABLE_ENTRY_FIELDS` (raw string fields only — identity and
+authority fields are not mappable, and a non-string value is refused). The
+shipped registry entry maps `cm_postalcode -> postcode` and
+`cm_locality -> town`, which is what gives this route a location at all; the
+adapter itself still knows nothing about classmarkets. Checked directly
+against `tests/fixtures/html/ovbimmo_suchergebnisse_rosenheim.atom`:
+
+| Field | feedparser key | What comes through |
+|---|---|---|
+| `cm:locality` | `entry.cm_locality` | plain text, e.g. `"Stephanskirchen"` - reachable as-is |
+| `cm:postalCode` | `entry.cm_postalcode` | plain text, e.g. `"83071"` - reachable as-is |
+| `cm:rooms` | `entry.cm_rooms` | plain text, e.g. `"5"` - reachable as-is |
+| `cm:marketingType` | `entry.cm_marketingtype` | plain text, e.g. `"sale"` - reachable as-is |
+| `cm:price` | `entry.cm_price` | **element text lost.** `<cm:price cm:currency="EUR">659000</cm:price>` carries an attribute, so feedparser's generic unknown-namespace handling keeps only the attribute dict (`{"currency": "EUR"}`) and drops `"659000"` entirely - needs real work |
+| `cm:area` | `entry.cm_area` | **element text lost**, same cause: `<cm:area cm:unit="m²">131</cm:area>` yields `{"unit": "m²"}`, the `"131"` is gone - needs real work |
+
+The two broken fields share one cause: `feedparser` only special-cases
+namespaces it recognises (Dublin Core, Media RSS, etc.); for an unrecognised
+namespaced element that also carries attributes, it keeps the attributes and
+discards the text. Getting `cm:price`/`cm:area` would mean bypassing that -
+reading the raw entry XML directly (e.g. with `lxml`/`ElementTree` against
+the `classmarkets` namespace) instead of trusting `feedparser`'s generic
+path - real, scoped work for whoever picks this up, not a config change.
+
+**Net effect today: ovbimmo.de arrives through two routes -
+`generic_rss`'s Atom feeds and the dedicated `ovbimmo` adapter's own search
+crawl - and *both* now yield a postcode and a town, while *neither* yields a
+typed price or room count.** The feed route gets its location from
+`options.entry_field_map`; the dedicated adapter gets it from the detail
+page's `dataLayer`. That is what `locate()` needs: `"83109
+Großkarolinenfeld"` is a geocodable query, and the title/description prose
+these listings used to be geocoded from was not. The figures are the part
+still missing, for the two separate reasons above (feedparser drops the text
+of an attribute-carrying namespaced element; `extract_labeled_fields` cannot
+read a value-then-label block).
+
+Because both routes reach the *same* canonical listing URLs — verified: the
+Atom `<link>` and the search page's `href` for
+`.../zweifamilienhaus-grosskarolinenfeld-...-H3N33B` are byte-identical —
+they would otherwise ingest as two properties. `hofradar.dedupe.compare`
+treats an identical canonical URL as proof of identity across sources for
+exactly this reason; see `docs/MODULE_API.md` under `hofradar.dedupe`.
+
+`generic_sitemap`'s `options.sites` was deliberately left empty rather than
+also pointing at ovbimmo.de's advertised sitemap - see that source's `notes:`
+in `config/sources.yaml` for the reasoning (three independently-rate-limited
+sources hitting one host for URLs two of them already cover is not obviously
+an improvement).
+
+`gemeindeblatt_pdf`'s `options.bulletins` stays empty and the source stays
+`enabled: false`: this container's egress proxy still 403s every Bavarian
+municipality domain tested (`feldkirchen-westerham.de`, `bruckmuehl.de`,
+`weyarn.de`, `holzkirchen.de`, 2026-09-03), even though `ovbimmo.de` and
+`www.blfd.bayern.de` were opened. See that source's `notes:` for the
+per-Gemeinde checklist left for whoever next has network access.
 
 ## Adding a regional source
 

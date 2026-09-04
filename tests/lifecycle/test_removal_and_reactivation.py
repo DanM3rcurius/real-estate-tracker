@@ -20,6 +20,35 @@ def _facts(source, url="https://bauernhoefe.example/objekt/4711"):
     )
 
 
+def _anchor(db_session, make_listing, source, *, suffix="anchor",
+            town="Bad Aibling", postcode="83043", land_sqm=1200.0):
+    """A second, always-seen property on ``source``.
+
+    Exists only so a call site can hand ``mark_missing`` an honestly non-empty
+    seen-set: the empty-seen-set guard it now enforces is unconditional (Task
+    3, review round 1, Important 1) - a run that saw *nothing at all* is
+    always refused, even from a source with only one or two listings. "This
+    one listing disappeared, everything else this source carries is still
+    there" therefore needs a second, genuinely-still-visible listing to say
+    so; ``set()`` can no longer represent it.
+    """
+    prop, _ = ingest(
+        db_session,
+        make_listing(
+            source_key=source.key,
+            url=f"https://bauernhoefe.example/{suffix}",
+            town=town,
+            postcode=postcode,
+            land_sqm=land_sqm,
+            living_sqm=90.0,
+            price=250_000,
+            year_built=1950,
+        ),
+        source=source,
+    )
+    return prop
+
+
 def test_a_listing_that_disappears_is_removed_then_reactivated(
     db_session, make_source, make_listing
 ):
@@ -30,8 +59,14 @@ def test_a_listing_that_disappears_is_removed_then_reactivated(
     assert first.kind == ChangeKind.FIRST_SEEN
     assert prop.listing_status == ListingStatus.ACTIVE
 
-    # run 2: the source no longer returns it at all.
-    removals = mark_missing(db_session, set(), source=source, run_id=2, enumeration_complete=True)
+    # A second listing the source still carries, so run 2's seen-set is
+    # honestly non-empty - see _anchor's docstring.
+    anchor = _anchor(db_session, make_listing, source)
+
+    # run 2: the source no longer returns `prop` - only the anchor.
+    removals = mark_missing(
+        db_session, {anchor.id}, source=source, run_id=2, enumeration_complete=True
+    )
     assert [c.kind for c in removals] == [ChangeKind.REMOVED]
     assert prop.listing_status == ListingStatus.REMOVED
     assert prop.removed_at is not None
@@ -45,7 +80,9 @@ def test_a_listing_that_disappears_is_removed_then_reactivated(
     assert change.old_status == ListingStatus.REMOVED
     assert same.listing_status == ListingStatus.ACTIVE
     assert same.removed_at is None
-    assert db_session.query(Property).count() == 1
+    # prop (reactivated in place, not recreated) plus the anchor seeded above
+    # to give mark_missing a non-empty seen-set - still exactly two, not three.
+    assert db_session.query(Property).count() == 2
 
 
 def test_reactivation_with_a_price_cut_reports_price_change_and_journals_both(
@@ -56,7 +93,8 @@ def test_reactivation_with_a_price_cut_reports_price_change_and_journals_both(
     prop, _ = ingest(
         db_session, make_listing(price=790_000, **_facts(source)), source=source, run_id=1
     )
-    mark_missing(db_session, set(), source=source, run_id=2, enumeration_complete=True)
+    anchor = _anchor(db_session, make_listing, source)
+    mark_missing(db_session, {anchor.id}, source=source, run_id=2, enumeration_complete=True)
     assert prop.listing_status == ListingStatus.REMOVED
 
     same, change = ingest(
@@ -122,12 +160,24 @@ def test_one_source_dropping_it_is_not_a_removal(db_session, make_source, make_l
         source=b,
     )
 
-    changes = mark_missing(db_session, set(), source=a, run_id=2, enumeration_complete=True)
+    anchor_a = _anchor(
+        db_session, make_listing, a, suffix="anchor-a", town="Bad Aibling", postcode="83043",
+        land_sqm=1200.0,
+    )
+    changes = mark_missing(
+        db_session, {anchor_a.id}, source=a, run_id=2, enumeration_complete=True
+    )
 
     assert changes == []
     assert prop.listing_status == ListingStatus.ACTIVE
 
-    changes = mark_missing(db_session, set(), source=b, run_id=3, enumeration_complete=True)
+    anchor_b = _anchor(
+        db_session, make_listing, b, suffix="anchor-b", town="Wasserburg am Inn",
+        postcode="83512", land_sqm=900.0,
+    )
+    changes = mark_missing(
+        db_session, {anchor_b.id}, source=b, run_id=3, enumeration_complete=True
+    )
     assert [c.kind for c in changes] == [ChangeKind.REMOVED]
     assert prop.listing_status == ListingStatus.REMOVED
 

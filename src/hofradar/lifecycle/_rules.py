@@ -27,12 +27,39 @@ ALIVE_STATUSES = frozenset(
 )
 
 #: Statuses a re-sighting lifts back into the funnel (never as FIRST_SEEN).
-DORMANT_STATUSES = frozenset({ListingStatus.REMOVED, ListingStatus.STALE})
+#:
+#: EXPIRED belongs here for the same reason REMOVED and STALE do: the listing
+#: had stopped being carried and is being carried again, and invariant 2 says
+#: that event is a REACTIVATED row in the append-only history, not a bare
+#: status flip a later reader has to reconstruct. Leaving it out was the only
+#: way a property could disappear from a source and come back with no
+#: reappearance recorded under its own name.
+#:
+#: This deliberately does NOT put the fortnightly renewal back in the weekly
+#: digest, which is what docs/DECISIONS.md entry 15 forbids: the *history*
+#: records the reappearance, and ``hofradar.report.data`` decides separately
+#: what is newsworthy - see ``_was_reactivated`` there, which skips a
+#: reactivation out of EXPIRED. Nothing real is lost by that: an advert that
+#: stays down long enough for its return to be news about the farmstead is
+#: moved on to STALE by ``apply_stale_rules`` first (EXPIRED is in
+#: STALE_ELIGIBLE_STATUSES below), so the digest still sees that reappearance
+#: as a reactivation out of STALE.
+DORMANT_STATUSES = frozenset(
+    {ListingStatus.REMOVED, ListingStatus.STALE, ListingStatus.EXPIRED}
+)
 
 #: Statuses that ``apply_stale_rules`` may time out.
+#:
+#: EXPIRED belongs here and deliberately not in GONE_STATUSES: an expired
+#: advert is not evidence the farmstead is gone, but it also cannot be
+#: allowed to sit at full availability forever - a property that genuinely
+#: sold has its advert expire in exactly the same way, and needs a path out
+#: of the ranking too. If it renews, ingest re-sets it to ACTIVE long before
+#: the stale clock (45 days) would fire, so a normal fortnightly cycle never
+#: reaches this at all.
 STALE_ELIGIBLE_STATUSES = frozenset(
     {ListingStatus.ACTIVE, ListingStatus.VERIFIED, ListingStatus.PRICE_CHANGED,
-     ListingStatus.DISCOVERED}
+     ListingStatus.DISCOVERED, ListingStatus.EXPIRED}
 )
 
 _ROLE_RANK = {SourceRole.DISCOVERY: 0, SourceRole.LOCAL: 1, SourceRole.PRIMARY: 2}

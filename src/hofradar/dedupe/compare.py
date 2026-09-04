@@ -17,10 +17,22 @@ line up and no number corroborates, the verdict carries a ``needs_review``
 reason and a deliberately middling confidence: a human decides, the machine
 does not guess.
 
-Two things are treated as proof and short-circuit the model:
+Three things are treated as proof and short-circuit the model:
 
 * the same ``external_id`` on the same source - that is literally the same
   listing seen twice;
+* the same canonical listing URL, on *any* source - a URL names one page on
+  one host, so two sources publishing it are publishing one listing, not two
+  descriptions of one farm. This is the only proof here that crosses source
+  boundaries, and it has to exist: a portal reached twice (a dedicated adapter
+  and a syndicated feed of the same site) produces byte-identical URLs, and
+  every other cross-source escape hatch is shut - ``external_id`` is one
+  source's private numbering, and no adapter or normalizer populates
+  ``image_hashes`` today, so the image proof below never fires either. Without
+  it the same advert becomes two properties, which double-counts the
+  shortlist, ``tracked_total`` and the per-source yield table. What counts as
+  "the same URL" is deliberately narrow - see
+  :func:`hofradar.dedupe._util.canonical_url`;
 * a shared perceptual image hash - photographs of a farmyard are unique enough
   that one match at Hamming distance <= 6 is near-certainty.
 
@@ -129,6 +141,15 @@ def compare_facts(fa: ListingFacts, fb: ListingFacts) -> DuplicateVerdict:
             is_duplicate=True,
             confidence=PROOF_CONFIDENCE,
             reasons=[f"same_external_id: {key}:{ext} (proof)"],
+            matched_property_id=matched_id,
+        )
+
+    shared_urls = fa.canonical_urls & fb.canonical_urls
+    if shared_urls:
+        return DuplicateVerdict(
+            is_duplicate=True,
+            confidence=PROOF_CONFIDENCE,
+            reasons=[f"same_canonical_url: {sorted(shared_urls)[0]} (proof)"],
             matched_property_id=matched_id,
         )
 

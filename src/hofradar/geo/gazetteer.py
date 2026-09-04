@@ -134,13 +134,50 @@ def _fold(text: str) -> str:
 _BY_NAME_FOLDED: dict[str, GazetteerEntry] = {_fold(entry.name): entry for entry in _TOWNS}
 
 
+def _boundary_pattern(name: str) -> re.Pattern[str]:
+    """A ``\\w``-boundary-anchored matcher for one folded entry name.
+
+    Farmstead addresses paste a town name into a longer string ("83512
+    Wasserburg am Inn", "Titting - Altdorf"), so the match has to look
+    inside the query - but German compounds glue words together with no
+    separator at all ("Fuerstenfeldbruck" contains "Bruck" as bare
+    characters, not as the town "Bruck"). ``\\w`` boundaries reject a hit
+    inside a longer word while still crossing spaces, hyphens and
+    punctuation, which is exactly where a real town name legitimately ends
+    inside a longer string.
+    """
+    return re.compile(rf"(?<!\w){re.escape(name)}(?!\w)")
+
+
+#: One boundary matcher per entry, paired with its folded name (for the
+#: leftmost-match tie-break below - comparing lengths on the *folded* name,
+#: not ``entry.name``, keeps this correct once a non-ASCII entry name is
+#: added; today the two lengths happen to coincide because every bundled
+#: name is already ASCII-transliterated).
+_NAME_PATTERNS: tuple[tuple[re.Pattern[str], str, GazetteerEntry], ...] = tuple(
+    (_boundary_pattern(name), name, entry) for name, entry in _BY_NAME_FOLDED.items()
+)
+
+
 def lookup(query: str) -> GazetteerEntry | None:
     """Best-effort match of a free-text address against the gazetteer.
 
     Tries an exact town-name match first (umlaut-folded, so "Muehldorf" and
-    "Mühldorf" both hit), then a substring match (so "Hauptstrasse 5, 83043
-    Bad Aibling" resolves via "bad aibling"), then any 5-digit postcode found
-    in the text.
+    "Mühldorf" both hit), then a word-boundary substring match (so
+    "Hauptstrasse 5, 83043 Bad Aibling" resolves via "bad aibling", but
+    "Fuerstenfeldbruck" does *not* resolve via "bruck" - the town name has to
+    appear as whole words in the query, not as a bare run of characters
+    inside a longer word), then any 5-digit postcode found in the text.
+
+    When two *disjoint* entries both match ("Chieming bei Waging am See"
+    contains both "Chieming" and "Waging am See"), the one that starts
+    earliest in the query wins, not the one with the longer name. The
+    subject of an "X bei Y" title is X, and X is written first - preferring
+    the longer name instead would systematically favour whichever entry's
+    name happens to be wordier, with no relation to which one the query is
+    actually about. A tie in start position (one entry's match is a prefix
+    of another's, e.g. "Tegernsee" at the start of "Tegernsee ...") keeps
+    the longer, more specific match.
     """
     normalized = " ".join((query or "").strip().split())
     if not normalized:
@@ -150,9 +187,20 @@ def lookup(query: str) -> GazetteerEntry | None:
     if folded in _BY_NAME_FOLDED:
         return _BY_NAME_FOLDED[folded]
 
-    for name, entry in _BY_NAME_FOLDED.items():
-        if name in folded:
-            return entry
+    best_start: int | None = None
+    best_name_len = -1
+    best_entry: GazetteerEntry | None = None
+    for pattern, name, entry in _NAME_PATTERNS:
+        match = pattern.search(folded)
+        if match is None:
+            continue
+        start = match.start()
+        if best_start is None or start < best_start or (
+            start == best_start and len(name) > best_name_len
+        ):
+            best_start, best_name_len, best_entry = start, len(name), entry
+    if best_entry is not None:
+        return best_entry
 
     for match in _POSTCODE_RE.findall(normalized):
         if match in BY_POSTCODE:

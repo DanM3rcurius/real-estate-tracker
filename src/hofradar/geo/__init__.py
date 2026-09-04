@@ -28,6 +28,7 @@ from hofradar.geo.locate import (
     within_air_radius,
     within_driving_radius,
 )
+from hofradar.geo.prefilter import town_in_radius
 from hofradar.geo.routing import route_distance
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "within_air_radius",
     "within_driving_radius",
     "driving_band",
+    "town_in_radius",
 ]

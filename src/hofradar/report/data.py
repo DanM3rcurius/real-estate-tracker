@@ -24,11 +24,23 @@ from sqlalchemy.orm import Session, selectinload
 from hofradar.config import SearchProfile
 from hofradar.db.enums import ChangeKind, ListingStatus, VerificationStatus
 from hofradar.db.models import Property, Score
+from hofradar.report.yield_stats import (
+    MunicipalityCoverage,
+    SourceYield,
+    coverage_by_municipality,
+    source_yield,
+)
 from hofradar.web import history, lazy
 from hofradar.web.filters import de_eur, de_km, de_pct, de_sqm, week_label
 
 #: How far back a weekly report looks when the caller does not say.
 DEFAULT_PERIOD_DAYS = 7
+
+#: How far back the per-source yield table looks. Wider than the weekly window
+#: on purpose - a source's worth is judged over its first several runs, not
+#: one week's trickle, and the go/no-go in docs/DECISIONS.md entry 14 is
+#: itself phrased as "across its first four weekly runs".
+YIELD_WINDOW_DAYS = 28
 
 ACTION_CALL = "📞 SOFORT"
 ACTION_WATCH = "👀 BEOBACHTEN"
@@ -48,6 +60,7 @@ STATUS_LABELS = {
     ListingStatus.PRICE_CHANGED: "Preis geändert",
     ListingStatus.STALE: "veraltet",
     ListingStatus.REMOVED: "entfernt",
+    ListingStatus.EXPIRED: "Anzeige abgelaufen",
     ListingStatus.SOLD: "verkauft",
     ListingStatus.FORECLOSURE: "Zwangsversteigerung",
     ListingStatus.OFF_MARKET_SIGNAL: "Off-Market-Signal",
@@ -151,8 +164,27 @@ class ReportData:
     counts: ReportCounts
     entries: list[ReportEntry] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: Per-source in-radius yield since ``since`` - see ``hofradar.report.yield_stats``.
+    #: A source can parse flawlessly and still produce nothing worth ranking; this is
+    #: how that becomes visible instead of discovered five weeks later.
+    source_yields: list[SourceYield] = field(default_factory=list)
+    #: Per-municipality observation counts over the same window as
+    #: :attr:`source_yields`, for every town ``config/search.yaml`` names as
+    #: expected - see ``hofradar.report.yield_stats.coverage_by_municipality``.
+    #: A town with ``observed == 0`` is a dark municipality: the report must
+    #: say so by name, because silence alone cannot distinguish a quiet market
+    #: from an uncovered one.
+    municipality_coverage: list[MunicipalityCoverage] = field(default_factory=list)
+    #: How many days :attr:`source_yields` covers. Carried on the data rather than
+    #: baked into the renderers' heading text, so ``YIELD_WINDOW_DAYS`` has exactly
+    #: one place to change.
+    yield_window_days: int = YIELD_WINDOW_DAYS
     run_id: int | None = None
     center_name: str = ""
+
+    @property
+    def yield_window_weeks(self) -> int:
+        return self.yield_window_days // 7
 
     def summary(self) -> dict[str, Any]:
         """The JSON blob persisted on :class:`~hofradar.db.models.ReportRecord`."""
@@ -173,10 +205,26 @@ class ReportData:
 # --------------------------------------------------------------------------- #
 
 
+#: Statuses whose reactivation is a billing event rather than news about the
+#: farmstead, and so never headlines the digest. An advert on a fixed paid
+#: window (``listing_ttl_days``) expires and renews on a fortnightly timer;
+#: counting each renewal as REAKTIVIERT is precisely the metronome
+#: docs/DECISIONS.md entry 15 exists to keep out of a ten-entry digest. The
+#: reappearance is still in the append-only history under its own
+#: ChangeKind.REACTIVATED row - this is a reporting judgement, not an erasure.
+#: Nothing genuinely newsworthy is dropped: an advert down long enough for its
+#: return to mean something has already been moved on to STALE by
+#: ``apply_stale_rules``, and a reactivation out of STALE does count.
+_UNREPORTED_REACTIVATION_ORIGINS: frozenset[str] = frozenset({ListingStatus.EXPIRED})
+
+
 def _was_reactivated(prop: Property, since: datetime) -> bool:
     for row in history.status_events_since(prop, since):
-        if getattr(row, "change_kind", "") == ChangeKind.REACTIVATED:
-            return True
+        if getattr(row, "change_kind", "") != ChangeKind.REACTIVATED:
+            continue
+        if getattr(row, "old_status", None) in _UNREPORTED_REACTIVATION_ORIGINS:
+            continue
+        return True
     return False
 
 
@@ -477,6 +525,12 @@ def build_report(
     counts.shortlisted = len(entries)
     counts.not_listed = max(0, counts.tracked_total - counts.shortlisted)
 
+    yield_since = now - timedelta(days=YIELD_WINDOW_DAYS)
+    yields = source_yield(session, since=yield_since, radius_air_km=profile.radius.air_km_max)
+    coverage = coverage_by_municipality(
+        session, since=yield_since, expected=profile.coverage.municipalities
+    )
+
     return ReportData(
         week_label=week_label(now),
         generated_at=now,
@@ -493,6 +547,9 @@ def build_report(
         counts=counts,
         entries=entries,
         notes=notes,
+        source_yields=yields,
+        municipality_coverage=coverage,
+        yield_window_days=YIELD_WINDOW_DAYS,
         run_id=run_id,
         center_name=profile.center.name,
     )

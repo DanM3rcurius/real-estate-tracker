@@ -18,6 +18,9 @@ sources:
     adapter: manual
     reliability: 0.95
     enabled: true
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Local ingest only, no outbound requests - no site terms apply.
     notes: >
       Paste a listing URL or an entire exposé text into the web UI. Always
       available, never blocked, and the fastest way to get value on day one.
@@ -28,6 +31,9 @@ sources:
     adapter: csv
     reliability: 0.9
     enabled: true
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Local ingest only, no outbound requests - no site terms apply.
     notes: "Bulk import from a spreadsheet export."
 
   - key: zvg_bayern
@@ -39,20 +45,167 @@ sources:
     reliability: 0.95
     enabled: true
     rate_limit_seconds: 3.0
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Official public foreclosure register, published for public inspection.
+      robots.txt permits /index.php; no clause restricting automated retrieval.
     notes: "Official public foreclosure register. Highest-signal hidden source."
     options:
       land_abk: "by"
 
+  - key: denkmalboerse
+    name: "BLfD Denkmalbörse"
+    role: primary
+    adapter: denkmalboerse
+    base_url: "https://www.blfd.bayern.de"
+    region: Bayern
+    reliability: 0.8
+    enabled: true
+    rate_limit_seconds: 4.0
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      https://www.blfd.bayern.de/robots.txt returns HTTP 404 Not Found
+      (Server: CERN httpd) - no robots.txt exists, so no crawl directives to
+      honour or violate. The Impressum's Nutzungsbedingungen section
+      (/blfd/impressum/index.html) reads: "Als Privatperson dürfen Sie
+      urheberrechtlich geschütztes Material zum privaten und sonstigen
+      eigenen Gebrauch im Rahmen des § 53 Urheberrechtsgesetz (UrhG)
+      verwenden. Eine Vervielfältigung oder Verwendung dieser Seiten oder
+      Teilen davon in anderen elektronischen oder gedruckten Publikationen
+      und deren Veröffentlichung ist nur mit unserer Einwilligung gestattet."
+      Neither the robots.txt (absent) nor the Impressum's Nutzungsbedingungen
+      restricts automated retrieval, crawling or machine access - no other
+      page was read. A Haftungsausschluss disclaims accuracy, completeness
+      and currency of the published information.
+    notes: >
+      A state authority's listing exchange for Baudenkmäler. role=primary
+      because the exposé is the origin of the advert, not a copy - it is
+      withdrawn when the owner withdraws it, so its silence is the seller's own
+      signal. reliability 0.8 rather than 0.95 because BLfD publishes owner
+      statements and explicitly disclaims their accuracy in a Haftungsausschluss
+      (see terms_excerpt): that is a fact about the data, which reliability
+      models, not about provenance, which role does.
+      Terms check completed 2026-09-03 (see terms_excerpt): private/own use is
+      permitted under § 53 UrhG, but republication - reproducing these pages or
+      parts of them in other electronic or printed publications - requires
+      BLfD's consent. Hofradar does not publish: the weekly digest and the web
+      UI must stay private to the household running it, never republished or
+      exposed outside that gate.
+
   - key: generic_rss
     name: "Regionale Makler (RSS/Atom)"
-    role: primary
+    role: local
     adapter: generic_rss
     reliability: 0.75
     enabled: true
-    rate_limit_seconds: 2.0
-    notes: "Feed URLs are configured per broker in options.feeds."
+    rate_limit_seconds: 5.0
+    listing_ttl_days: 14
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Terms are a property of each configured feed, not of this adapter; every
+      entry added to options.feeds/options.sites carries its own check. The
+      four ovbimmo.de Atom feeds below were checked together with the
+      ovbimmo source's own terms check (see that entry and docs/SOURCES.md):
+      https://ovbimmo.de/robots.txt's "User-agent: *" block carries no
+      blanket Disallow - only */2823228/, /_widget/* and /search-widget/*
+      are excluded - and /immobilien/*, the path every entry's <id>/<link>
+      resolves to, is explicitly Allow'd. suchergebnisse.atom is itself an
+      advertised channel on the site's own search result pages: the <link>
+      element carries both rel="alternate" and, duplicated on the same tag,
+      rel="nofollow" - and the page's own visible "share-rss" anchor to the
+      same feed URL is rel="nofollow" too. Both are named here rather than
+      only the alternate one. Neither changes the reading: rel="nofollow" is
+      a link-graph directive to a crawler about not passing on authority
+      through that link and not treating it as an invitation to discover
+      more pages from it - it says nothing about whether the resource the
+      link points to may be retrieved. Retrieval permission is what
+      robots.txt governs, and robots.txt Allows the path this feed and every
+      entry's canonical URL resolve to. https://www.rosenheim24.de/ueber-uns/agb/
+      (OVB24 GmbH, Stand April 2024, linked from ovbimmo's own footer) covers
+      online advertising, purchased shop products and Gewinnspiele; no
+      clause in it restricts automated retrieval of the public feed or
+      listing pages. All findings are scoped to the pages actually read, not
+      to the whole site.
+    notes: >
+      Feed URLs are configured per broker in options.feeds. The four
+      configured here are ovbimmo.de's per-Landkreis Atom feeds (Rosenheim,
+      Traunstein, Miesbach, Ebersberg), captured live 2026-09-03 with entry
+      counts 100/75/14/14 - see docs/coverage.md for why Miesbach and
+      Ebersberg appear here despite being dark for the Amtsblatt/newspaper
+      channel: OVBimmo the *portal* aggregates brokers across publisher
+      boundaries, unlike the newspaper. A fifth area id documented alongside
+      these, de.muehldorf-am-inn, renders zero entries and an empty feed
+      title live - that id is wrong for Lkr. Mühldorf, not a source with no
+      current listings - and is deliberately left out rather than shipped.
+
+      role/rate_limit_seconds/listing_ttl_days are set to match the ovbimmo
+      entry below, not this adapter's own previous defaults (role: primary,
+      rate_limit_seconds: 2.0, no ttl), because every feed configured here
+      today is ovbimmo.de - the same host, the same portal, reached by a
+      second route. Three mismatches would otherwise follow from treating
+      the two routes as unrelated: (1) role rank - primary (2) would have
+      outranked ovbimmo's local (1) in dedupe._primary_sort_key, so a
+      listing seen by both would pick this generic route as the property's
+      primary source over the dedicated, better-documented ovbimmo adapter -
+      an accident of configuration, not a decision, so role is local here
+      too; (2) rate limiting is per-SourceAdapter, not per-host (see
+      generic_sitemap's notes above), so 2.0s here on top of ovbimmo's
+      deliberate 5.0s would poll the same host faster through the generic
+      route than through the entry that actually thought about it - matched
+      to 5.0s; (3) ovbimmo's listing_ttl_days: 14 encodes that a paid advert
+      window's silence is EXPIRED, not REMOVED (docs/DECISIONS.md entry 15) -
+      the same portal inventory reached through this route needs the same
+      reading, not a different lifecycle depending on which adapter saw it
+      first, so ttl is 14 here too.
+
+      Correction to an earlier version of this note, which called that third
+      value load-bearing: it is NOT. listing_ttl_days is inert on this entry
+      and will stay inert while the adapter keeps enumerates=False. A feed
+      carries only the latest N items, so
+      hofradar.lifecycle.absence.mark_missing returns at its
+      enumeration_complete gate before _absence_status is ever reached - this
+      route can mark nothing EXPIRED and nothing REMOVED, whatever the ttl
+      says. It is kept rather than deleted so the two routes into one portal
+      do not appear to state different retention policies for the same
+      adverts, and so the value is already correct if options.enumerates is
+      ever overridden true for a feed that genuinely is exhaustive. Anyone
+      relying on it today is relying on nothing.
+
+      options.entry_field_map is what gives this route a location at all.
+      These feeds state the postcode and the town only in classmarkets'
+      own cm: namespace (feedparser surfaces <cm:postalCode>/<cm:locality>
+      as the plain strings cm_postalcode/cm_locality); the standard Atom
+      elements carry neither, and without them every property found here has
+      town = NULL, no geocode query, no distance_air_km, and is invisible to
+      both the in-radius yield column and the per-Gemeinde coverage map. The
+      element names live here, in the same entry that already documents this
+      feed's terms, rather than in the adapter - GenericRssAdapter must stay
+      generic, and a mapping in configuration is how it learns a feed's
+      dialect without learning a vendor. Only raw string fields can be
+      targeted (see MAPPABLE_ENTRY_FIELDS); cm:price and cm:area are
+      deliberately not mapped, and could not be usefully: they carry their
+      value as element text alongside an attribute, which feedparser reduces
+      to the attributes alone.
+
+      If a genuine broker's own-site feed (not
+      an ovbimmo re-aggregation) is ever added to options.feeds alongside
+      these four, reconsider: an origin listing on a broker's own site is
+      arguably primary/no-ttl in its own right, and mixing that with
+      ovbimmo-tuned values under one Source row would be the same kind of
+      silent mismatch this note exists to prevent. The same goes for
+      entry_field_map, which is one feed dialect's vocabulary, not every
+      feed's. The fix then is a second
+      Source entry for that feed, not stretching this one's role/limits/ttl
+      to cover two different kinds of provenance at once.
     options:
-      feeds: []
+      entry_field_map:
+        cm_postalcode: postcode
+        cm_locality: town
+      feeds:
+        - "https://ovbimmo.de/suchergebnisse.atom?t=all:sale:living&a=de.rosenheim-kreis"
+        - "https://ovbimmo.de/suchergebnisse.atom?t=all:sale:living&a=de.traunstein"
+        - "https://ovbimmo.de/suchergebnisse.atom?t=all:sale:living&a=de.miesbach"
+        - "https://ovbimmo.de/suchergebnisse.atom?t=all:sale:living&a=de.ebersberg"
 
   - key: generic_sitemap
     name: "Regionale Makler (Sitemap-Crawl)"
@@ -61,7 +214,28 @@ sources:
     reliability: 0.7
     enabled: true
     rate_limit_seconds: 3.0
-    notes: "Polite sitemap.xml crawl of small broker sites that publish one."
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      Terms are a property of each configured feed, not of this adapter. Every
+      entry added to options.feeds/options.sites carries its own check.
+    notes: >
+      Polite sitemap.xml crawl of small broker sites that publish one.
+      options.sites is deliberately left empty. ovbimmo.de's own robots.txt
+      advertises a sitemap, but ovbimmo.de is already reached by two other
+      configured sources: the dedicated ovbimmo adapter (structured
+      per-municipality/property-type search with its own pagination and
+      mark_enumeration_incomplete bookkeeping) and generic_rss's four Atom
+      feeds above. Each SourceAdapter owns an independent PoliteClient with
+      its own rate limiter (hofradar.sources.base.SourceAdapter.client) -
+      rate_limit_seconds is enforced per source, not per host - so adding
+      ovbimmo.de here would be a third, uncoordinated request stream against
+      one host for URLs the other two sources already surface, not new
+      discovery. It would also give dedupe three Observation rows per
+      property instead of two for zero marginal signal, inflating
+      Quellen-Ausbeute without inflating what is actually found. Populate
+      options.sites for a broker site that has a sitemap.xml and neither a
+      feed nor a dedicated adapter - see docs/SOURCES.md's "Adding a
+      regional source".
     options:
       sites: []
 
@@ -74,10 +248,102 @@ sources:
     enabled: false
     rate_limit_seconds: 4.0
     notes: >
-      Chiffre ads live here. Needs a per-municipality list of bulletin index
-      URLs in options.bulletins; requires the [pdf] extra.
+      BLOCKED, not merely undone. This container's egress proxy returns a
+      403 CONNECT denial for Bavarian municipality domains; re-tested
+      2026-09-03 against feldkirchen-westerham.de, bruckmuehl.de, weyarn.de
+      and holzkirchen.de, all four denied. That is an organisation-level
+      policy block, not a per-site outage or a missing page, so no bulletin
+      index URL was guessed or invented to fill options.bulletins - see
+      shared-context.md, Ruling 1. hofradar.sources.adapters.pdf_bulletin,
+      its tests and the [pdf] extra are already in place: this is data
+      entry for whoever next has network access to these sites, not
+      engineering. Checklist (dark rows of docs/coverage.md first, since
+      gemeindeblatt_pdf is their only configured route into the radius
+      until an Ippen/Merkur source exists):
+        [ ] Irschenberg (Lkr. Miesbach)
+        [ ] Weyarn (Lkr. Miesbach)
+        [ ] Valley (Lkr. Miesbach)
+        [ ] Holzkirchen (Lkr. Miesbach)
+        [ ] Otterfing (Lkr. Miesbach)
+        [ ] Aying (Lkr. München)
+        [ ] Glonn (Lkr. Ebersberg)
+        [ ] Feldkirchen-Westerham (Lkr. Rosenheim)
+        [ ] Bruckmühl (Lkr. Rosenheim)
+        [ ] Bad Aibling (Lkr. Rosenheim)
+        [ ] Kolbermoor (Lkr. Rosenheim)
+        [ ] Rosenheim (Lkr. Rosenheim)
+        [ ] Wasserburg am Inn (Lkr. Rosenheim)
+      For each: open the Gemeinde's own website and find its Amtsblatt /
+      Mitteilungsblatt archive - typically under /rathaus/amtsblatt or
+      /buergerservice/mitteilungsblatt - and record that INDEX page, not a
+      link to one individual PDF; the adapter walks the index to find each
+      issue. Append the index URL to options.bulletins below, read that
+      page's robots.txt/terms and fill in terms_checked_at/terms_excerpt
+      (required before enabled can flip true - see
+      hofradar.config.SourceConfig._enabled_requires_terms_check), and only
+      then set enabled: true.
     options:
       bulletins: []
+
+  - key: ovbimmo
+    name: "OVBimmo (OVB Heimatzeitungen)"
+    role: local
+    adapter: ovbimmo
+    base_url: "https://ovbimmo.de"
+    region: "Lkr. Rosenheim / Mühldorf / West-Traunstein"
+    reliability: 0.75
+    enabled: true
+    rate_limit_seconds: 5.0
+    listing_ttl_days: 14
+    terms_checked_at: 2026-09-03
+    terms_excerpt: >
+      https://ovbimmo.de/robots.txt: User-agent: * carries no blanket
+      Disallow. Only */2823228/, /_widget/* and /search-widget/* are
+      excluded - none of which this adapter touches. /immobilien/* is
+      explicitly Allow'd, and a sitemap is advertised; /kaufen/... is not
+      disallowed. https://www.rosenheim24.de/ueber-uns/agb/ (linked by
+      ovbimmo's own footer as its AGB; publisher OVB24 GmbH, Stand April
+      2024) has three parts: (I) AGB für Online-Werbung, which defers to
+      ovb24.de/agb/; (II) AGB für Shop-Produkte, covering purchase, delivery,
+      payment and Widerruf for PURCHASED products (E-Books, paid article
+      access) - its §6 "Nutzungsrecht bei digitalen Produkten" governs those
+      purchased products, not the public listing pages this adapter reads;
+      (III) Teilnahmebedingungen für Gewinnspiele. No clause anywhere in it
+      restricts automated retrieval, crawling or scraping. This is a claim
+      about the two pages actually read (that robots.txt, that AGB), never
+      about the whole site.
+    notes: >
+      A regional newspaper portal, not a national one - it carries the
+      brokers OVB aggregates plus the classified ads from its own papers,
+      including private sellers with Chiffre. Covers Lkr. Rosenheim but NOT
+      Lkr. Miesbach or Ebersberg (Ippen/Merkur territory) - see
+      docs/coverage.md. reliability 0.75 keeps it below the
+      small_local_source threshold, which is correct: it is a regional
+      paper, not a portal. listing_ttl_days: 14 because adverts run a fixed
+      paid window, so a disappearance within that window is EXPIRED, not
+      REMOVED - see docs/DECISIONS.md entry 15.
+      The detail page's dataLayer JSON and its three eps-item price/rooms/
+      area blocks are confirmed by a real capture but not parsed -
+      fetch_detail only reads the external id from the URL and the generic
+      og:/body-text fallback, so price/rooms/area stay in description as
+      plain text rather than typed fields. See docs/SOURCES.md. contact_kind
+      is deliberately left unset because this source carries both broker and
+      private inventory, and the one detail page captured so far is a
+      broker listing whose own dataLayer.features disagrees with its body
+      text about commission (free_of_commission vs. "Provision für Käufer") -
+      further reason not to trust either as a source of truth for this field.
+    options:
+      municipalities:
+        - feldkirchen-westerham
+        - bruckmuehl
+        - bad-aibling
+        - kolbermoor
+        - rosenheim
+        # NOT "wasserburg-am-inn": that is the gazetteer/coverage.md town
+        # name ("Wasserburg am Inn"), a different namespace from OVB's URL
+        # slug. Verified live: wasserburg-am-inn 301-redirects to this slug.
+        - wasserburg-a-inn
+      property_types: ["haus", "grundstueck"]
 
   # ------------------------------------------------- off by default (ToS/bot)
   - key: kleinanzeigen

@@ -106,6 +106,16 @@ class TestPriceAndStatusGates:
         result = score_property(prop, profile, now=now)
         assert REJECT_LISTING_GONE not in result.reject_reasons
 
+    def test_an_expired_advert_is_not_treated_as_gone(
+        self, session, profile: SearchProfile, now: datetime
+    ) -> None:
+        """EXPIRED means a newspaper's ad window ran out, not that the
+        farmstead sold or was withdrawn - it must not be in GONE_STATUSES,
+        or a live listing would drop out of the ranking on a billing timer."""
+        prop = well_evidenced(session, now, listing_status=ListingStatus.EXPIRED)
+        result = score_property(prop, profile, now=now)
+        assert REJECT_LISTING_GONE not in result.reject_reasons
+
 
 class TestConfidenceGates:
     @pytest.fixture()

@@ -18,8 +18,8 @@ from sqlalchemy import select
 
 from hofradar.db.enums import ListingStatus, SourceRole
 from hofradar.db.models import Property, PropertySource, Source
-from hofradar.lifecycle import ingest, mark_missing
-from hofradar.lifecycle.absence import EMPTY_RESULT_GUARD_MIN_ROWS
+from hofradar.lifecycle import ImplausibleAbsence, ingest, mark_missing
+from hofradar.lifecycle.absence import FRACTION_GUARD_MIN_ROWS
 from hofradar.sources import get_adapter
 
 # --------------------------------------------------------------------------- #
@@ -117,11 +117,19 @@ def test_an_incomplete_enumeration_removes_nothing(db_session, make_source, make
 def test_a_complete_enumeration_still_removes_a_genuinely_gone_listing(
     db_session, make_source, make_listing
 ) -> None:
-    """The guard against the lazy fix: real removals must keep working."""
-    source, props = _seed(db_session, make_source, make_listing)
+    """The guard against the lazy fix: real removals must keep working.
+
+    Seeded with two listings, not one: the empty-seen-set guard is now
+    unconditional (Task 3, review round 1, Important 1), so "the source saw
+    nothing" is always refused, even from a two-listing source. A genuine
+    single removal has to be represented honestly - one listing still seen,
+    the other genuinely gone - not as an empty result.
+    """
+    source, props = _seed(db_session, make_source, make_listing, count=2)
+    seen = {props[1].id}
 
     changes = mark_missing(
-        db_session, set(), source=source, run_id=2, enumeration_complete=True
+        db_session, seen, source=source, run_id=2, enumeration_complete=True
     )
 
     assert len(changes) == 1
@@ -132,16 +140,19 @@ def test_a_complete_enumeration_still_removes_a_genuinely_gone_listing(
 def test_a_source_going_from_many_to_zero_is_treated_as_broken(
     db_session, make_source, make_listing
 ) -> None:
-    """Silent parser rot returns HTTP 200 and no results. Do not obey it."""
+    """Silent parser rot returns HTTP 200 and no results. Do not obey it.
+
+    Task 3 tightened this from a silent no-op to a raise: a swallowed []
+    still lets a broken adapter run week after week undetected, which is the
+    same fiction with a longer fuse.
+    """
     source, props = _seed(
-        db_session, make_source, make_listing, count=EMPTY_RESULT_GUARD_MIN_ROWS
+        db_session, make_source, make_listing, count=FRACTION_GUARD_MIN_ROWS
     )
 
-    changes = mark_missing(
-        db_session, set(), source=source, run_id=2, enumeration_complete=True
-    )
+    with pytest.raises(ImplausibleAbsence, match="saw nothing"):
+        mark_missing(db_session, set(), source=source, run_id=2, enumeration_complete=True)
 
-    assert changes == []
     assert all(p.listing_status == ListingStatus.ACTIVE for p in props)
 
 
@@ -149,7 +160,7 @@ def test_a_partial_result_still_removes_only_what_is_missing(
     db_session, make_source, make_listing
 ) -> None:
     source, props = _seed(
-        db_session, make_source, make_listing, count=EMPTY_RESULT_GUARD_MIN_ROWS + 1
+        db_session, make_source, make_listing, count=FRACTION_GUARD_MIN_ROWS + 1
     )
     still_listed = {p.id for p in props[1:]}
 

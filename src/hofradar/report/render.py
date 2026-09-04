@@ -100,6 +100,31 @@ def render_markdown(data: ReportData) -> str:
         add(f"| {label} | {de_number(getattr(data.counts, attribute))} |")
     add("")
 
+    add(f"## Quellen-Ausbeute (letzte {data.yield_window_weeks} Wochen)")
+    add("")
+    if not data.source_yields:
+        add("_Keine Beobachtungen im Zeitraum._")
+    else:
+        add("| Quelle | Objekte gesehen | davon im Radius |")
+        add("| --- | ---: | ---: |")
+        for row in data.source_yields:
+            add(f"| {row.source_key} | {de_number(row.observed)} | {de_number(row.in_radius)} |")
+    add("")
+
+    add(
+        f"## Dunkle Gemeinden (letzte {data.yield_window_weeks} Wochen "
+        "ohne einen einzigen Treffer)"
+    )
+    add("")
+    dark_towns = [row.town for row in data.municipality_coverage if row.observed == 0]
+    if not dark_towns:
+        add("_Keine – jede erwartete Gemeinde hatte mindestens einen Treffer._")
+    else:
+        add(" · ".join(dark_towns))
+    add("")
+    add("Eine Gemeinde ohne Treffer ist keine ruhige Gemeinde — sie ist eine ungedeckte.")
+    add("")
+
     add(f"## Shortlist ({len(data.entries)} von {data.counts.tracked_total} erfassten Objekten)")
     add("")
     if not data.entries:

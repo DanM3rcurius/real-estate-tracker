@@ -18,12 +18,38 @@ the aggregator reindexed, not that the farm sold. So:
 * :func:`apply_stale_rules` exists precisely so that "we have not heard about
   this in six weeks" has somewhere to go that is *not* REMOVED. STALE means we
   stopped hearing; REMOVED means somebody checked and it was gone.
+* a *complete* enumeration can still be lying, and :class:`ImplausibleAbsence`
+  is the guard against that: a run that saw nothing from a source that used to
+  carry a real inventory, or that would remove an implausibly large slice of
+  it in one pass, is refused outright rather than written to the append-only
+  history where the fiction can never be told apart from the truth later;
+* and a source can be telling the truth while still explaining nothing about
+  the farmstead. A source with ``listing_ttl_days`` (a newspaper's ad package)
+  loses most or all of its inventory on a fixed timer, not because the market
+  moved. :func:`_absence_status` splits those out as EXPIRED *before the
+  fraction guard* runs, so a fortnightly billing cycle is never mistaken for
+  the parser rot that guard exists to catch - and it obeys the same **no
+  verifying source still shows it** rule as REMOVED, so one source's ad timing
+  out never downgrades a listing a different verifying source still carries
+  live. The **empty**-seen-set guard is deliberately *not* on that side of the
+  split: a TTL explains why a listing vanished, never why the run produced no
+  output at all, so seeing literally nothing is refused before any
+  classification is attempted. Otherwise a TTL source would be the one source
+  in the registry with no absence guard left standing - every missing row
+  reclassified as an expiry, both guards handed an empty list, and a template
+  change written to the append-only history as a clean sweep of EXPIRED rows.
+  A real fortnightly cycle is not that shape: some adverts age out while the
+  rest of the inventory is still listed, so the seen-set is not empty.
+  EXPIRED is not a dead end either: it stays on the ordinary stale clock
+  (:data:`hofradar.lifecycle._rules.STALE_ELIGIBLE_STATUSES`), because a
+  farmstead that genuinely sold looks identical to one whose ad merely expired
+  until somebody re-confirms it either way.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,10 +61,64 @@ from hofradar.lifecycle import _rules
 
 log = logging.getLogger(__name__)
 
-#: A source holding at least this many listings that returns none at all is
-#: treated as broken rather than emptied. Below it, a genuine sell-out is
-#: plausible enough to believe.
-EMPTY_RESULT_GUARD_MIN_ROWS = 3
+#: A source holding at least this many listings must clear this floor before
+#: the *fraction* guard below is allowed to reason about it at all. Below it,
+#: a percentage is meaningless (a broker's last listing selling is 100%). It
+#: has nothing to do with the *empty*-result guard below, which is
+#: unconditional and does not reference this constant at all: seeing
+#: literally nothing is not a percentage, it is the signature of a parser
+#: that produced no output, and that is exactly as suspicious for a 1-2
+#: listing source as for a much larger one.
+FRACTION_GUARD_MIN_ROWS = 3
+
+#: A run that saw this fraction or more of a source's visible inventory
+#: disappear is treated as a parser failure, not as a market event. Half an
+#: inventory never goes in one week; a changed HTML template does. Only
+#: applied once a source clears FRACTION_GUARD_MIN_ROWS.
+IMPLAUSIBLE_ABSENCE_FRACTION = 0.30
+
+#: ... and only once at least this many listings would actually be removed.
+#: A single disappearance is never evidence of a broken parser - it is the
+#: single most common real event this whole module exists to record (a
+#: source with exactly 3 listings loses one: that is 33%, over the fraction
+#: above, and would otherwise deadlock the source into refusing forever).
+#: Two or more vanishing in the same run is what engages the percentage.
+IMPLAUSIBLE_ABSENCE_MIN_MISSING = 2
+
+
+class ImplausibleAbsence(RuntimeError):
+    """A run's absences are too broad to be believed, so nothing is written."""
+
+
+def _absence_status(
+    source: Source, prop: Property, ps: PropertySource, now: datetime
+) -> ListingStatus:
+    """Did the advert expire on a timer, or did the seller actually withdraw it?
+
+    A source with a ``listing_ttl_days`` sells a fixed advertising window (a
+    newspaper's two weeks). Once *this advert* has been up for at least that
+    long, its disappearance is the billing cycle ending and carries no
+    information about the farmstead. Before that window, or for a source with
+    no such window at all, a disappearance is the seller acting - real news,
+    handled as REMOVED exactly as before.
+
+    Ages from ``ps.first_seen`` - when *this source* first carried the
+    listing - not ``prop.first_seen``, which is the property's first sighting
+    by any source and may predate this advert by months. A farmstead known
+    for 300 days that OVB only started advertising yesterday is not evidence
+    of anything if that OVB ad drops after one day; a real withdrawal there
+    would be misread as an expiry. ``prop.first_seen`` is only a fallback for
+    a row with no ``first_seen`` of its own.
+    """
+    ttl = source.listing_ttl_days
+    if not ttl:
+        return ListingStatus.REMOVED
+    first_seen = _rules.as_utc(ps.first_seen) or _rules.as_utc(prop.first_seen)
+    if first_seen is None:
+        return ListingStatus.REMOVED
+    age_days = (now - first_seen).days
+    return ListingStatus.EXPIRED if age_days >= ttl else ListingStatus.REMOVED
+
 
 #: Default patience before an unseen ACTIVE property is called STALE.
 DEFAULT_STALE_AFTER_DAYS = 45
@@ -68,6 +148,14 @@ def mark_missing(
     Returns one :class:`ChangeResult` per property that actually transitioned
     to REMOVED. Properties that merely lost one of several sources are updated
     silently - losing a source is not news, losing the last one is.
+
+    Raises :class:`ImplausibleAbsence` - and writes nothing - when the run's
+    absences are too broad to be believed: an empty seen-set against a real
+    inventory (unconditionally - even one visible listing, and whether or not
+    ``source.listing_ttl_days`` would have explained the rows away), or a run that
+    would remove both :data:`IMPLAUSIBLE_ABSENCE_MIN_MISSING` or more
+    listings and :data:`IMPLAUSIBLE_ABSENCE_FRACTION` or more of the source's
+    inventory in one pass.
     """
     if not _rules.can_verify(source):
         # A discovery source's silence proves nothing whatsoever.
@@ -90,27 +178,103 @@ def mark_missing(
         )
     ).scalars().all()
 
-    # Last line of defence against silent parser rot. A site redesign makes
-    # selectors match nothing: HTTP 200, no exception, zero results - and the
-    # enumeration looks complete. A broker legitimately selling their last one
-    # or two listings is plausible; a source with a real portfolio going to
-    # zero in one step is far more likely to be broken. The costs are
-    # asymmetric (a missed removal is a stale row; a wrong removal is lost
-    # history), so above the threshold we make the operator look instead.
-    if not seen and len(rows) >= EMPTY_RESULT_GUARD_MIN_ROWS:
-        log.warning(
-            "%s: enumeration returned nothing while %d listings were on record - "
-            "refusing to read that as %d removals. Check the adapter.",
-            source.key,
-            len(rows),
-            len(rows),
+    # Last line of defence against silent parser rot, and it runs FIRST -
+    # before the expiry split below, before anything is classified at all. A
+    # site redesign makes selectors match nothing: HTTP 200, no exception,
+    # zero results - and the enumeration looks complete. This guard is
+    # deliberately unconditional on inventory size: seeing literally nothing
+    # is not a percentage, it is the exact signature of a parser matching
+    # nothing, and that is exactly as likely for a source with 1-2 listings as
+    # for one with a hundred - a narrow search DNA makes 1-2 matches the
+    # *modal* inventory for a small source, not an edge case to special-case
+    # away. It is equally unconditional on how the missing rows *would* have
+    # been classified: a listing_ttl_days explains why an advert vanished, but
+    # nothing whatsoever about why the run yielded no rows, so a TTL must not
+    # be allowed to launder a zero-result run into a clean sweep of EXPIRED
+    # transitions. Moving this below the split is exactly that bug - it leaves
+    # a TTL source with no absence guard at all, because every missing row is
+    # pulled out as an expiry before either guard can see it. A genuine
+    # fortnightly mass-expiry is a different shape and still passes: the ads
+    # that aged out are missing while the rest of the inventory is still
+    # listed, so the seen-set is not empty (see
+    # tests/lifecycle/test_listing_ttl.py). The costs are asymmetric (a missed
+    # removal is a stale row; a wrong removal is lost history), so we refuse
+    # to write anything and make the operator look instead - a returned []
+    # here reads as "a quiet run", which is exactly the fiction that must not
+    # survive.
+    if rows and not seen:
+        raise ImplausibleAbsence(
+            f"source {source.key!r} saw nothing while {len(rows)} of its listings "
+            "are still marked visible; refusing to mark them removed"
         )
-        return []
+
+    # Expiring adverts are separated out before the fraction guard
+    # runs, and transitioned to EXPIRED immediately: a source that sells a
+    # fixed advertising window (listing_ttl_days) legitimately clears a large
+    # slice of its inventory on a fortnightly timer, which is exactly the
+    # shape the fraction guard exists to reject for a source whose silence
+    # really does mean the market moved. Only what is left after this split -
+    # a disappearance the TTL cannot explain - ever reaches that guard or the
+    # REMOVED loop.
+    missing = [ps for ps in rows if ps.property_id not in seen]
+    genuinely_missing: list[PropertySource] = []
+    for ps in missing:
+        prop = session.get(Property, ps.property_id)
+        # A missing or already-merged property falls straight through to
+        # genuinely_missing unexamined - exactly as it did before this split
+        # existed. It is a no-op in the write loop below either way; what
+        # matters here is that it is not silently pulled out of the guards'
+        # accounting the way a real expiry is.
+        if (
+            prop is not None
+            and prop.merged_into_id is None
+            and _absence_status(source, prop, ps, now) is ListingStatus.EXPIRED
+        ):
+            ps.last_listing_visible = False
+            # Same rule as the REMOVED loop below: a status only moves once no
+            # *verifying* source still shows the listing. OVB's ad running out
+            # is not news about a farmstead a primary portal still lists live -
+            # that would downgrade a verified, visible property on someone
+            # else's billing timer.
+            if (
+                prop.listing_status != ListingStatus.EXPIRED
+                and not _any_verifying_source_visible(session, prop.id)
+            ):
+                _transition(
+                    session, prop, ListingStatus.EXPIRED, ChangeKind.STATUS_CHANGE,
+                    detail=f"advert window of {source.listing_ttl_days} days elapsed "
+                           f"({source.key})",
+                    run_id=run_id, now=now,
+                )
+            continue
+        genuinely_missing.append(ps)
+
+    # The fraction guard is different in kind: a *partial* result is not
+    # inherently suspicious the way a total-zero one is, so it only engages
+    # once there is enough inventory for a percentage to mean anything
+    # (FRACTION_GUARD_MIN_ROWS) AND enough would actually be removed for that
+    # to be more than a single ordinary sale (IMPLAUSIBLE_ABSENCE_MIN_MISSING).
+    # Skipping single removals here is what keeps a small source from
+    # deadlocking: without the floor, a 3-listing source losing exactly one
+    # (33%) would raise every run forever, since a refused run writes nothing
+    # and the next run sees the same "still visible" row again. The
+    # denominator stays len(rows) - the source's whole visible inventory - so
+    # an expiring source is judged by what fraction of it is a *real*
+    # disappearance, not by a fraction of an already-filtered count.
+    if (
+        len(rows) >= FRACTION_GUARD_MIN_ROWS
+        and len(genuinely_missing) >= IMPLAUSIBLE_ABSENCE_MIN_MISSING
+    ):
+        fraction = len(genuinely_missing) / len(rows)
+        if fraction >= IMPLAUSIBLE_ABSENCE_FRACTION:
+            raise ImplausibleAbsence(
+                f"source {source.key!r} would remove {len(genuinely_missing)} of "
+                f"{len(rows)} listings ({fraction:.0%}); refusing above "
+                f"{IMPLAUSIBLE_ABSENCE_FRACTION:.0%}"
+            )
 
     changes: list[ChangeResult] = []
-    for ps in rows:
-        if ps.property_id in seen:
-            continue
+    for ps in genuinely_missing:
         ps.last_listing_visible = False
         prop = session.get(Property, ps.property_id)
         if prop is None or prop.merged_into_id is not None:

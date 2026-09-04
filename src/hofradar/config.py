@@ -12,12 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 #: Bundled copies of the YAML files, installed with the package.
 PACKAGED_CONFIG_DIR = Path(__file__).parent / "_config_defaults"
@@ -177,6 +178,19 @@ class LandConfig(BaseModel):
     strong_min_sqm: float = 5000
 
 
+class CoverageConfig(BaseModel):
+    """Municipalities the plan believes fall inside the search radius.
+
+    Not a slider - this does not touch scoring or ``profile_hash`` - but it
+    lives on the profile anyway because it must load through the same config
+    machinery the radius and budget do, so the report can never read a stale
+    or mistyped copy of the list. See ``docs/coverage.md`` for how this list
+    was built (a reconstruction, not a verified survey) and its caveats.
+    """
+
+    municipalities: list[str] = Field(default_factory=list)
+
+
 class ScoreWeights(BaseModel):
     """Final ranking weights. Must sum to ~1.0; normalised on load if not."""
 
@@ -255,6 +269,7 @@ class SearchProfile(BaseModel):
     weights: ScoreWeights = Field(default_factory=ScoreWeights)
     gates: GateConfig = Field(default_factory=GateConfig)
     renovation: RenovationRates = Field(default_factory=RenovationRates)
+    coverage: CoverageConfig = Field(default_factory=CoverageConfig)
 
     property_types: list[str] = Field(default_factory=list)
     preferred_features: list[str] = Field(default_factory=list)
@@ -325,8 +340,26 @@ class SourceConfig(BaseModel):
     enabled: bool = False
     rate_limit_seconds: float = 2.0
     respect_robots: bool = True
+    #: How many days a listing stays up before the advert simply expires. Set
+    #: for sources that sell a fixed ad window (a newspaper's two weeks), so
+    #: their silence after that window is read as EXPIRED, not REMOVED.
+    listing_ttl_days: int | None = None
     notes: str | None = None
+    #: The day somebody actually read this source's robots.txt and terms, and
+    #: what they found. A source nobody has checked may be written and tested,
+    #: but it may not be switched on - see docs/DECISIONS.md entry 14.
+    terms_checked_at: date | None = None
+    terms_excerpt: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _enabled_requires_terms_check(self) -> SourceConfig:
+        if self.enabled and not (self.terms_checked_at and self.terms_excerpt):
+            raise ValueError(
+                f"source {self.key!r} is enabled but has no recorded terms check: "
+                "set terms_checked_at and terms_excerpt, or leave it disabled"
+            )
+        return self
 
 
 class AppConfig(BaseModel):

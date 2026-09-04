@@ -58,6 +58,7 @@ STATUS_OPTIONS: dict[str, str] = {
     ListingStatus.FORECLOSURE: "Zwangsversteigerung",
     ListingStatus.OFF_MARKET_SIGNAL: "Off-Market-Signal",
     ListingStatus.REMOVED: "Entfernt",
+    ListingStatus.EXPIRED: "Anzeige abgelaufen",
     ListingStatus.SOLD: "Verkauft",
 }
 

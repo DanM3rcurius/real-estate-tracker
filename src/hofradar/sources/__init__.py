@@ -19,12 +19,14 @@ from sqlalchemy.orm import Session
 from hofradar.config import SourceConfig
 from hofradar.db.models import Source
 from hofradar.sources.adapters.csv_adapter import CsvAdapter
+from hofradar.sources.adapters.denkmalboerse import DenkmalboerseAdapter
 from hofradar.sources.adapters.generic_rss import GenericRssAdapter
 from hofradar.sources.adapters.generic_sitemap import GenericSitemapAdapter
 from hofradar.sources.adapters.immoscout import ImmoscoutAdapter
 from hofradar.sources.adapters.immowelt import ImmoweltAdapter
 from hofradar.sources.adapters.kleinanzeigen import KleinanzeigenAdapter
 from hofradar.sources.adapters.manual import ManualAdapter
+from hofradar.sources.adapters.ovbimmo import OvbimmoAdapter
 from hofradar.sources.adapters.pdf_bulletin import PdfBulletinAdapter
 from hofradar.sources.adapters.web_search import WebSearchAdapter
 from hofradar.sources.adapters.zvg import ZvgAdapter
@@ -45,6 +47,8 @@ logger = logging.getLogger(__name__)
 ADAPTERS: dict[str, type[SourceAdapter]] = {
     "manual": ManualAdapter,
     "csv": CsvAdapter,
+    "denkmalboerse": DenkmalboerseAdapter,
+    "ovbimmo": OvbimmoAdapter,
     "generic_rss": GenericRssAdapter,
     "generic_sitemap": GenericSitemapAdapter,
     "zvg": ZvgAdapter,
@@ -85,10 +89,10 @@ def sync_sources_to_db(session: Session, configs: Iterable[SourceConfig]) -> lis
     """Upsert config/sources.yaml into the ``sources`` table.
 
     Matches existing rows on ``key``. Updates name/role/base_url/region/
-    reliability/enabled/rate limits/respect_robots/notes/config. Never
-    touches ``last_run_at``, ``last_error`` or ``consecutive_failures`` -
-    that is the pipeline's runtime history, and a config reload must not
-    reset it.
+    reliability/enabled/rate limits/respect_robots/listing_ttl_days/notes/
+    config. Never touches ``last_run_at``, ``last_error`` or
+    ``consecutive_failures`` - that is the pipeline's runtime history, and a
+    config reload must not reset it.
     """
     rows: list[Source] = []
     for cfg in configs:
@@ -106,6 +110,7 @@ def sync_sources_to_db(session: Session, configs: Iterable[SourceConfig]) -> lis
         row.enabled = cfg.enabled
         row.rate_limit_seconds = cfg.rate_limit_seconds
         row.respect_robots = cfg.respect_robots
+        row.listing_ttl_days = cfg.listing_ttl_days
         row.notes = cfg.notes
         row.config = {"adapter": cfg.adapter, "options": cfg.options}
         rows.append(row)

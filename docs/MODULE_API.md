@@ -5,7 +5,22 @@ Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
 GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
-Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig).
+`CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
+`hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
+hard-reject a property on total cost; an "inferred" one only flags it.
+Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig,
+CoverageConfig). `SearchProfile.coverage.municipalities` is not a scoring slider - it
+is excluded from `scoring_payload()` / `profile_hash` - but loads through the same
+config machinery so the report can never drift from `config/search.yaml`.
+`SourceConfig` carries `terms_checked_at: date | None` and `terms_excerpt: str | None` —
+the record of somebody having actually read the source's robots.txt and terms.
+A model validator rejects `enabled=True` unless both are set; see
+`docs/DECISIONS.md` entry 14.
+`SourceConfig` also carries `listing_ttl_days: int | None` (and the matching
+`Source.listing_ttl_days` ORM column) — set for a source that sells a fixed
+advertising window (a newspaper's fortnight), so `hofradar.lifecycle.mark_missing`
+reads its silence past that window as `ListingStatus.EXPIRED`, not `REMOVED`;
+see `docs/DECISIONS.md` entry 15.
 ORM models live in `hofradar.db.models`. Enums in `hofradar.db.enums`.
 
 ---
@@ -35,6 +50,13 @@ is_private_seller, is_off_market_signal` (lists of canonical lowercase tags / bo
 def fingerprint(listing: NormalizedListing | Property) -> str
 def find_duplicate(session, listing: NormalizedListing, *, lat=None, lon=None) -> DuplicateVerdict
 def compare(a, b) -> DuplicateVerdict            # a/b: NormalizedListing | Property
+    # Three short-circuit proofs, then the weighted evidence model. The proofs
+    # are: the same (source_key, external_id); the same canonical listing URL
+    # on ANY source (a URL names one page on one host, so this is the one
+    # proof that crosses source boundaries - it is what joins a portal reached
+    # by both a dedicated adapter and a syndicated feed of the same site); and
+    # a shared image phash. Everything else needs >= 2 corroborating numeric
+    # dimensions; text similarity alone never merges.
 def merge_properties(session, keep: Property, drop: Property) -> Property
 ```
 
@@ -47,6 +69,15 @@ def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
     # when the source listed its whole inventory without error or truncation.
+    # A listing missing past source.listing_ttl_days is set EXPIRED, not
+    # REMOVED - see docs/DECISIONS.md entry 15. Raises ImplausibleAbsence -
+    # and writes nothing - in two cases. First, unconditionally and BEFORE
+    # that EXPIRED split: the seen-set is empty against a real inventory (even
+    # a single visible listing). A listing_ttl_days explains why one advert
+    # vanished, never why a run produced no rows at all, so it cannot excuse
+    # that. Second, after the split: what remains would remove >= 2 listings
+    # AND >= 30% of a source with at least 3 visible listings in one run - a
+    # genuine fortnightly mass-expiry is pulled out before this one and passes.
 def apply_stale_rules(session, *, stale_after_days: int = 45,
                       unverified_stale_after_days: int = 180,
                       non_reporting_source_ids: set[int] | None = None,
@@ -55,6 +86,11 @@ def apply_stale_rules(session, *, stale_after_days: int = 45,
 def repair_phantom_removals(session, *, non_reporting_source_keys: set[str],
                             dry_run: bool = True) -> RepairReport
 def changes_since(session, since: datetime, *, kinds: list[str] | None = None) -> list[dict]
+
+class ImplausibleAbsence(RuntimeError)
+    # Raised by mark_missing when a run's absences are too broad to be
+    # believed (see above). The caller decides what to do - the pipeline logs
+    # it as a source failure and continues with the other sources.
 ```
 
 ## `hofradar.geo`
@@ -67,6 +103,7 @@ async def locate(session, listing: NormalizedListing, profile: SearchProfile) ->
 def within_air_radius(distance_air_km: float | None, profile: SearchProfile) -> bool
 def within_driving_radius(distance_driving_km: float | None, profile: SearchProfile) -> bool | None  # None = unknown
 def driving_band(km: float | None, profile: SearchProfile) -> str  # within_soft | within_hard | beyond | unknown
+def town_in_radius(town: str | None, profile: SearchProfile) -> bool | None  # None = unknown
 ```
 
 ## `hofradar.costmodel`
@@ -75,9 +112,17 @@ def driving_band(km: float | None, profile: SearchProfile) -> str  # within_soft
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
 def infer_renovation_tier(prop: Property) -> str
+def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
 ```
 
 ## `hofradar.scoring`
+
+`GONE_STATUSES` (an internal constant, defined identically in
+`hofradar.scoring.engine` and `hofradar.scoring.signals`) is
+`{ListingStatus.REMOVED, ListingStatus.SOLD}`. `ListingStatus.EXPIRED` is
+deliberately absent from both — an expired advert must not fire
+`REJECT_LISTING_GONE` or zero a property's availability term; see
+`docs/DECISIONS.md` entry 15.
 
 ```python
 def score_property(prop: Property, profile: SearchProfile, *, cost: CostResult | None = None,
@@ -104,12 +149,24 @@ class SourceAdapter:
     key: str
     enumerates: bool                 # does discover() yield a COMPLETE inventory?
     enumeration_complete: bool       # did this run's enumeration finish intact?
+    enumerated_urls: set[str]        # URLs seen this run, fetched or pre-filtered away
     can_prove_absence: bool          # enumerates and complete and can_verify
     def begin_enumeration(self) -> None: ...
     def mark_enumeration_incomplete(self, reason: str) -> None: ...
+    def record_enumerated_url(self, url: str) -> None: ...
     async def discover(self, profile: SearchProfile, keywords: KeywordConfig) -> AsyncIterator[RawListing]: ...
     async def fetch_detail(self, url: str) -> RawListing | None: ...
     async def verify(self, url: str) -> tuple[bool, int | None]: ...   # (still_live, http_status)
+
+# hofradar.sources.adapters.generic_rss
+MAPPABLE_ENTRY_FIELDS: frozenset[str]
+    # The raw RawListing fields a source's options.entry_field_map may fill
+    # from a feed's own element names ({feedparser key: field}). This is how
+    # the generic feed adapter learns a vendor dialect - e.g. classmarkets'
+    # cm_postalcode/cm_locality - without learning the vendor. Raw string
+    # fields only: identity (external_id, url) and authority (contact_kind,
+    # listing_visible) fields are not mappable, and a non-string value is
+    # refused rather than coerced.
 ```
 
 ## `hofradar.report`
@@ -119,7 +176,40 @@ def build_report(session, profile: SearchProfile, *, run_id: int | None = None,
                  since: datetime | None = None) -> ReportData
 def render_markdown(data: ReportData) -> str
 def render_html(data: ReportData) -> str
+
+# hofradar.report.yield_stats - was a source worth building?
+@dataclass
+class SourceYield:
+    source_key: str
+    observed: int    # distinct properties observed since `since`
+    in_radius: int    # of those, how many have distance_air_km <= radius_air_km
+                       # (an unknown distance is never counted as in-radius)
+
+def source_yield(session, *, since: datetime, radius_air_km: float | None = None) -> list[SourceYield]
+    # radius_air_km overrides the "in radius" threshold; omit it and the module
+    # falls back to YIELD_RADIUS_AIR_KM. build_report always passes the
+    # configured profile.radius.air_km_max, so the table matches the radius
+    # printed in the report header rather than an unrelated hardcoded value.
+
+@dataclass
+class MunicipalityCoverage:
+    town: str
+    observed: int    # distinct properties observed since `since`, 0 = dark municipality
+
+def coverage_by_municipality(session, *, since: datetime, expected: list[str]) -> list[MunicipalityCoverage]
+    # `expected` is required, never derived from the data: a town that produced
+    # nothing cannot appear in a query over what was produced. Every name in
+    # `expected` appears in the result, in that order, even at zero. The list
+    # comes from config/search.yaml's `coverage.municipalities` (SearchProfile.coverage,
+    # see hofradar.config.CoverageConfig) - see docs/coverage.md for how it was
+    # built and its caveats.
 ```
+
+`ReportData.source_yields` carries a `source_yield(..., since=now - 28 days)`
+snapshot into both renderers - see docs/DECISIONS.md entry 14.
+`ReportData.municipality_coverage` carries the matching `coverage_by_municipality(...)`
+snapshot into both renderers, rendered as "Dunkle Gemeinden" (towns with zero
+observations over the same window) - see docs/coverage.md.
 
 ## `hofradar.pipeline`
 

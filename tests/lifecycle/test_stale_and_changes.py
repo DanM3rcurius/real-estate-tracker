@@ -65,7 +65,19 @@ def test_changes_since_returns_report_ready_dicts(db_session, make_source, make_
 
     prop, _ = ingest(db_session, make_listing(price=790_000, **facts), source=source, run_id=1)
     ingest(db_session, make_listing(price=749_000, **facts), source=source, run_id=2)
-    mark_missing(db_session, set(), source=source, run_id=3, enumeration_complete=True)
+    # A second, still-visible listing: mark_missing's empty-seen-set guard is
+    # unconditional (Task 3, review round 1, Important 1), so an honest
+    # "only prop is gone" needs a real second listing, not an empty set.
+    anchor, _ = ingest(
+        db_session,
+        make_listing(
+            source_key=source.key, url="https://anchor.example/1",
+            town="Bad Aibling", postcode="83043", land_sqm=1200, living_sqm=90,
+            price=250_000, year_built=1950,
+        ),
+        source=source,
+    )
+    mark_missing(db_session, {anchor.id}, source=source, run_id=3, enumeration_complete=True)
 
     entries = changes_since(db_session, since)
     kinds = [e["kind"] for e in entries]
