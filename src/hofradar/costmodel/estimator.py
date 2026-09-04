@@ -68,6 +68,17 @@ OUTBUILDING_SQM: dict[str, float] = {
 #: Any other outbuilding tag we do not recognise.
 DEFAULT_OUTBUILDING_SQM = 100.0
 
+#: German words for the renovation tiers, for the assumption sentences below.
+#: A small local dict rather than an import from ``hofradar.web`` - this module
+#: must stay usable without the web package installed.
+TIER_WORDS: dict[str, str] = {
+    "light": "leicht",
+    "medium": "mittel",
+    "heavy": "schwer",
+    "complete": "Kernsanierung",
+    "unknown": "unbekannt",
+}
+
 #: Renovation rate bands, tier -> (min attribute, max attribute) on RenovationRates.
 _TIER_RATE_FIELDS: dict[RenovationTier, tuple[str, str]] = {
     RenovationTier.LIGHT: ("light_min", "light_max"),
@@ -109,13 +120,13 @@ def _living_sqm(prop: Property, assumptions: list[str]) -> float:
     if usable and usable > 0:
         derived = float(usable) * USABLE_TO_LIVING_FRACTION
         assumptions.append(
-            f"Living area not stated; assumed {derived:.0f} m2, i.e. "
-            f"{USABLE_TO_LIVING_FRACTION:.0%} of the stated usable area of {usable:.0f} m2."
+            f"Wohnfläche nicht angegeben; angenommen {derived:.0f} m², also "
+            f"{USABLE_TO_LIVING_FRACTION:.0%} der genannten Nutzfläche von {usable:.0f} m²."
         )
         return derived
     assumptions.append(
-        f"Neither living nor usable area stated; assumed the typical Bavarian "
-        f"farmhouse dwelling of {DEFAULT_LIVING_SQM:.0f} m2."
+        f"Weder Wohn- noch Nutzfläche angegeben; angenommen wird das typische "
+        f"bayerische Hofhaus mit {DEFAULT_LIVING_SQM:.0f} m²."
     )
     return DEFAULT_LIVING_SQM
 
@@ -128,10 +139,14 @@ def _outbuilding_sqm(prop: Property, assumptions: list[str]) -> tuple[float, dic
         sqm = OUTBUILDING_SQM[matched] if matched else DEFAULT_OUTBUILDING_SQM
         per_tag[tag] = per_tag.get(tag, 0.0) + sqm
     if per_tag:
-        detail = ", ".join(f"{tag} {sqm:.0f} m2" for tag, sqm in sorted(per_tag.items()))
-        assumptions.append(f"Outbuilding areas assumed from typical Bavarian sizes: {detail}.")
+        detail = ", ".join(f"{tag} {sqm:.0f} m²" for tag, sqm in sorted(per_tag.items()))
+        assumptions.append(
+            f"Nebengebäudeflächen aus typischen bayerischen Größen angenommen: {detail}."
+        )
     else:
-        assumptions.append("No outbuildings tagged; no outbuilding renovation budgeted.")
+        assumptions.append(
+            "Keine Nebengebäude erfasst; keine Sanierung von Nebengebäuden eingeplant."
+        )
     return sum(per_tag.values()), per_tag
 
 
@@ -150,9 +165,9 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
 
     tier = infer_renovation_tier(prop)
     rate_low, rate_mid, rate_high = _tier_rates(tier, profile)
+    tier_word = TIER_WORDS.get(tier.value, tier.value)
     assumptions.append(
-        f"Renovation tier {tier.value.upper()} at {rate_low:.0f}-{rate_high:.0f} EUR/m2 "
-        f"of living area."
+        f"Sanierungsstufe {tier_word} mit {rate_low:.0f}–{rate_high:.0f} €/m² Wohnfläche."
     )
 
     living_sqm = _living_sqm(prop, assumptions)
@@ -164,24 +179,24 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
     roof_sqm = house_footprint * ROOF_FOOTPRINT_FACTOR
     roof = roof_sqm * rates.roof_per_sqm_footprint
     assumptions.append(
-        f"Roof: {living_sqm:.0f} m2 living area over {LIVING_TO_FOOTPRINT_STOREYS} storeys gives a "
-        f"{house_footprint:.0f} m2 house footprint; the continuous farmstead ridge covers "
-        f"{ROOF_FOOTPRINT_FACTOR}x that, so {roof_sqm:.0f} m2 at "
-        f"{rates.roof_per_sqm_footprint:.0f} EUR/m2."
+        f"Dach: {living_sqm:.0f} m² Wohnfläche über {LIVING_TO_FOOTPRINT_STOREYS} Geschosse "
+        f"ergeben {house_footprint:.0f} m² Grundfläche; der durchgehende Hoffirst deckt das "
+        f"{ROOF_FOOTPRINT_FACTOR}-Fache, also {roof_sqm:.0f} m² zu "
+        f"{rates.roof_per_sqm_footprint:.0f} €/m²."
     )
 
     outbuilding_sqm, per_outbuilding = _outbuilding_sqm(prop, assumptions)
     outbuildings = outbuilding_sqm * rates.outbuilding_per_sqm
     if outbuilding_sqm:
         assumptions.append(
-            f"Outbuildings: {outbuilding_sqm:.0f} m2 at "
-            f"{rates.outbuilding_per_sqm:.0f} EUR/m2 to make them weathertight and usable."
+            f"Nebengebäude: {outbuilding_sqm:.0f} m² zu "
+            f"{rates.outbuilding_per_sqm:.0f} €/m², um sie wetterfest und nutzbar zu machen."
         )
 
     utilities = float(rates.utilities_base)
     assumptions.append(
-        f"Utilities (heating, electrics, water, waste water) as a lump sum of "
-        f"{utilities:,.0f} EUR, independent of size."
+        f"Haustechnik (Heizung, Elektrik, Wasser, Abwasser) pauschal {utilities:,.0f} €, "
+        f"unabhängig von der Größe."
     )
 
     base_low = house_low + roof + outbuildings + utilities
@@ -190,9 +205,7 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
     contingency_low = base_low * rates.contingency_pct
     contingency_mid = base_mid * rates.contingency_pct
     contingency_high = base_high * rates.contingency_pct
-    assumptions.append(
-        f"Contingency of {rates.contingency_pct:.0%} on every renovation component."
-    )
+    assumptions.append(f"Puffer von {rates.contingency_pct:.0%} auf jede Sanierungsposition.")
 
     renovation_low = base_low + contingency_low
     renovation_mid = base_mid + contingency_mid
@@ -200,21 +213,21 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
 
     immediate_capex = float(rates.immediate_capex_base)
     assumptions.append(
-        f"Immediate capex of {immediate_capex:,.0f} EUR before the building is usable at all "
-        f"(access, securing the structure, emergency repairs)."
+        f"Sofortmaßnahmen von {immediate_capex:,.0f} €, bevor das Gebäude überhaupt nutzbar "
+        f"ist (Zufahrt, Sicherung, Notreparaturen)."
     )
 
     price = getattr(prop, "price", None)
     purchase = float(price) if price else 0.0
     if not price:
         assumptions.append(
-            "No asking price known; totals below are renovation and capex only and are "
-            "a lower bound, not an estimate."
+            "Kein Angebotspreis bekannt; die Summen sind nur Sanierung und Sofortmaßnahmen "
+            "und eine Untergrenze, keine Schätzung."
         )
     acquisition = acquisition_costs(purchase, profile)
     assumptions.append(
-        f"Acquisition side costs of {profile.budget.acquisition_cost_pct:.2%} of the purchase "
-        f"price (Grunderwerbsteuer, Notar, Grundbuch, Makler) = {acquisition:,.0f} EUR."
+        f"Erwerbsnebenkosten von {profile.budget.acquisition_cost_pct:.2%} des Kaufpreises "
+        f"(Grunderwerbsteuer, Notar, Grundbuch, Makler) = {acquisition:,.0f} €."
     )
 
     fixed = purchase + acquisition + immediate_capex

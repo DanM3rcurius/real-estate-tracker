@@ -94,6 +94,8 @@ small { color: var(--ink-soft); }
 .hint { color: var(--ink-soft); font-size: .9rem; margin-top: 0; }
 .crumb { margin: 0 0 8px; font-size: .9rem; }
 .empty { color: var(--ink-soft); background: var(--bg-sunken); padding: 14px; border-radius: var(--radius); }
+.fold > summary { cursor: pointer; font-weight: 600; margin: 8px 0; }
+.fold[open] > summary { margin-bottom: 4px; }
 
 /* ---------- radar ---------- */
 
@@ -196,6 +198,7 @@ small { color: var(--ink-soft); }
 .btn--small { padding: 5px 10px; font-size: .82rem; }
 .btn--ghost { background: transparent; color: var(--ink); border-color: var(--line); }
 .btn--danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+.btn--on { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
 
 .thinking {
   display: none; align-items: center; gap: 8px;

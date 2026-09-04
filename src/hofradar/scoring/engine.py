@@ -29,6 +29,7 @@ from hofradar.scoring._util import to_utc
 from hofradar.scoring.deal import deal_score
 from hofradar.scoring.fit import fit_score
 from hofradar.scoring.signals import confidence_score, freshness_score, hidden_score
+from hofradar.search import matches_search
 
 if TYPE_CHECKING:  # pragma: no cover
     from sqlalchemy.orm import Session
@@ -89,9 +90,10 @@ SUPPORTED_FILTERS: frozenset[str] = frozenset(
         "verified_only",
         "has_outbuildings",
         "flags",
+        "q",
+        "shortlisted",
     }
 )
-
 
 # --------------------------------------------------------------------------- #
 # Scoring one property
@@ -407,6 +409,8 @@ def _apply_filters(stmt, filters: dict[str, Any]):
         stmt = stmt.where(Property.user_state.in_(states))
     if filters.get("verified_only"):
         stmt = stmt.where(Property.verification_status == VerificationStatus.VERIFIED)
+    if filters.get("shortlisted"):
+        stmt = stmt.where(Property.shortlisted_at.is_not(None))
     return stmt
 
 
@@ -436,6 +440,7 @@ def ranked_properties(
     filters = dict(filters or {})
     wanted_flags = filters.pop("flags", None)
     wanted_outbuildings = filters.pop("has_outbuildings", None)
+    wanted_search = filters.pop("q", None)
 
     blocked = case(
         (Score.confidence_score < profile.gates.min_confidence_for_shortlist, 1), else_=0
@@ -461,6 +466,10 @@ def ranked_properties(
     stmt = _apply_filters(stmt, filters)
 
     rows: list[tuple[Property, Score]] = [tuple(row) for row in session.execute(stmt).all()]
+
+    if wanted_search:
+        # A casefolded Python substring, not a SQL LIKE - see matches_search.
+        rows = [row for row in rows if matches_search(row[0], wanted_search)]
 
     if wanted_outbuildings:
         # A JSON list column; emptiness is not portably testable in SQL.

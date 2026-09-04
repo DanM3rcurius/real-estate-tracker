@@ -34,6 +34,7 @@ APP_SUBTITLE = "Hofstellen im Blick behalten"
 NAV_ITEMS = (
     ("/", "Radar", "🎯"),
     ("/map", "Karte", "🗺"),
+    ("/merkliste", "Merkliste", "⭐"),
     ("/report", "Report", "📰"),
     ("/runs", "Läufe", "⚙️"),
     ("/add", "Hinzufügen", "➕"),
@@ -104,13 +105,14 @@ def create_app(
         health,
         login,
         map_view,
+        merkliste,
         radar,
         reports,
         runs,
         settings,
     )
 
-    for module in (radar, dossier, map_view, reports, runs, add, settings, health):
+    for module in (radar, dossier, map_view, merkliste, reports, runs, add, settings, health):
         app.include_router(module.router)
 
     # Authentication is opt-in: with no password configured the gate is not

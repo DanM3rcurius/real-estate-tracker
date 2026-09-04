@@ -10,14 +10,30 @@ from hofradar.db.models import Property, SearchProfileRecord
 def test_triage_post_persists_user_state(client, db, seeded):
     response = client.post(
         "/property/HF-0001/triage",
-        data={"user_state": "shortlist", "user_note": "Anrufen, Stadel ansehen."},
+        data={"user_state": "watch", "user_note": "Anrufen, Stadel ansehen."},
     )
     assert response.status_code == 200
     assert "Gespeichert" in response.text
 
     db.expire_all()
     prop = db.scalar(select(Property).where(Property.public_id == "HF-0001"))
-    assert prop.user_state == "shortlist"
+    assert prop.user_state == "watch"
+    assert prop.user_note == "Anrufen, Stadel ansehen."
+
+
+def test_triage_legacy_shortlist_puts_it_on_the_merkliste(client, db, seeded):
+    """A stale tab still posts the old value. Honour the intent instead of a lie."""
+    response = client.post(
+        "/property/HF-0001/triage",
+        data={"user_state": "shortlist", "user_note": "Anrufen, Stadel ansehen."},
+    )
+    assert response.status_code == 200
+    assert "Gespeichert: ⭐ gemerkt" in response.text
+
+    db.expire_all()
+    prop = db.scalar(select(Property).where(Property.public_id == "HF-0001"))
+    assert prop.user_state is None
+    assert prop.shortlisted_at is not None
     assert prop.user_note == "Anrufen, Stadel ansehen."
 
 

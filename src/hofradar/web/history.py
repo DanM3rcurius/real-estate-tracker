@@ -17,6 +17,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from hofradar.db.enums import ChangeKind
+
+#: ``timeline()`` entry kinds that the folding pass merges into one line.
+OBSERVATION_KINDS = ("observation",)
+
 #: How far back "recently" reaches for the card chips, in days.
 DEFAULT_WINDOW_DAYS = 7
 
@@ -126,7 +131,7 @@ def timeline(prop: Any) -> list[dict[str, Any]]:
     gefallen" - so each entry carries a pre-built German phrase alongside the
     raw values, and the template only has to print it.
     """
-    from hofradar.web.filters import de_date, de_eur, de_month_year
+    from hofradar.web.filters import de_date, de_eur, de_month_year, de_status
 
     events: list[dict[str, Any]] = []
 
@@ -173,16 +178,27 @@ def timeline(prop: Any) -> list[dict[str, Any]]:
         )
 
     for row in getattr(prop, "status_history", None) or []:
-        moment = as_aware(getattr(row, "observed_at", None))
+        change_kind = getattr(row, "change_kind", None)
+        if str(change_kind) == str(ChangeKind.FIRST_SEEN):
+            # "Erstmals erfasst" above already says this; a second row would
+            # repeat it under a different heading.
+            continue
         old, new = getattr(row, "old_status", None), getattr(row, "new_status", None)
+        if old == new:
+            continue
+        moment = as_aware(getattr(row, "observed_at", None))
         detail = getattr(row, "detail", None)
-        text = f"Status {old or 'unbekannt'} → {new}."
+        text = (
+            f"„{de_status(old)}“ → „{de_status(new)}“."
+            if old
+            else f"Jetzt „{de_status(new)}“."
+        )
         if detail:
             text += f" {detail}"
         events.append(
             {
                 "at": moment,
-                "kind": getattr(row, "change_kind", "status_change"),
+                "kind": change_kind or "status_change",
                 "icon": "🔁",
                 "title": "Statuswechsel",
                 "text": text,
@@ -202,11 +218,55 @@ def timeline(prop: Any) -> list[dict[str, Any]]:
                     f"{de_date(moment)}: Quelle abgerufen"
                     + ("" if visible else " – Inserat nicht mehr erreichbar")
                 ),
+                "visible": visible,
             }
         )
 
     events.sort(key=lambda e: e["at"] or now_utc())
-    return events
+    return _fold_observations(events)
+
+
+def _fold_observations(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse a run of consecutive observation entries into one line.
+
+    The reader does not need to see "Quelle abgerufen" five times in a row; a
+    price or status event in between still starts a new group, so the order
+    of what actually happened is preserved.
+    """
+    from hofradar.web.filters import de_date
+
+    out: list[dict[str, Any]] = []
+    group: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        if not group:
+            return
+        if len(group) == 1:
+            out.append(group[0])
+        else:
+            first, last = group[0], group[-1]
+            text = f"{len(group)} Abrufe seit {de_date(first['at'])}, zuletzt {de_date(last['at'])}"
+            if not last.get("visible", True):
+                text += " – Inserat nicht mehr erreichbar"
+            out.append(
+                {
+                    "at": last["at"],
+                    "kind": "observations",
+                    "icon": "👁",
+                    "title": "Beobachtungen",
+                    "text": text,
+                }
+            )
+        group.clear()
+
+    for event in events:
+        if event["kind"] in OBSERVATION_KINDS:
+            group.append(event)
+        else:
+            flush()
+            out.append(event)
+    flush()
+    return out
 
 
 def timeline_sentence(prop: Any, *, now: datetime | None = None) -> str:

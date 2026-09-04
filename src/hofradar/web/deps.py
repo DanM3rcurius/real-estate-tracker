@@ -9,16 +9,25 @@ never 500, because the value comes from a URL a human can edit.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from hofradar.config import SearchProfile
-from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus
+from hofradar.db.enums import HIDDEN_USER_STATES
+from hofradar.web.filters import STATUS_LABELS
+
+if TYPE_CHECKING:
+    # hofradar.web.query imports ResultFilters from this module, so importing
+    # ResultSet at runtime would be circular; the annotation-only import is safe
+    # because of ``from __future__ import annotations`` above.
+    from hofradar.web.query import ResultSet
 
 # --------------------------------------------------------------------------- #
 # Slider ranges. These are the UI contract; the model's own validators are
@@ -47,20 +56,7 @@ SORT_OPTIONS: dict[str, str] = {
     "drop": "Größter Preisrückgang",
 }
 
-STATUS_OPTIONS: dict[str, str] = {
-    "": "Alle Status",
-    "alive": "Nur aktive",
-    ListingStatus.DISCOVERED: "Entdeckt",
-    ListingStatus.VERIFIED: "Verifiziert",
-    ListingStatus.ACTIVE: "Aktiv",
-    ListingStatus.PRICE_CHANGED: "Preis geändert",
-    ListingStatus.STALE: "Veraltet",
-    ListingStatus.FORECLOSURE: "Zwangsversteigerung",
-    ListingStatus.OFF_MARKET_SIGNAL: "Off-Market-Signal",
-    ListingStatus.REMOVED: "Entfernt",
-    ListingStatus.EXPIRED: "Anzeige abgelaufen",
-    ListingStatus.SOLD: "Verkauft",
-}
+STATUS_OPTIONS: dict[str, str] = {"": "Alle Status", "alive": "Nur aktive", **STATUS_LABELS}
 
 
 # --------------------------------------------------------------------------- #
@@ -254,6 +250,9 @@ class ResultFilters:
     #: The human's triage (``Property.user_state``), which survives every re-run.
     include_hidden: bool = False
     user_state: str = ""
+    #: The Merkliste view: only rows the reader has marked. Set by
+    #: ``routes/merkliste.py``, never remembered in the filter cookie.
+    shortlisted_only: bool = False
     limit: int = RESULT_LIMIT_DEFAULT
     raw: dict[str, str] = field(default_factory=dict)
 
@@ -274,15 +273,15 @@ class ResultFilters:
         if self.outbuildings_only:
             payload["has_outbuildings"] = True
         if self.town:
-            payload["town"] = self.town
+            payload["q"] = self.town
         if self.user_state:
             payload["user_state"] = self.user_state
+        if self.shortlisted_only:
+            payload["shortlisted"] = True
         return payload
 
     def query_string(self, profile: SearchProfile, **overrides: Any) -> str:
         """Rebuild a canonical query string (used for export/permalinks)."""
-        from urllib.parse import urlencode
-
         values: dict[str, Any] = {
             "air_km_max": profile.radius.air_km_max,
             "total_budget_max": profile.budget.total_budget_max,
@@ -294,6 +293,7 @@ class ResultFilters:
             "sort": self.sort,
             "include_rejected": int(self.include_rejected),
             "include_hidden": int(self.include_hidden),
+            "merkliste": int(self.shortlisted_only),
         }
         values.update(overrides)
         return urlencode({k: v for k, v in values.items() if v not in ("", None)})
@@ -323,6 +323,7 @@ def filters_from_query(params: Any) -> ResultFilters:
         include_rejected=to_bool(get("include_rejected")),
         include_hidden=include_hidden,
         user_state=user_state,
+        shortlisted_only=to_bool(get("merkliste")),
         limit=int(clamp(limit, 1, RESULT_LIMIT_MAX)),
         raw={k: v for k, v in dict(params).items() if isinstance(v, str)},
     )
@@ -360,3 +361,64 @@ def _auth_enabled() -> bool:
     from hofradar.web import auth
 
     return auth.password_configured()
+
+
+# --------------------------------------------------------------------------- #
+# Filter memory - one cookie, and a 303 so the URL stays the truth
+# --------------------------------------------------------------------------- #
+
+FILTER_COOKIE = "hofradar_radar"
+FILTER_COOKIE_MAX_AGE = 365 * 24 * 3600
+FILTER_COOKIE_MAX_LEN = 1000
+
+#: The keys ``ResultFilters.query_string`` emits - the only ones remembered.
+REMEMBERED_KEYS: frozenset[str] = frozenset(
+    {
+        "air_km_max", "total_budget_max", "min_land_sqm", "status", "verified_only",
+        "outbuildings_only", "q", "sort", "include_rejected", "include_hidden",
+    }
+)
+#: The two sliders: what the scores depend on. The Merkliste applies only these.
+PROFILE_KEYS: frozenset[str] = frozenset({"air_km_max", "total_budget_max"})
+
+
+def has_control_params(params: Mapping[str, str]) -> bool:
+    return any(key in params for key in REMEMBERED_KEYS)
+
+
+def _parse_saved(raw: str | None) -> list[tuple[str, str]]:
+    if not raw or len(raw) > FILTER_COOKIE_MAX_LEN:
+        return []
+    pairs = [(k, v) for k, v in parse_qsl(raw, keep_blank_values=False) if k in REMEMBERED_KEYS]
+    return pairs
+
+
+def saved_query(request: Request) -> str | None:
+    pairs = _parse_saved(request.cookies.get(FILTER_COOKIE))
+    return urlencode(pairs) if pairs else None
+
+
+def saved_profile_params(request: Request) -> dict[str, str]:
+    return {k: v for k, v in _parse_saved(request.cookies.get(FILTER_COOKIE)) if k in PROFILE_KEYS}
+
+
+def remember_query(response: Response, results: ResultSet) -> None:
+    value = results.filters.query_string(results.profile)
+    response.set_cookie(
+        FILTER_COOKIE, value, max_age=FILTER_COOKIE_MAX_AGE, path="/",
+        samesite="lax", httponly=True,
+    )
+
+
+def forget_query(response: Response) -> None:
+    response.delete_cookie(FILTER_COOKIE, path="/")
+
+
+def redirect_to_saved(request: Request) -> RedirectResponse | None:
+    """The 303 that makes a bare ``/`` show the remembered sliders, or None."""
+    if "reset" in request.query_params or has_control_params(request.query_params):
+        return None
+    saved = saved_query(request)
+    if not saved:
+        return None
+    return RedirectResponse(f"{request.url.path}?{saved}", status_code=303)

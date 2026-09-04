@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from hofradar.web.deps import get_db, render
+from hofradar.web.deps import get_db, has_control_params, redirect_to_saved, remember_query, render
 from hofradar.web.query import row_to_dict
 from hofradar.web.routes.radar import resolve, result_context
 
@@ -26,6 +26,9 @@ PRECISE = ("exact", "street")
 
 @router.get("/map")
 def map_page(request: Request, session: Session = Depends(get_db)):
+    redirect = redirect_to_saved(request)
+    if redirect is not None:
+        return redirect
     results = resolve(request, session)
     points = []
     without_coordinates = []
@@ -46,4 +49,7 @@ def map_page(request: Request, session: Session = Depends(get_db)):
             "radius_km": results.profile.radius.air_km_max,
         }
     )
-    return render(request, "pages/map.html", context)
+    response = render(request, "pages/map.html", context)
+    if has_control_params(request.query_params):
+        remember_query(response, results)
+    return response

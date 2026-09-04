@@ -20,9 +20,10 @@ EVERY_CONTROL = ResultFilters(
     verified_only=True,
     outbuildings_only=True,
     town="Bad Feilnbach",
-    user_state="shortlist",
+    user_state="watch",
     include_rejected=True,
     include_hidden=True,
+    shortlisted_only=True,
 )
 
 

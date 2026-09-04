@@ -18,8 +18,12 @@ from sqlalchemy.orm import Session
 
 from hofradar.web.deps import (
     filters_from_query,
+    forget_query,
     get_db,
+    has_control_params,
     profile_from_query,
+    redirect_to_saved,
+    remember_query,
     render,
 )
 from hofradar.web.query import ResultSet, build_results, row_to_dict
@@ -47,15 +51,26 @@ def result_context(request: Request, results: ResultSet) -> dict[str, Any]:
 
 @router.get("/")
 def radar(request: Request, session: Session = Depends(get_db)):
+    redirect = redirect_to_saved(request)
+    if redirect is not None:
+        return redirect
     results = resolve(request, session)
-    return render(request, "pages/radar.html", result_context(request, results))
+    response = render(request, "pages/radar.html", result_context(request, results))
+    if "reset" in request.query_params:
+        forget_query(response)
+    elif has_control_params(request.query_params):
+        remember_query(response, results)
+    return response
 
 
 @router.get("/api/results")
 def api_results(request: Request, session: Session = Depends(get_db)):
     """The HTMX target. Returns the result-list partial, not a full page."""
     results = resolve(request, session)
-    return render(request, "partials/results.html", result_context(request, results))
+    response = render(request, "partials/results.html", result_context(request, results))
+    if has_control_params(request.query_params):
+        remember_query(response, results)
+    return response
 
 
 @router.get("/api/properties.json")
@@ -99,8 +114,21 @@ CSV_COLUMNS = (
     ("listing_status", "Status"),
     ("verification_status", "Verifikation"),
     ("user_state", "Triage"),
+    ("shortlisted_at", "Merkliste"),
     ("url", "Quelle"),
 )
+
+
+#: The mark is exported as a flag, not the timestamp - the CSV asks "on the
+#: list or not", not "since when".
+CSV_SHORTLISTED_KEY = "shortlisted_at"
+
+
+def _csv_value(key: str, payload: dict[str, Any]) -> Any:
+    value = payload.get(key)
+    if key == CSV_SHORTLISTED_KEY:
+        return "1" if value else ""
+    return value if value is not None else ""
 
 
 @router.get("/api/export.csv")
@@ -115,7 +143,7 @@ def api_export(request: Request, session: Session = Depends(get_db)) -> Response
         scores = payload.get("scores") or {}
         # A missing road route stays empty in the export; it never inherits the air value.
         writer.writerow(
-            [payload.get(key) if payload.get(key) is not None else "" for key, _ in CSV_COLUMNS]
+            [_csv_value(key, payload) for key, _ in CSV_COLUMNS]
             + [
                 scores.get("final", ""),
                 scores.get("fit", ""),

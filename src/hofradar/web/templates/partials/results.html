@@ -17,13 +17,21 @@
   <span>·</span>
   <span>{{ results.hidden_archived | de_number }} archivierte ausgeblendet</span>
   {% endif %}
+  {% if filters.town %}<span>·</span><span>Suche „{{ filters.town }}“</span>{% endif %}
 </p>
 
 {% if not results.rows %}
 <p class="empty">
-  {% if results.total_in_db == 0 %}
+  {% if filters.shortlisted_only and results.total_in_db == 0 %}
+    Noch nichts gemerkt. Auf einem Dossier oder einer Trefferkarte ☆ Merken drücken.
+  {% elif filters.shortlisted_only %}
+    Alle gemerkten Objekte sind archiviert.
+  {% elif results.total_in_db == 0 %}
     Noch keine Objekte in der Datenbank. Über <a href="/add">Hinzufügen</a> ein Inserat einfügen
     oder unter <a href="/runs">Läufe</a> eine Suche starten.
+  {% elif filters.town %}
+    0 Treffer für „{{ filters.town }}“. Ort, PLZ, Ortsteil oder ein Wort aus dem Titel werden
+    durchsucht.
   {% else %}
     Kein Objekt passt zu diesen Reglern. Entfernung oder Gesamtbudget erhöhen.
   {% endif %}

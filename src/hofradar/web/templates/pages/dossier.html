@@ -18,6 +18,7 @@
     {% if best_url %}
     <p><a class="btn" href="{{ best_url }}" rel="noopener noreferrer nofollow" target="_blank">Inserat öffnen</a></p>
     {% endif %}
+    {% include "partials/merken_button.html" %}
   </header>
 
   <section class="dossier__section">
@@ -71,7 +72,7 @@
     {{ ui.score_badges(score) }}
     {% if score %}
     <p>
-      Kapitalrisiko: <b>{{ score.capital_risk or 'unbekannt' }}</b>
+      Kapitalrisiko: <b>{{ capital_risk_label or 'unbekannt' }}</b>
       {% if score.flags %}· Merkmale: {{ score.flags | join(', ') }}{% endif %}
     </p>
     {% if score.rejected %}
@@ -82,16 +83,19 @@
     {% endif %}
     {% endif %}
     {% if breakdown_rows %}
-    <div class="tablewrap">
-      <table class="table">
-        <thead><tr><th scope="col">Position</th><th scope="col">Punkte</th></tr></thead>
-        <tbody>
-          {% for row in breakdown_rows %}
-          <tr><th scope="row">{{ row.path }}</th><td>{{ row.value }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <details class="fold">
+      <summary>Punkteaufschlüsselung ({{ breakdown_rows | length }} Positionen)</summary>
+      <div class="tablewrap">
+        <table class="table">
+          <thead><tr><th scope="col">Position</th><th scope="col">Punkte</th></tr></thead>
+          <tbody>
+            {% for row in breakdown_rows %}
+            <tr><th scope="row">{{ row.path }}</th><td>{{ row.value }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
     {% else %}
     <p class="empty">Keine Punkteaufschlüsselung vorhanden.</p>
     {% endif %}
@@ -105,6 +109,8 @@
       <table class="table">
         <thead><tr><th scope="col">Position</th><th scope="col">Betrag</th></tr></thead>
         <tbody>
+          <tr><th scope="row">Sanierungsstufe</th>
+              <td><b>{{ renovation_tier_label }}</b> <small>· {{ renovation_basis }}</small></td></tr>
           <tr><th scope="row">Kaufpreis</th><td>{{ cost.purchase_price | de_eur }}</td></tr>
           <tr><th scope="row">Erwerbsnebenkosten</th><td>{{ cost.acquisition_costs | de_eur }}</td></tr>
           <tr><th scope="row">Sanierung (niedrig / mittel / hoch)</th>
@@ -116,6 +122,10 @@
         </tbody>
       </table>
     </div>
+    <p class="hint">
+      Stufe: das schlechteste Signal aus Zustand, Merkmalen und Baujahr gewinnt. Ohne Angabe
+      zum Zustand gilt ein Baujahr vor 1960 als „schwer“.
+    </p>
     <h3>Annahmen</h3>
     {% if cost.assumptions %}
     <ul class="list">{% for item in cost.assumptions %}<li>{{ item }}</li>{% endfor %}</ul>

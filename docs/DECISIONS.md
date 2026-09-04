@@ -575,3 +575,74 @@ snapshot is the operator's job there; `hofradar delete-property --apply
 dump. And `hofradar.db.enums.HIDDEN_USER_STATES` — not `hofradar.scoring` — owns
 the vocabulary, because the web layer applies it in its own filter pass, which
 must keep working when the scoring package cannot be imported (`web/lazy.py`).
+
+---
+
+## 21. The Merkliste is a flag, not a triage state; the radar remembers by redirecting
+
+**Decision.** The reader's bookmarked properties (the *Merkliste*) are stored in
+`Property.shortlisted_at: DateTime(timezone=True) | None`. `POST /property/
+{public_id}/merken` (which toggles it null ↔ now) is the only route that writes
+it on a reader's action; the legacy-triage branch and `dedupe.merge` also set it
+(see "Legacy silence" below). It is read by `ResultFilters.shortlisted_only: bool`
+(query key `merkliste=1`), which the radar and the Merkliste both honour, but the
+Merkliste never applies the profile's slider gate to a mark - the sliders only
+score and label it, they do not filter it - and its counts (`total_in_db`,
+`hidden_archived`) are taken over the marked set, not the whole database. Filter
+memory —
+every slider, search box term and sort preference — lives in a single cookie
+`hofradar_radar`, the canonical query string of `ResultFilters.query_string()`.
+A bare `GET /` (or `GET /map`) with no query parameters and a non-empty cookie
+answers `303` to the same path with the cookie's query string appended, so the
+address bar always shows the real state. The Merkliste route `GET /merkliste`
+applies only the *profile* half of the cookie (the two sliders `air_km_max` and
+`total_budget_max`), never the *view filters* (search box, status, sort, switches):
+a saved `q=Miesbach` must not empty the reader's own bookmarked list.
+
+**Why a separate column.** The list is orthogonal to triage. A farm marked
+`Kontaktiert` stays on the Merkliste, and deleting `user_state` does not clear
+`shortlisted_at`. The second reason is the #9 lesson: one German word, one fact.
+The digest's "shortlist" is the scorer's top ten (see `report/data.py`) and keeps
+its name; the reader's list is *Merkliste* everywhere in UI copy. The radio choice
+`⭐ Shortlist` left `USER_STATES`, so `Property.user_state` holds only triage:
+`watch`, `contacted`, `rejected` and `archived` (where `archived` is "off my
+radar" and `rejected` is "I decided about this and it stays visible").
+
+**Legacy silence.** Two places would otherwise silently drop the mark, the shape
+of bug this codebase keeps producing (entries 17, 18, 19). A form rendered
+before the Merkliste existed still posts `user_state=shortlist`: the triage route
+treats it as "put it on the Merkliste", setting `shortlisted_at` if null, clearing
+`user_state`, and answering `Gespeichert: ⭐ gemerkt`. The migration adds the
+column and converts `user_state='shortlist'` to `shortlisted_at=updated_at` (the
+best available timestamp) in one SQL statement, honoring the reader's saved list.
+When two properties merge, `dedupe.merge` picks the earlier `shortlisted_at` from
+either side (`min(filter(None, ...))`), so absorbing a duplicate never un-marks a
+farm.
+
+**Why a cookie plus 303, not localStorage.** The URL is the truth. `ResultFilters.
+query_string()` already emits the canonical query string for permalinks (CSV,
+JSON, map exports); it feeds the cookie directly, and a bare `/` redirects to show
+it. This costs no Javascript, no server-side session table, no stale-tab
+inconsistencies. The existing `syncUrl` in `app.js` keeps working and the dossier's
+← Radar crumb and the top-nav links need no change — they are built from `request.
+url.path` and already do the right thing when the query string is in the URL. Guard
+rails: the cookie is only honoured if it is ≤ 1,000 characters and parses to at
+least one known key; the `reset`, `profile`, `limit` and unknown keys are never
+stored; overwriting on the next request is silent.
+
+**Why Python, not SQL.** `ResultFilters.as_scoring_filters()` emits `q` (not
+`town`) for the search box. The scoring engine applies it in Python after the SQL
+query, exactly like `flags` and `has_outbuildings` already are, not as a SQL
+`LIKE`. SQLite's `lower()` is ASCII-only, so `lower('Ödhof')` never matches a
+casefolded `öd` — and the radar would be wrong for every umlaut village. One
+function `hofradar.search.matches_search(prop, needle)` (casefolded substring
+over `town`, `postcode`, `district`, `canonical_title`) lives in the neutral
+module `hofradar/search.py`, and both `scoring/engine.py` and `web/query.py`
+import it from there: the web layer must keep working when the scoring package
+is missing (`web/lazy.py`), and the engine must never import the web package.
+So the ranked path and the degraded path cannot drift.
+
+**Consequence.** A test must not assert defaults on a bare `/` after it has
+requested `/` with parameters in the same `TestClient` — cookies are kept across
+requests in the test harness, so a following bare `/` may redirect and the response
+will carry the saved filters in its redirect target.
