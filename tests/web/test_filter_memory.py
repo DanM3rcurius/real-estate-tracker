@@ -25,6 +25,14 @@ def test_htmx_results_set_the_cookie_too(client, seeded):
     assert FILTER_COOKIE in response.cookies
 
 
+def test_bare_api_results_does_not_overwrite_the_remembered_cookie(client, seeded):
+    client.get("/?air_km_max=50&total_budget_max=700000")
+    client.get("/api/results")
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 303
+    assert "air_km_max=50" in response.headers["location"]
+
+
 def test_bare_radar_redirects_to_the_remembered_state(client, seeded):
     client.get("/?air_km_max=50&total_budget_max=700000&q=Traun")
     response = client.get("/", follow_redirects=False)
