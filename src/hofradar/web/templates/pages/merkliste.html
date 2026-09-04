@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Merkliste – {{ app_title }}{% endblock %}
+{% block content %}
+<section class="page">
+  <h1>⭐ Merkliste</h1>
+  <p class="hint">{{ results.total_matched | de_number }} gemerkt · bewertet mit
+     {{ profile.radius.air_km_max | de_km(0) }} und {{ profile.budget.total_budget_max | de_eur }}.
+     <a href="/">Regler ändern</a></p>
+  {% if not results.rows and not results.hidden_archived %}
+  <p class="empty">Noch nichts gemerkt. Auf einem Dossier oder einer Karte ☆ Merken drücken.</p>
+  {% else %}
+  <div id="results">{% include "partials/results.html" %}</div>
+  {% endif %}
+</section>
+{% endblock %}

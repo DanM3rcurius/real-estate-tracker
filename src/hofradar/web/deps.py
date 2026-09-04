@@ -250,6 +250,9 @@ class ResultFilters:
     #: The human's triage (``Property.user_state``), which survives every re-run.
     include_hidden: bool = False
     user_state: str = ""
+    #: The Merkliste view: only rows the reader has marked. Set by
+    #: ``routes/merkliste.py``, never remembered in the filter cookie.
+    shortlisted_only: bool = False
     limit: int = RESULT_LIMIT_DEFAULT
     raw: dict[str, str] = field(default_factory=dict)
 
@@ -273,6 +276,8 @@ class ResultFilters:
             payload["q"] = self.town
         if self.user_state:
             payload["user_state"] = self.user_state
+        if self.shortlisted_only:
+            payload["shortlisted"] = True
         return payload
 
     def query_string(self, profile: SearchProfile, **overrides: Any) -> str:
@@ -290,6 +295,7 @@ class ResultFilters:
             "sort": self.sort,
             "include_rejected": int(self.include_rejected),
             "include_hidden": int(self.include_hidden),
+            "merkliste": int(self.shortlisted_only),
         }
         values.update(overrides)
         return urlencode({k: v for k, v in values.items() if v not in ("", None)})
@@ -319,6 +325,7 @@ def filters_from_query(params: Any) -> ResultFilters:
         include_rejected=to_bool(get("include_rejected")),
         include_hidden=include_hidden,
         user_state=user_state,
+        shortlisted_only=to_bool(get("merkliste")),
         limit=int(clamp(limit, 1, RESULT_LIMIT_MAX)),
         raw={k: v for k, v in dict(params).items() if isinstance(v, str)},
     )

@@ -213,6 +213,13 @@ def _merge_facts(keep: Property, drop: Property) -> None:
     if keep.fingerprint is None:
         keep.fingerprint = drop.fingerprint
 
+    # The Merkliste mark: either side marked -> survivor marked, earliest
+    # timestamp. Not a fillable field (a blank on ``keep`` never wins here) and
+    # not a max-optional (a mark is never un-set by absorbing a duplicate).
+    keep.shortlisted_at = min(
+        filter(None, (as_utc(keep.shortlisted_at), as_utc(drop.shortlisted_at))), default=None
+    )
+
 
 def _merge_evidence(keep: Property, drop: Property) -> None:
     """Union the evidence dicts, keeping the higher-confidence entry per field."""

@@ -28,14 +28,22 @@ router = APIRouter(tags=["dossier"])
 #: states in :data:`~hofradar.db.enums.HIDDEN_USER_STATES` take it off the
 #: screen, and the labels have to say which is which - one German word for both
 #: is what GitHub issue #9 reported. See docs/DECISIONS.md entry 20.
+#: There is no "shortlist" entry any more: the Merkliste (``Property.
+#: shortlisted_at``, the ``/merken`` route) replaced it. It was orthogonal to
+#: triage - a Kontaktiert farm can stay on the list - and collided with the
+#: same one-word-two-facts lesson issue #9 already taught this file.
 USER_STATES: dict[str, str] = {
-    "shortlist": "⭐ Shortlist",
     "watch": "👀 Beobachten",
     "contacted": "📞 Kontaktiert",
     "rejected": "🚫 Abgelehnt (bleibt sichtbar)",
     "archived": "📦 Archiviert – nicht mehr anzeigen",
     "none": "– kein Status",
 }
+
+#: A form rendered before the Merkliste existed still posts this. Honoured as
+#: "put it on the Merkliste" rather than silently dropped - see decision 20 /
+#: docs/superpowers/specs/2026-09-04-ui-refinements-design.md section 2.
+LEGACY_SHORTLIST_STATE = "shortlist"
 
 #: Cost breakdown keys -> German labels. The table already prints purchase
 #: price, acquisition costs and immediate capex from ``CostEstimate`` columns
@@ -304,6 +312,13 @@ def triage(
             status_code=404,
         )
     state = (user_state or "none").strip().lower()
+    legacy_marked = False
+    if state == LEGACY_SHORTLIST_STATE:
+        # A form rendered before the Merkliste existed. Honour the intent.
+        if prop.shortlisted_at is None:
+            prop.shortlisted_at = history.now_utc()
+        state = "none"
+        legacy_marked = True
     if state not in USER_STATES:
         state = "none"
     prop.user_state = None if state == "none" else state
@@ -314,8 +329,28 @@ def triage(
     return render(
         request,
         "partials/triage.html",
-        {"prop": prop, "user_states": USER_STATES, "saved": True},
+        {"prop": prop, "user_states": USER_STATES, "saved": True, "legacy_marked": legacy_marked},
     )
+
+
+@router.post("/property/{public_id}/merken")
+def merken(public_id: str, request: Request, session: Session = Depends(get_db)):
+    """The Merkliste toggle. The only writer of ``Property.shortlisted_at``."""
+    prop = load_property(session, public_id)
+    if prop is None:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 404, "message": f"Kein Objekt mit der ID {public_id}."},
+            status_code=404,
+        )
+    prop.shortlisted_at = None if prop.shortlisted_at else history.now_utc()
+    session.add(prop)
+    session.commit()
+    session.refresh(prop)
+    if request.headers.get("HX-Request"):
+        return render(request, "partials/merken_button.html", {"prop": prop})
+    return RedirectResponse(f"/property/{prop.public_id}", status_code=303)
 
 
 @router.post("/property/{public_id}/delete")

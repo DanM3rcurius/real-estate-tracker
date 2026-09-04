@@ -199,6 +199,10 @@ class Property(Base, TimestampMixin):
     user_state: Mapped[str | None] = mapped_column(String(24), index=True)
     user_note: Mapped[str | None] = mapped_column(Text)
 
+    #: On the reader's Merkliste since. Triage-class data like ``user_state``;
+    #: null means not on the list. Written only by the ``/merken`` route.
+    shortlisted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
     observations: Mapped[list[Observation]] = relationship(
         back_populates="property", cascade="all, delete-orphan"
     )

@@ -91,6 +91,7 @@ SUPPORTED_FILTERS: frozenset[str] = frozenset(
         "has_outbuildings",
         "flags",
         "q",
+        "shortlisted",
     }
 )
 
@@ -408,6 +409,8 @@ def _apply_filters(stmt, filters: dict[str, Any]):
         stmt = stmt.where(Property.user_state.in_(states))
     if filters.get("verified_only"):
         stmt = stmt.where(Property.verification_status == VerificationStatus.VERIFIED)
+    if filters.get("shortlisted"):
+        stmt = stmt.where(Property.shortlisted_at.is_not(None))
     return stmt
 
 
