@@ -131,9 +131,17 @@
         <span>nur mit Nebengebäuden</span>
       </label>
 
+      {# Two different facts, deliberately two switches: the first is the
+         Bewertungs-Gate (Score.rejected), the second is the human triage
+         (user_state). Both used to be called „abgelehnt". #}
       <label class="switch">
         <input type="checkbox" name="include_rejected" value="1"{% if filters.include_rejected %} checked{% endif %}>
-        <span>auch abgelehnte zeigen</span>
+        <span>vom Bewertungs-Gate aussortierte zeigen</span>
+      </label>
+
+      <label class="switch">
+        <input type="checkbox" name="include_hidden" value="1"{% if filters.include_hidden %} checked{% endif %}>
+        <span>Ausgeblendete anzeigen</span>
       </label>
 
       <noscript><button type="submit" class="btn">Anwenden</button></noscript>

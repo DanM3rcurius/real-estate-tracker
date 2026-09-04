@@ -47,6 +47,29 @@ def test_triage_none_clears_the_flag(client, db, seeded):
     assert prop.user_state is None
 
 
+def test_the_triage_vocabulary_offers_the_hidden_state(client, db, seeded):
+    """A state the radar hides must be selectable, or nothing can ever set it."""
+    from hofradar.db.enums import HIDDEN_USER_STATES
+    from hofradar.web.routes.dossier import USER_STATES
+
+    assert HIDDEN_USER_STATES <= set(USER_STATES)
+    assert "Abgelehnt" in USER_STATES["rejected"]
+    assert "sichtbar" in USER_STATES["rejected"]  # no longer collides with the gate
+
+
+def test_triage_can_archive_and_unarchive(client, db, seeded):
+    client.post("/property/HF-0001/triage", data={"user_state": "archived"})
+    db.expire_all()
+    prop = db.scalar(select(Property).where(Property.public_id == "HF-0001"))
+    assert prop.user_state == "archived"
+
+    client.post("/property/HF-0001/triage", data={"user_state": "none"})
+    db.expire_all()
+    prop = db.scalar(select(Property).where(Property.public_id == "HF-0001"))
+    assert prop.user_state is None
+    assert "HF-0001" in client.get("/").text
+
+
 def test_settings_saves_a_profile(client, db):
     response = client.post(
         "/settings",

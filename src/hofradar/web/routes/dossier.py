@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from hofradar.db.models import Property
@@ -23,11 +23,16 @@ from hofradar.web.query import best_url, change_chips, load_property, row_to_dic
 router = APIRouter(tags=["dossier"])
 
 #: ``user_state`` values the triage control accepts. "none" clears the flag.
+#: "rejected" is a verdict about the farm and keeps it on the radar; only the
+#: states in :data:`~hofradar.db.enums.HIDDEN_USER_STATES` take it off the
+#: screen, and the labels have to say which is which - one German word for both
+#: is what GitHub issue #9 reported. See docs/DECISIONS.md entry 20.
 USER_STATES: dict[str, str] = {
     "shortlist": "⭐ Shortlist",
     "watch": "👀 Beobachten",
     "contacted": "📞 Kontaktiert",
-    "rejected": "🚫 Abgelehnt",
+    "rejected": "🚫 Abgelehnt (bleibt sichtbar)",
+    "archived": "📦 Archiviert – nicht mehr anzeigen",
     "none": "– kein Status",
 }
 
@@ -190,6 +195,67 @@ def triage(
         "partials/triage.html",
         {"prop": prop, "user_states": USER_STATES, "saved": True},
     )
+
+
+@router.post("/property/{public_id}/delete")
+def delete(
+    public_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    confirm_public_id: str = Form(default=""),
+):
+    """The narrow escape hatch: a mis-crawl or a duplicate, gone for good.
+
+    Triage's 📦 *Archiviert* is the answer to "get this off my radar"; this is
+    the answer to "this was never a property". It takes the ``public_id`` typed
+    back by hand because it destroys append-only history that no source can
+    re-supply, and it refuses outright while another row was merged into this
+    one - deleting the survivor of a merge would resurrect the duplicate.
+    """
+    from hofradar.db.backup import BackupUnavailable
+    from hofradar.lifecycle import ResurrectsMergedDuplicates, delete_property
+
+    prop = load_property(session, public_id)
+    if prop is None:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 404, "message": f"Kein Objekt mit der ID {public_id}."},
+            status_code=404,
+        )
+    if (confirm_public_id or "").strip() != prop.public_id:
+        return render(
+            request,
+            "pages/error.html",
+            {
+                "code": 400,
+                "message": (
+                    f"Zum Löschen muss die ID {prop.public_id} genau eingetippt werden. "
+                    "Es wurde nichts gelöscht."
+                ),
+            },
+            status_code=400,
+        )
+    try:
+        delete_property(session, prop)
+    except ResurrectsMergedDuplicates as exc:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 409, "message": f"Nicht gelöscht: {exc}"},
+            status_code=409,
+        )
+    except BackupUnavailable as exc:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 409, "message": f"Nicht gelöscht, keine Sicherung möglich: {exc}"},
+            status_code=409,
+        )
+    if request.headers.get("HX-Request"):
+        # HTMX follows a 303 itself and would swap the radar into the dossier.
+        return Response(status_code=204, headers={"HX-Redirect": "/"})
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/api/property/{public_id}.json")

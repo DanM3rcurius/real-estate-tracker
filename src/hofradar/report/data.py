@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from hofradar.config import SearchProfile
-from hofradar.db.enums import ChangeKind, ListingStatus, VerificationStatus
+from hofradar.db.enums import HIDDEN_USER_STATES, ChangeKind, ListingStatus, VerificationStatus
 from hofradar.db.models import Property, Score
 from hofradar.report.yield_stats import (
     MunicipalityCoverage,
@@ -401,6 +401,11 @@ def _count(properties: list[Property], since: datetime) -> ReportCounts:
 
 # --------------------------------------------------------------------------- #
 # Ranking (lazily, so a half-written scoring module cannot break the report)
+#
+# The digest is a reader-facing view, so an archived property is left out of
+# the entries - but it stays in ``counts``, because the report also says how
+# much the database is tracking and that number must not shrink when somebody
+# tidies their screen.
 # --------------------------------------------------------------------------- #
 
 
@@ -416,6 +421,7 @@ def _ranked(
         profile,
         limit=limit,
         include_rejected=False,
+        include_hidden=False,
     )
     if degraded is not None or pairs is None:
         if degraded is not None:
@@ -426,6 +432,8 @@ def _ranked(
                 (s for s in (prop.scores or []) if s.profile_hash == profile.profile_hash), None
             )
             if score is not None and score.rejected:
+                continue
+            if (prop.user_state or "") in HIDDEN_USER_STATES:
                 continue
             scored.append((prop, score))
         scored.sort(
