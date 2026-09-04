@@ -360,3 +360,70 @@ def _auth_enabled() -> bool:
     from hofradar.web import auth
 
     return auth.password_configured()
+
+
+# --------------------------------------------------------------------------- #
+# Filter memory - one cookie, and a 303 so the URL stays the truth
+# --------------------------------------------------------------------------- #
+
+FILTER_COOKIE = "hofradar_radar"
+FILTER_COOKIE_MAX_AGE = 365 * 24 * 3600
+FILTER_COOKIE_MAX_LEN = 1000
+
+#: The keys ``ResultFilters.query_string`` emits - the only ones remembered.
+REMEMBERED_KEYS: frozenset[str] = frozenset(
+    {
+        "air_km_max", "total_budget_max", "min_land_sqm", "status", "verified_only",
+        "outbuildings_only", "q", "sort", "include_rejected", "include_hidden",
+    }
+)
+#: The two sliders: what the scores depend on. The Merkliste applies only these.
+PROFILE_KEYS: frozenset[str] = frozenset({"air_km_max", "total_budget_max"})
+
+
+def has_control_params(params: Any) -> bool:
+    return any(key in params for key in REMEMBERED_KEYS)
+
+
+def _parse_saved(raw: str | None) -> list[tuple[str, str]]:
+    from urllib.parse import parse_qsl
+
+    if not raw or len(raw) > FILTER_COOKIE_MAX_LEN:
+        return []
+    pairs = [(k, v) for k, v in parse_qsl(raw, keep_blank_values=False) if k in REMEMBERED_KEYS]
+    return pairs
+
+
+def saved_query(request: Request) -> str | None:
+    from urllib.parse import urlencode
+
+    pairs = _parse_saved(request.cookies.get(FILTER_COOKIE))
+    return urlencode(pairs) if pairs else None
+
+
+def saved_profile_params(request: Request) -> dict[str, str]:
+    return {k: v for k, v in _parse_saved(request.cookies.get(FILTER_COOKIE)) if k in PROFILE_KEYS}
+
+
+def remember_query(response: Any, results: Any) -> None:
+    value = results.filters.query_string(results.profile)
+    response.set_cookie(
+        FILTER_COOKIE, value, max_age=FILTER_COOKIE_MAX_AGE, path="/",
+        samesite="lax", httponly=True,
+    )
+
+
+def forget_query(response: Any) -> None:
+    response.delete_cookie(FILTER_COOKIE, path="/")
+
+
+def redirect_to_saved(request: Request):
+    """The 303 that makes a bare ``/`` show the remembered sliders, or None."""
+    from fastapi.responses import RedirectResponse
+
+    if "reset" in request.query_params or has_control_params(request.query_params):
+        return None
+    saved = saved_query(request)
+    if not saved:
+        return None
+    return RedirectResponse(f"{request.url.path}?{saved}", status_code=303)

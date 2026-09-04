@@ -18,8 +18,12 @@ from sqlalchemy.orm import Session
 
 from hofradar.web.deps import (
     filters_from_query,
+    forget_query,
     get_db,
+    has_control_params,
     profile_from_query,
+    redirect_to_saved,
+    remember_query,
     render,
 )
 from hofradar.web.query import ResultSet, build_results, row_to_dict
@@ -47,15 +51,25 @@ def result_context(request: Request, results: ResultSet) -> dict[str, Any]:
 
 @router.get("/")
 def radar(request: Request, session: Session = Depends(get_db)):
+    redirect = redirect_to_saved(request)
+    if redirect is not None:
+        return redirect
     results = resolve(request, session)
-    return render(request, "pages/radar.html", result_context(request, results))
+    response = render(request, "pages/radar.html", result_context(request, results))
+    if "reset" in request.query_params:
+        forget_query(response)
+    elif has_control_params(request.query_params):
+        remember_query(response, results)
+    return response
 
 
 @router.get("/api/results")
 def api_results(request: Request, session: Session = Depends(get_db)):
     """The HTMX target. Returns the result-list partial, not a full page."""
     results = resolve(request, session)
-    return render(request, "partials/results.html", result_context(request, results))
+    response = render(request, "partials/results.html", result_context(request, results))
+    remember_query(response, results)
+    return response
 
 
 @router.get("/api/properties.json")
