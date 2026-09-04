@@ -102,6 +102,9 @@ result from an input it should have rejected or a fact it quietly dropped, and
 nothing errors. When something here goes wrong, suspect a missing warning
 before a wrong calculation. Anything that drops a load-bearing fact gets a
 `NormalizedListing.warnings` entry and a place in the UI - see decision 18.
+A fetched page now has to prove it is a listing before `ingest` will remember
+it (`page_kind`, `NotAListing`, decision 19) - a fact-count gate cannot, because
+a portal's search page yields facts scraped off several adverts at once.
 
 **The suite cannot see schema drift on its own.** Every fixture builds its
 database from the models with `create_all()`, where a missing migration is

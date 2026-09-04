@@ -5,6 +5,11 @@ Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
 GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
+`RawListing.page_kind` and `NormalizedListing.page_kind` are `PageKind`
+(`PAGE_KIND_LISTING` / `PAGE_KIND_INDEX` / `PAGE_KIND_UTILITY`, all defined in
+`hofradar.contracts`), defaulting to `"listing"` so a source that hands over
+one advert it already knows to be one says nothing. Only a `listing` may
+become a `Property`; see `docs/DECISIONS.md` entry 19.
 `CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
 `hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
 hard-reject a property on total cost; an "inferred" one only flags it.
@@ -65,6 +70,11 @@ five-digit run. A recovered location carries lower evidence confidence and says
 so in `warnings`; a listing with no recoverable location warns too, rather than
 leaving `town` silently `None`. See `docs/DECISIONS.md` entry 18.
 
+`normalize_listing` carries `raw.page_kind` through unchanged and, for anything
+other than `PAGE_KIND_LISTING`, prepends a German `warnings` line saying what
+the page actually was — the fact every other field below it depends on. It does
+not refuse: refusing is `hofradar.lifecycle.ingest`'s call (entry 19).
+
 `FeatureExtraction` is a dataclass with: `building_features, outbuildings,
 special_features, exclusion_flags, hidden_signals, is_foreclosure, is_monument,
 is_private_seller, is_off_market_signal` (lists of canonical lowercase tags / bools).
@@ -90,6 +100,9 @@ def merge_properties(session, keep: Property, drop: Property) -> Property
 ```python
 def ingest(session, listing: NormalizedListing, *, run_id: int | None = None,
            source: Source, geo: GeoResult | None = None) -> tuple[Property, ChangeResult]
+    # Raises NotAListing - writing nothing at all, not even the Observation -
+    # when listing.page_kind is not PAGE_KIND_LISTING. Checked before
+    # find_duplicate: docs/DECISIONS.md entry 19.
 def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
@@ -116,6 +129,12 @@ class ImplausibleAbsence(RuntimeError)
     # Raised by mark_missing when a run's absences are too broad to be
     # believed (see above). The caller decides what to do - the pipeline logs
     # it as a source failure and continues with the other sources.
+
+class NotAListing(ValueError)
+    # Raised by ingest for a page that is not one advert, carrying .url,
+    # .page_kind and a short English .reason. Not a source failure: the
+    # pipeline counts it by reason and carries on, the paste box turns it
+    # into a German sentence.
 ```
 
 ## `hofradar.geo`
@@ -192,6 +211,28 @@ MAPPABLE_ENTRY_FIELDS: frozenset[str]
     # fields only: identity (external_id, url) and authority (contact_kind,
     # listing_visible) fields are not mappable, and a non-string value is
     # refused rather than coerced.
+
+# hofradar.sources.adapters._htmlutil - the shared full-page lift. Package
+# internal (adapters only), but every HTML adapter depends on it, so its
+# surface is pinned here:
+def raw_listing_from_html(source_key, url, html, *, http_status=None,
+                          extra=None) -> RawListing
+def extract_labeled_fields(text: str) -> dict[str, str]
+def listing_title(tree: HTMLParser, url: str) -> str | None
+    # JSON-LD name -> <h1> -> og:title -> <title>, with a trailing site name
+    # stripped only when it matches og:site_name or the URL's own host.
+def page_kind(tree: HTMLParser, url: str) -> PageKind
+    # listing | index | utility. Signals, in order: UTILITY_PATH_RE on the
+    # path; the page's own heading; schema.org @type (an index declaration
+    # outranks a listing one, because a portal makes both at once); many
+    # sibling result-card links. Unclassified is "listing", so a plain broker
+    # detail page that declares nothing still ingests. DECISIONS entry 19.
+def is_utility_url(url: str) -> bool
+UTILITY_PATH_RE: re.Pattern
+    # Whole path segments only (/merkliste, /suchagent, /login, /impressum,
+    # /suche, ...), so /suchergebnisse is not read as /suche. The generic
+    # sitemap and RSS adapters skip these URLs - AFTER recording them as
+    # enumerated, so invariant 4b / can_prove_absence are unaffected.
 ```
 
 ## `hofradar.report`

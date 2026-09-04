@@ -442,3 +442,66 @@ shortlist — it just no longer does so silently.
 entry 17 is the same shape one layer down, and issue #2 was a third. Anything
 that quietly drops a load-bearing fact gets a `warnings` entry and a place in
 the UI.
+
+---
+
+## 19. A fetched page must prove it is a listing before it becomes a property
+
+**Decision.** Every full-page lift classifies what it fetched —
+`_htmlutil.page_kind()` returns `listing`, `index` or `utility` — the kind
+rides along on `RawListing`/`NormalizedListing` as `page_kind`, and
+`hofradar.lifecycle.ingest` raises `NotAListing` for anything that is not a
+`listing`, **before** `find_duplicate` and before the observation. A refused
+page leaves no row of any kind.
+
+**Why.** A property titled *„Merkliste"* — a portal's bookmark widget, every
+fact `k. A.` — reached the radar with a `public_id`, a geocode and a score
+(GitHub issue #10). Two independent gaps produced it: the title chain
+preferred `og:title`, which on a portal is the page's marketing name rather
+than the property's; and nothing anywhere asked whether the fetched page was
+an advert at all. A crawler reaches `/merkliste`, `/suche` and a login form on
+exactly the same code path as a real exposé.
+
+**Page shape, not fact count.** The obvious gate — "no price, no area, no
+year, no location: drop it" — does not work, and it is worth saying why in
+writing so nobody re-proposes it. `extract_labeled_fields` scans the whole
+page, so the real OVB search capture in `tests/fixtures/html` yields a
+complete, plausible set of facts assembled from *different result cards*:
+`property_type bauernhaus`, `land_sqm 461`, `living_sqm 434`, `town
+Stephanskirchen 83071` — four adverts wearing one coat. A fact-count gate
+passes exactly the page it has to reject. A page that lists twenty properties
+is not a poorly-described property; it is a different kind of page.
+
+**The signals, weakest last.** The URL naming a portal function
+(`UTILITY_PATH_RE`, whole path segments only, so `/suchergebnisse` is not
+`/suche`); the page's own headline being one („Merkliste" — the signal that
+survives a paste with no URL, which is how the reported one arrived);
+schema.org `@type`; and finally many sibling links of one URL shape (20 under
+`/immobilien/*` on the search capture, against 5 in the related-ads rail of a
+detail page). An index declaration outranks a listing one, because a portal
+makes both at once: that same capture declares `SearchResultsPage` *and* a
+`Product` named after the page whose `offers` is an `AggregateOffer` over all
+186 results. Anything unclassified is a listing — a small broker's detail page
+states nothing about itself, and refusing those would be worse than the bug.
+
+**No observation for a refused page.** `Observation` is append-only and is the
+history of what a source said about a *listing*. A search page never was one,
+so admitting it there would make every count, every yield statistic and the
+whole change feed read from a table with portal chrome in it. Invariant 1 is
+untouched: `ingest` is still the only writer of `Property` rows; a refusal
+simply writes nothing.
+
+**Refusals are counted, never silent** — the lesson of entries 17 and 18
+applied to a rejection rather than a fact. `normalize_listing` adds a German
+`warnings` line so `/add` can explain it, the paste box turns the refusal into
+a sentence instead of a saved property, and `pipeline.runner` counts every
+discarded row by reason and logs one `NORMALIZE` entry (`rejected=N` plus the
+breakdown) that `/runs` renders. That entry is written even when nothing was
+rejected: "nothing was thrown away" and "nobody counted" must stay
+distinguishable.
+
+**Defence in depth, and where it is *not*.** The generic sitemap and RSS
+adapters also skip `UTILITY_PATH_RE` URLs, so the fetch is never made — but
+only *after* `record_enumerated_url`, because invariant 4b is about what the
+site still offers and it plainly still offers that URL. Not fetching it is a
+routing decision, exactly like the `options.pattern` filter beside it.
