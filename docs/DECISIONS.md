@@ -388,10 +388,22 @@ that boots is worse than one that does not: the mismatch surfaces later, deep
 inside an unrelated page, and `web/lazy.py` reported it as a *missing module*,
 which is not where anyone would look. That message now names the database.
 
+**One at a time.** The web app and the scheduler are separate containers on one
+database and `docker compose up` starts them together, so both migrate at once.
+Reading the revision, deciding and acting happen on different connections, so
+without a lock they interleave and the loser dies — "table alembic_version
+already exists", or "duplicate column name" once both get as far as the upgrade.
+Measured with six concurrent boots, not theorised. SQLite takes an OS file lock
+beside the database (`<db>.migrate-lock`, on the same volume the processes
+already share); Postgres takes a session advisory lock; the loser then finds the
+work done and reports `current`.
+
 **Consequence.** `hofradar migrate` (and `hofradar migrate --check`, which
 changes nothing and exits 1 when work is pending) exist for operators. Because
 the migrations are inside the package, `alembic.ini` at the repository root
-points at `src/hofradar/migrations` — there is one copy, not a synced pair.
+points at `src/hofradar/migrations` — there is one copy, not a synced pair. A
+`hofradar.sqlite3.migrate-lock` file appears next to the database; it holds no
+data and is safe to delete when nothing is running.
 
 ---
 

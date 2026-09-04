@@ -185,3 +185,7 @@ docker compose run --rm --no-deps hofradar hofradar migrate
 
 If the UI shows *„Die Datenbank passt nicht zum Programm“*, the schema is behind
 the code — that is what these commands fix.
+
+Both containers migrate on start and take a lock first, so bringing them up
+together is safe; only one does the work. The `hofradar.sqlite3.migrate-lock`
+file beside the database is that lock — it holds no data.

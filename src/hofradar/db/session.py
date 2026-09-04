@@ -17,6 +17,9 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DEFAULT_DB_PATH = Path(os.environ.get("HOFRADAR_DATA_DIR", "data")) / "hofradar.sqlite3"
 
+#: How long a SQLite writer waits for another writer before giving up.
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
 
 class Base(DeclarativeBase):
     pass
@@ -56,6 +59,10 @@ def _apply_sqlite_pragmas(engine: Engine) -> None:
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA foreign_keys=ON")
         cur.execute("PRAGMA journal_mode=WAL")
+        # The web app and the weekly scheduler are separate processes on one
+        # file. Without this a writer that meets another writer fails instantly
+        # instead of waiting the moment it takes the other to finish.
+        cur.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
         cur.close()
 
 

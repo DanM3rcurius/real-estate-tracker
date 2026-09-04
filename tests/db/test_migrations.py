@@ -214,3 +214,43 @@ def test_migrations_alone_reproduce_the_models(tmp_path: Path) -> None:
         "the models have a change with no migration - run "
         "`alembic -c alembic.ini revision --autogenerate -m '...'`"
     )
+
+
+def test_two_processes_booting_at_once_do_not_fight(tmp_path: Path) -> None:
+    """The web app and the scheduler are separate containers on one database.
+
+    ``docker compose up`` starts them together, so both call ``ensure_schema``
+    at once. The check-then-act is not atomic across processes: both read "not
+    stamped", both stamp, and the loser used to die with "table
+    alembic_version already exists" - a crash-looping web container while the
+    scheduler quietly won.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    engine = _at_baseline(tmp_path)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE alembic_version"))
+
+    def boot() -> str:
+        # A separate engine per "process", as separate containers would have.
+        return ensure_schema(_engine(tmp_path)).action
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        actions = [future.result() for future in [pool.submit(boot) for _ in range(4)]]
+
+    assert all(action in {"created", "adopted", "upgraded", "current"} for action in actions)
+    assert "listing_ttl_days" in _columns(tmp_path, "sources")
+    assert not schema_drift(engine)
+
+
+def test_a_broken_database_is_still_refused_after_the_retries(tmp_path: Path) -> None:
+    """Losing a race gracefully must not become swallowing a real failure."""
+    engine = _engine(tmp_path)
+    ensure_schema(engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE sources DROP COLUMN listing_ttl_days"))
+        connection.execute(text("DROP TABLE alembic_version"))
+        connection.execute(text("ALTER TABLE properties ADD COLUMN not_in_the_models TEXT"))
+
+    with pytest.raises(SchemaError):
+        ensure_schema(engine)

@@ -25,6 +25,9 @@ has no ``alembic_version`` row to read:
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -33,7 +36,8 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, Engine, inspect
+from sqlalchemy import Connection, Engine, inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from hofradar.db.models import Base
 
@@ -53,6 +57,25 @@ BASELINE_REVISION = "a78c19944d2d"
 SENTINEL_TABLE = "properties"
 
 ALEMBIC_VERSION_TABLE = "alembic_version"
+
+#: The web app and the scheduler are separate containers sharing one database,
+#: and `docker compose up` starts them together, so both call `ensure_schema`
+#: at once. Reading the current revision, deciding, and acting happen on
+#: different connections, so without a lock two processes interleave: both read
+#: "not stamped", both stamp, and the loser dies with "table alembic_version
+#: already exists" or "duplicate column name" - a crash-looping web container
+#: while the scheduler quietly wins. Measured, not theorised.
+#:
+#: So one process migrates at a time and the rest wait, then find the work
+#: done. The retries below stay as a second line for a dialect with no lock:
+#: a migration another process already performed is not an error, it is the
+#: desired end state.
+_MIGRATION_ATTEMPTS = 5
+_RETRY_BACKOFF_SECONDS = 0.25
+
+#: Arbitrary but fixed: the key every Hofradar process uses for the Postgres
+#: advisory lock, so they all contend on the same one.
+_ADVISORY_LOCK_KEY = 0x484F4652  # "HOFR"
 
 
 class SchemaError(RuntimeError):
@@ -140,14 +163,103 @@ def schema_drift(engine: Engine) -> list[str]:
 def ensure_schema(engine: Engine | None = None) -> SchemaState:
     """Bring the database to the current schema. Safe to call on every boot.
 
-    Returns what it did. Raises :class:`SchemaError` if the database is left
-    not matching the models, because booting into a half-migrated database is
-    the failure this whole module exists to prevent - a stale column surfaces
-    much later, as an ``OperationalError`` inside an unrelated page.
+    Safe to call from several processes at once, too - see
+    ``_MIGRATION_ATTEMPTS``. Returns what it did. Raises :class:`SchemaError`
+    if the database is left not matching the models, because booting into a
+    half-migrated database is the failure this whole module exists to prevent -
+    a stale column surfaces much later, as an ``OperationalError`` inside an
+    unrelated page.
     """
     from hofradar.db.session import get_engine
 
     engine = engine or get_engine()
+    last_error: BaseException | None = None
+
+    for attempt in range(_MIGRATION_ATTEMPTS):
+        try:
+            with _migration_lock(engine):
+                # Re-read inside the lock: the process we just waited for has
+                # very likely done the whole job already.
+                if _matches_models(engine):
+                    revision = current_revision(engine)
+                    return SchemaState(
+                        action="current", from_revision=revision, to_revision=revision
+                    )
+                return _ensure_once(engine)
+        except (SQLAlchemyError, SchemaError) as exc:
+            last_error = exc
+            if _matches_models(engine):
+                # Another process migrated it while we were trying. That is a
+                # success - it is the state we wanted - so say so rather than
+                # taking the container down over a race we already won.
+                revision = current_revision(engine)
+                log.info("schema: already brought to %s by another process", revision)
+                return SchemaState(action="current", from_revision=revision, to_revision=revision)
+            if attempt + 1 < _MIGRATION_ATTEMPTS:
+                time.sleep(_RETRY_BACKOFF_SECONDS * (attempt + 1))
+
+    raise SchemaError(
+        f"could not bring the database to the current schema after "
+        f"{_MIGRATION_ATTEMPTS} attempts: {last_error!r}"
+    ) from last_error
+
+
+@contextmanager
+def _migration_lock(engine: Engine) -> Iterator[None]:
+    """Hold the right to migrate this database, or wait for whoever has it.
+
+    SQLite gets an OS file lock beside the database file - the processes that
+    share it also share the volume it lives on, so ``flock`` is exactly the
+    right scope. Postgres gets a session advisory lock. Anything else proceeds
+    unlocked and relies on the retry loop.
+    """
+    dialect = engine.dialect.name
+
+    if dialect == "sqlite":
+        path = engine.url.database
+        if path and path != ":memory:":
+            try:
+                import fcntl
+            except ImportError:  # pragma: no cover - not POSIX
+                yield
+                return
+            lock_path = Path(f"{path}.migrate-lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(lock_path, "w") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+            return
+
+    elif dialect == "postgresql":
+        with engine.connect() as connection:
+            connection.execute(
+                text("SELECT pg_advisory_lock(:key)"), {"key": _ADVISORY_LOCK_KEY}
+            )
+            connection.commit()
+            try:
+                yield
+            finally:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:key)"), {"key": _ADVISORY_LOCK_KEY}
+                )
+                connection.commit()
+        return
+
+    yield
+
+
+def _matches_models(engine: Engine) -> bool:
+    """Is this database at head *and* free of drift, whoever got it there?"""
+    try:
+        return current_revision(engine) == head_revision() and not schema_drift(engine)
+    except SQLAlchemyError:
+        return False
+
+
+def _ensure_once(engine: Engine) -> SchemaState:
     head = head_revision()
 
     if _database_is_empty(engine):
