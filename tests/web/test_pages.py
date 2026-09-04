@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-EMPTY_DB_PAGES = ["/healthz", "/", "/map", "/settings", "/add", "/report", "/runs"]
+EMPTY_DB_PAGES = ["/healthz", "/", "/map", "/merkliste", "/settings", "/add", "/report", "/runs"]
 
 
 @pytest.mark.parametrize("path", EMPTY_DB_PAGES)
@@ -37,6 +37,7 @@ def test_healthz_reports_counts(client, db, source):
     [
         "/",
         "/map",
+        "/merkliste",
         "/report",
         "/runs",
         "/add",

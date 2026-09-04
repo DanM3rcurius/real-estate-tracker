@@ -184,6 +184,8 @@ def passes_filters(prop: Property, filters: ResultFilters) -> bool:
         return False
     if filters.user_state and (prop.user_state or "none") != filters.user_state:
         return False
+    if filters.shortlisted_only and prop.shortlisted_at is None:
+        return False
     if filters.town and not matches_search(prop, filters.town):
         return False
     return True
@@ -411,6 +413,7 @@ def row_to_dict(row: ResultRow) -> dict[str, Any]:
         "listing_status": prop.listing_status,
         "verification_status": prop.verification_status,
         "user_state": prop.user_state,
+        "shortlisted_at": prop.shortlisted_at.isoformat() if prop.shortlisted_at else None,
         "url": row.best_url,
         "chips": [c.label for c in row.chips],
         "scores": None

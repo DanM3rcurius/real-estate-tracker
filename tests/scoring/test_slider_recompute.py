@@ -286,7 +286,7 @@ class TestRankedProperties:
             ({"max_price": 500_000}, 2),
             ({"status": ListingStatus.ACTIVE}, 3),
             ({"status": ListingStatus.SOLD}, 0),
-            ({"user_state": "shortlist"}, 0),
+            ({"user_state": "watch"}, 0),
             ({"verified_only": True}, 3),
             ({"has_outbuildings": True}, 3),
             # only "pricey" pushes the all-in total past the 1.2M budget slider

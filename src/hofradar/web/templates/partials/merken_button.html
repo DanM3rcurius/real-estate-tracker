@@ -1,0 +1,10 @@
+{# The Merkliste toggle. Self-contained: it swaps itself, so it works inside
+   a card that arrived through an HTMX results swap. #}
+<form class="merken" method="post" action="/property/{{ prop.public_id }}/merken"
+      hx-post="/property/{{ prop.public_id }}/merken" hx-swap="outerHTML">
+  <button class="btn btn--small{% if prop.shortlisted_at %} btn--on{% endif %}" type="submit"
+          aria-pressed="{{ 'true' if prop.shortlisted_at else 'false' }}"
+          title="{% if prop.shortlisted_at %}Von der Merkliste nehmen{% else %}Auf die Merkliste{% endif %}">
+    {% if prop.shortlisted_at %}★ Gemerkt{% else %}☆ Merken{% endif %}
+  </button>
+</form>

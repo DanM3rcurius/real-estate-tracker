@@ -114,8 +114,21 @@ CSV_COLUMNS = (
     ("listing_status", "Status"),
     ("verification_status", "Verifikation"),
     ("user_state", "Triage"),
+    ("shortlisted_at", "Merkliste"),
     ("url", "Quelle"),
 )
+
+
+#: The mark is exported as a flag, not the timestamp - the CSV asks "on the
+#: list or not", not "since when".
+CSV_SHORTLISTED_KEY = "shortlisted_at"
+
+
+def _csv_value(key: str, payload: dict[str, Any]) -> Any:
+    value = payload.get(key)
+    if key == CSV_SHORTLISTED_KEY:
+        return "1" if value else ""
+    return value if value is not None else ""
 
 
 @router.get("/api/export.csv")
@@ -130,7 +143,7 @@ def api_export(request: Request, session: Session = Depends(get_db)) -> Response
         scores = payload.get("scores") or {}
         # A missing road route stays empty in the export; it never inherits the air value.
         writer.writerow(
-            [payload.get(key) if payload.get(key) is not None else "" for key, _ in CSV_COLUMNS]
+            [_csv_value(key, payload) for key, _ in CSV_COLUMNS]
             + [
                 scores.get("final", ""),
                 scores.get("fit", ""),

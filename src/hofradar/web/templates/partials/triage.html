@@ -19,6 +19,13 @@
       <textarea name="user_note" rows="3" placeholder="Was ist hier zu tun?">{{ prop.user_note or '' }}</textarea>
     </label>
     <button class="btn" type="submit">Speichern</button>
-    {% if saved %}<span class="notice notice--ok" role="status">Gespeichert: {{ prop.user_state or 'kein Status' }}</span>{% endif %}
+    {% if saved %}
+      <span class="notice notice--ok" role="status">
+        Gespeichert:
+        {%- if legacy_marked %} ⭐ gemerkt
+        {%- else %} {{ prop.user_state or 'kein Status' }}
+        {%- endif %}
+      </span>
+    {% endif %}
   </fieldset>
 </form>

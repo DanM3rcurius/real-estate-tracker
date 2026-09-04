@@ -57,6 +57,7 @@
     {% if row.best_url %}
     <a class="btn btn--small btn--ghost" href="{{ row.best_url }}" rel="noopener noreferrer nofollow" target="_blank">Quelle</a>
     {% endif %}
+    {% with prop = row.prop %}{% include "partials/merken_button.html" %}{% endwith %}
     {% if row.prop.user_state %}<span class="chip chip--user">{{ row.prop.user_state }}</span>{% endif %}
   </footer>
 </article>

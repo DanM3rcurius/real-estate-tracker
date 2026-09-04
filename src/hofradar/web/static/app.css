@@ -198,6 +198,7 @@ small { color: var(--ink-soft); }
 .btn--small { padding: 5px 10px; font-size: .82rem; }
 .btn--ghost { background: transparent; color: var(--ink); border-color: var(--line); }
 .btn--danger { background: transparent; color: var(--danger); border-color: var(--danger); }
+.btn--on { background: var(--ok-soft); color: var(--ok); border-color: var(--ok); }
 
 .thinking {
   display: none; align-items: center; gap: 8px;
