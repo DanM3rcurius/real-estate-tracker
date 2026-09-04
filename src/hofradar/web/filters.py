@@ -209,6 +209,28 @@ def week_label(value: Any) -> str:
     return f"KW {iso.week:02d} / {iso.year}"
 
 
+#: German names for ``ListingStatus`` values - the reader never sees the enum.
+STATUS_LABELS: dict[str, str] = {
+    "discovered": "Entdeckt",
+    "verified": "Verifiziert",
+    "active": "Aktiv",
+    "price_changed": "Preis geändert",
+    "stale": "Veraltet",
+    "foreclosure": "Zwangsversteigerung",
+    "off_market_signal": "Off-Market-Signal",
+    "removed": "Entfernt",
+    "expired": "Anzeige abgelaufen",
+    "sold": "Verkauft",
+}
+
+
+def de_status(value: Any) -> str:
+    """The German name of a listing status; an unknown value passes through."""
+    if value is None:
+        return "unbekannt"
+    return STATUS_LABELS.get(str(value), str(value))
+
+
 #: Registered on the Jinja environment by :func:`hofradar.web.app.create_app`.
 JINJA_FILTERS = {
     "de_number": de_number,
@@ -226,4 +248,5 @@ JINJA_FILTERS = {
     "de_relative_days": de_relative_days,
     "de_score": de_score,
     "week_label": week_label,
+    "de_status": de_status,
 }
