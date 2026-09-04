@@ -37,6 +37,33 @@ MONTHS_DE = (
 
 WEEKDAYS_DE = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
 
+#: German name for every :class:`hofradar.db.enums.ListingStatus` value. The
+#: home for these words, so ``deps.STATUS_OPTIONS`` and ``history.py`` both
+#: build on the same dict instead of drifting apart. Keyed by the plain enum
+#: *value* (a string), not the enum member, so a raw string from the DB or a
+#: query param looks itself up without an extra coercion step.
+STATUS_LABELS: dict[str, str] = {
+    "discovered": "Entdeckt",
+    "verified": "Verifiziert",
+    "active": "Aktiv",
+    "price_changed": "Preis geändert",
+    "stale": "Veraltet",
+    "foreclosure": "Zwangsversteigerung",
+    "off_market_signal": "Off-Market-Signal",
+    "removed": "Entfernt",
+    "expired": "Anzeige abgelaufen",
+    "sold": "Verkauft",
+}
+
+#: German name for every :class:`hofradar.db.enums.RenovationTier` value.
+TIER_LABELS: dict[str, str] = {
+    "light": "leicht",
+    "medium": "mittel",
+    "heavy": "schwer",
+    "complete": "Kernsanierung",
+    "unknown": "unbekannt",
+}
+
 _SEP_PLACEHOLDER = "\x00"
 
 
@@ -202,6 +229,27 @@ def de_score(value: Any) -> str:
     return de_number(round(number), 0)
 
 
+#: What ``de_status``/``de_tier`` print for ``None`` - "we do not know the
+#: state", distinct from :data:`UNKNOWN` ("we do not know the fact").
+UNBEKANNT = "unbekannt"
+
+
+def de_status(value: Any) -> str:
+    """``ListingStatus`` value -> German word. An unrecognised value passes
+    through unchanged rather than being hidden behind a label."""
+    if value is None:
+        return UNBEKANNT
+    return STATUS_LABELS.get(str(value), str(value))
+
+
+def de_tier(value: Any) -> str:
+    """Renovation tier -> German word. An unrecognised value passes through
+    unchanged rather than being hidden behind a label."""
+    if value is None:
+        return UNBEKANNT
+    return TIER_LABELS.get(str(value), str(value))
+
+
 def week_label(value: Any) -> str:
     """``KW 35 / 2026`` - the report header the user recognises."""
     moment = _coerce_datetime(value) or datetime.now()
@@ -247,6 +295,8 @@ JINJA_FILTERS = {
     "de_month_year": de_month_year,
     "de_relative_days": de_relative_days,
     "de_score": de_score,
+    "de_status": de_status,
+    "de_tier": de_tier,
     "week_label": week_label,
     "de_status": de_status,
 }

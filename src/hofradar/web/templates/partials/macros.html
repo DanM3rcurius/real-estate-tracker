@@ -22,7 +22,7 @@
 {% endmacro %}
 
 {% macro status_chip(prop) %}
-  <span class="chip chip--status chip--status-{{ prop.listing_status }}">{{ prop.listing_status }}</span>
+  <span class="chip chip--status chip--status-{{ prop.listing_status }}">{{ prop.listing_status | de_status }}</span>
 {% endmacro %}
 
 {% macro distances(prop) %}
@@ -41,7 +41,7 @@
 {% macro cost_band(cost) %}
   {% if cost %}
     {{ cost.total_low | de_eur }} – {{ cost.total_high | de_eur }}
-    <small>(Mitte {{ cost.total_mid | de_eur }}{% if cost.renovation_tier %}, Sanierung {{ cost.renovation_tier }}{% endif %})</small>
+    <small>(Mitte {{ cost.total_mid | de_eur }}{% if cost.renovation_tier %}, Sanierung {{ cost.renovation_tier | de_tier }}{% endif %})</small>
   {% else %}
     <small>Gesamtkosten noch nicht berechnet</small>
   {% endif %}

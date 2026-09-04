@@ -131,14 +131,14 @@ class TestEstimateCosts:
             assert sentence.endswith(".")
             assert sentence[0].isupper()
         joined = " ".join(cost.assumptions).casefold()
-        for topic in ("roof", "outbuilding", "utilities", "contingency", "acquisition"):
+        for topic in ("dach", "nebengebäude", "haustechnik", "puffer", "erwerbsnebenkosten"):
             assert topic in joined
 
     def test_unknown_living_area_falls_back_and_says_so(self, profile: SearchProfile) -> None:
         prop = make_property(living_sqm=None, usable_sqm=None)
         cost = estimate_costs(prop, profile)
         assert cost.breakdown["living_sqm_used"] == pytest.approx(DEFAULT_LIVING_SQM)
-        assert any("assumed the typical" in a for a in cost.assumptions)
+        assert any("typische bayerische Hofhaus" in a for a in cost.assumptions)
 
     def test_usable_area_is_preferred_over_the_blind_fallback(self, profile: SearchProfile) -> None:
         prop = make_property(living_sqm=None, usable_sqm=600)
@@ -154,4 +154,4 @@ class TestEstimateCosts:
         cost = estimate_costs(make_property(price=None), profile)
         assert cost.purchase_price is None
         assert cost.acquisition_costs == 0.0
-        assert any("lower bound" in a for a in cost.assumptions)
+        assert any("Untergrenze" in a for a in cost.assumptions)

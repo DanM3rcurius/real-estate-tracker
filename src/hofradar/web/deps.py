@@ -18,7 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from hofradar.config import SearchProfile
-from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus
+from hofradar.db.enums import HIDDEN_USER_STATES
+from hofradar.web.filters import STATUS_LABELS
 
 # --------------------------------------------------------------------------- #
 # Slider ranges. These are the UI contract; the model's own validators are
@@ -47,20 +48,7 @@ SORT_OPTIONS: dict[str, str] = {
     "drop": "Größter Preisrückgang",
 }
 
-STATUS_OPTIONS: dict[str, str] = {
-    "": "Alle Status",
-    "alive": "Nur aktive",
-    ListingStatus.DISCOVERED: "Entdeckt",
-    ListingStatus.VERIFIED: "Verifiziert",
-    ListingStatus.ACTIVE: "Aktiv",
-    ListingStatus.PRICE_CHANGED: "Preis geändert",
-    ListingStatus.STALE: "Veraltet",
-    ListingStatus.FORECLOSURE: "Zwangsversteigerung",
-    ListingStatus.OFF_MARKET_SIGNAL: "Off-Market-Signal",
-    ListingStatus.REMOVED: "Entfernt",
-    ListingStatus.EXPIRED: "Anzeige abgelaufen",
-    ListingStatus.SOLD: "Verkauft",
-}
+STATUS_OPTIONS: dict[str, str] = {"": "Alle Status", "alive": "Nur aktive", **STATUS_LABELS}
 
 
 # --------------------------------------------------------------------------- #
