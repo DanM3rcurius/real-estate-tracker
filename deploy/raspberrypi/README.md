@@ -335,12 +335,12 @@ A restored database that predates the code is migrated on the next start
 - **Nominatim and OSRM are public services** being used politely by default.
   A Pi crawling weekly is well inside that, but the endpoints are configurable
   (`.env.example`) if you ever run your own.
-- **CI has never actually run in this repo** (see `CLAUDE.md`), so a red check
-  on a PR is not evidence of anything. Local green is the verification that
-  exists. This folder is no exception: it is written against the Hetzner
-  deployment that does work, and the Pi-specific paths — the ARM image build,
-  `dphys-swapfile`, `vcgencmd` — have not been exercised on real hardware.
-  Read the bootstrap before you run it; it is commented for exactly that.
+- **CI does not cover any of this.** The workflow lints and tests the Python
+  package; no shell here is linted and no path here is booted by it. This
+  folder is written against the Hetzner deployment that does work, and the
+  Pi-specific parts — the ARM image build, `dphys-swapfile`, `vcgencmd` — are
+  reasoned, not exercised on real hardware. Read the bootstrap before you run
+  it; it is commented for exactly that.
 
 ## Troubleshooting
 

@@ -41,7 +41,7 @@ search:
     makler_pct: 0.0357
 
   land:
-    preferred_min_sqm: 2000
+    preferred_min_sqm: 1000
     strong_min_sqm: 5000
 
   # Municipalities believed to fall inside the search radius, per docs/coverage.md.

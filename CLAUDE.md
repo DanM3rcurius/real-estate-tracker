@@ -111,11 +111,17 @@ database from the models with `create_all()`, where a missing migration is
 invisible. `tests/db/test_migrations.py` builds one from the migrations alone
 and compares - that is the test that would have caught #7, so do not weaken it.
 
-**CI has never run.** All 44 workflow runs to date fail in 2-4 seconds with no
-step logs and a 404 on the job log: the job never reaches a runner (Actions
-billing / repo settings, not the code). Green locally is currently the only
-verification that exists. Do not read a red check on a PR as a real failure
-without opening the run first.
+**CI runs now, and was red for one real reason.** Runs 1-44 did die in 2-4
+seconds without reaching a runner - that ended at run 45 (2026-09-04 12:31),
+and every run since executes its steps. From then until this commit the
+failing step was *Config defaults are in sync*: `config/search.yaml` was edited
+by hand (`land.preferred_min_sqm` 2000 -> 1000, commit 3768df7) without running
+`scripts/sync_config_defaults.py`, so the copy bundled into the package still
+carried 2000. That is the guard working, not a flaky check - the installed
+wheel really would have scored against the old number. Because that step is
+step 6 of 9, everything after it - the 893 tests and both smoke steps - had
+never executed in CI at all; they pass locally. Read the run before assuming a
+red check is infrastructure again.
 
 **`pipeline/runner.py` has no `commit()` at all.** The whole run is one
 `session_scope()` transaction, so the `SearchRun(status="running")` row and
