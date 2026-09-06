@@ -39,7 +39,12 @@ build-backend = "hatchling.build"
 packages = ["src/hofradar"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "." as well as "src": four test modules import their sibling conftest
+# absolutely (`from tests.web.conftest import ...`), which needs the repo root
+# importable. `python -m pytest` put it there implicitly by adding the working
+# directory, so the suite was green locally and uncollectable under the plain
+# `pytest` CI runs. Both invocations now mean the same thing.
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]

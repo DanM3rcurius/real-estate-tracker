@@ -80,8 +80,8 @@ lands in `src/hofradar/migrations/versions/` so the installed wheel carries it.
 pip install -e ".[dev,pdf,images]"
 hofradar init-db && hofradar serve
 hofradar migrate --check          # pending schema work? (exit 1 if so)
-PYTHONPATH=src python -m pytest -q
-ruff check src tests
+pytest -q                         # exactly what CI runs, no PYTHONPATH needed
+ruff check src tests scripts      # CI lints scripts/ too
 ```
 
 Tests must never hit the network: they mock every outbound call with `respx`
@@ -122,6 +122,14 @@ wheel really would have scored against the old number. Because that step is
 step 6 of 9, everything after it - the 893 tests and both smoke steps - had
 never executed in CI at all; they pass locally. Read the run before assuming a
 red check is infrastructure again.
+
+The suite was also green locally and uncollectable in CI, for a reason with
+the same shape: four modules import their sibling conftest absolutely (`from
+tests.web.conftest import ...`), which needs the repo root on `sys.path`.
+`python -m pytest` adds the working directory and the plain `pytest` CI runs
+does not, so the documented local command could not see the failure. The root
+is in `pythonpath` now, and the documented command is CI's command. Keep them
+identical.
 
 One of them was a trap worth knowing about: `hofradar run --dry-run` is not a
 dry run of the crawl. `dry_run` only skips the writes - ingest and
