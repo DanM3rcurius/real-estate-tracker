@@ -64,8 +64,14 @@ write_files:
     content: |
       # Sourced into /opt/hofradar/app/.env on first boot, then never read again -
       # edit /opt/hofradar/app/.env for later changes and run `hofradar-update`.
-      HOFRADAR_DOMAIN=hofradar.example.com                # REPLACE (empty = plain HTTP on :80)
+      # REPLACE. Any hostname that resolves to this server: one you own, or a free
+      # DuckDNS one (see deploy/hetzner/README.md). Empty means plain HTTP on :80,
+      # which is only safe behind an SSH tunnel or Tailscale.
+      HOFRADAR_DOMAIN=hofradar.duckdns.org
       ACME_EMAIL=you@example.com                          # REPLACE
+      # Only for a *.duckdns.org name. With it, the box keeps its own DNS record
+      # pointing at itself, so a rebuild on a new IP does not break the cert.
+      DUCKDNS_TOKEN=
       HOFRADAR_REPO=https://github.com/DanM3rcurius/real-estate-tracker.git
       HOFRADAR_BRANCH=trunk
       # Leave empty to have a password generated on first boot (see the header).
@@ -192,6 +198,45 @@ write_files:
       find /var/backups/hofradar -name 'hofradar-*.sqlite3.gz' -mtime +14 -delete
       echo "backup ok: /var/backups/hofradar/hofradar-${stamp}.sqlite3.gz"
 
+  - path: /usr/local/bin/hofradar-duckdns
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Point the DuckDNS record at whatever address this machine currently has.
+      # Hetzner IPs are static per server, but a rebuild gets a new one - and a
+      # stale record means Caddy cannot pass the ACME HTTP-01 challenge.
+      set -euo pipefail
+      . /etc/hofradar-duckdns.env
+      answer="$(curl -fsS "https://www.duckdns.org/update?domains=${DUCKDNS_SUBDOMAIN}&token=${DUCKDNS_TOKEN}&ip=")"
+      [ "$answer" = "OK" ] || { echo "duckdns refused the update: ${answer}" >&2; exit 1; }
+      echo "duckdns: ${DUCKDNS_SUBDOMAIN}.duckdns.org updated"
+
+  - path: /etc/systemd/system/hofradar-duckdns.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Refresh the DuckDNS record for this host
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/hofradar-duckdns
+
+  - path: /etc/systemd/system/hofradar-duckdns.timer
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Keep the DuckDNS record fresh
+
+      [Timer]
+      OnBootSec=30s
+      OnUnitActiveSec=6h
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
   - path: /usr/local/bin/hofradar-update
     permissions: "0755"
     content: |
@@ -303,6 +348,24 @@ write_files:
       ENV
       chown hofradar:hofradar /opt/hofradar/app/.env
       chmod 600 /opt/hofradar/app/.env
+
+      # ---- DuckDNS, if that is the kind of name we were given ----------------
+      # Must happen before Caddy starts: the ACME HTTP-01 challenge is a request
+      # to this host by name, so the name has to point here first.
+      case "${HOFRADAR_DOMAIN:-}" in
+        *.duckdns.org)
+          if [ -n "${DUCKDNS_TOKEN:-}" ]; then
+            printf 'DUCKDNS_SUBDOMAIN=%s\nDUCKDNS_TOKEN=%s\n' \
+              "${HOFRADAR_DOMAIN%%.duckdns.org}" "$DUCKDNS_TOKEN" > /etc/hofradar-duckdns.env
+            chmod 600 /etc/hofradar-duckdns.env
+            /usr/local/bin/hofradar-duckdns
+            systemctl enable --now hofradar-duckdns.timer
+          else
+            echo "note: ${HOFRADAR_DOMAIN} given without DUCKDNS_TOKEN - set the IP" \
+                 "yourself at duckdns.org or the certificate request will fail"
+          fi
+          ;;
+      esac
 
       cd /opt/hofradar/app
       compose=(docker compose -f docker-compose.yml -f deploy/hetzner/docker-compose.prod.yml)

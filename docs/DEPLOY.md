@@ -105,6 +105,11 @@ A `cx22` (2 vCPU, 4 GB, 40 GB) is comfortable. The app is published on
 `127.0.0.1:8000` only and Caddy is the sole thing listening publicly — Docker
 writes its own iptables rules and would otherwise punch straight through ufw.
 
+No domain? A free `*.duckdns.org` name gets a real Let's Encrypt certificate,
+and the cloud-init keeps the record pointed at the box if you give it the token.
+Buying a domain is €5–10 a year and removes the dependency; switching between
+them is one line in `.env`. Both paths are in `deploy/hetzner/README.md`.
+
 If you supply no `HOFRADAR_PASSWORD_HASH`, first boot mints a password and
 leaves it in `/home/hofradar/INITIAL_PASSWORD.txt`; the gate is never simply
 absent on a public IP. Details, day-to-day commands and the private-repo case
