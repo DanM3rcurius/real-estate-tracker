@@ -123,6 +123,13 @@ step 6 of 9, everything after it - the 893 tests and both smoke steps - had
 never executed in CI at all; they pass locally. Read the run before assuming a
 red check is infrastructure again.
 
+One of them was a trap worth knowing about: `hofradar run --dry-run` is not a
+dry run of the crawl. `dry_run` only skips the writes - ingest and
+disappearance detection - so discovery and fetching still hit the live
+portals. The smoke step now passes `--sources manual`, which enumerates
+nothing and still walks every stage. Do not widen it back without deciding
+that CI should crawl the real web on every push.
+
 **`pipeline/runner.py` has no `commit()` at all.** The whole run is one
 `session_scope()` transaction, so the `SearchRun(status="running")` row and
 every `_log_stage` entry stay invisible to other connections until the run

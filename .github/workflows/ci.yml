@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Nothing here should take five minutes. A step that hangs is a step to
+    # kill, not one to let run for six hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -36,13 +39,21 @@ jobs:
       - name: Test
         run: pytest -q
 
+      # `--sources manual` is what keeps this a smoke test. --dry-run skips
+      # only the writes (pipeline/runner.py) - discovery and the crawl still
+      # happen, so a bare `hofradar run --dry-run` fetches live pages from the
+      # real portals on every push, at the deliberate rate the adapters keep.
+      # That is minutes of wall clock, a dependency on somebody else's uptime,
+      # and crawling from a shared runner address. The manual source
+      # enumerates nothing, so every stage still executes and the run must
+      # still finish "ok" - which is what this step is actually asserting.
       - name: Smoke - boot the app
         env:
           HOFRADAR_OFFLINE: "1"
         run: |
           hofradar init-db
           hofradar config
-          hofradar run --dry-run
+          hofradar run --dry-run --sources manual
           python -c "from hofradar.web.app import app; print('web app imports OK')"
 
       # Booting against an EXISTING database is the deployment's actual shape,
