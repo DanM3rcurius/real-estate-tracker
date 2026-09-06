@@ -111,17 +111,22 @@ database from the models with `create_all()`, where a missing migration is
 invisible. `tests/db/test_migrations.py` builds one from the migrations alone
 and compares - that is the test that would have caught #7, so do not weaken it.
 
-**CI runs now, and was red for one real reason.** Runs 1-44 did die in 2-4
-seconds without reaching a runner - that ended at run 45 (2026-09-04 12:31),
-and every run since executes its steps. From then until this commit the
-failing step was *Config defaults are in sync*: `config/search.yaml` was edited
-by hand (`land.preferred_min_sqm` 2000 -> 1000, commit 3768df7) without running
-`scripts/sync_config_defaults.py`, so the copy bundled into the package still
-carried 2000. That is the guard working, not a flaky check - the installed
-wheel really would have scored against the old number. Because that step is
-step 6 of 9, everything after it - the 893 tests and both smoke steps - had
-never executed in CI at all; they pass locally. Read the run before assuming a
-red check is infrastructure again.
+**CI is green as of run 74, which is the first time it ever has been.** Runs
+1-44 did die in 2-4 seconds without reaching a runner - that ended at run 45
+(2026-09-04 12:31), and every run since executes its steps. What it then found
+was two real defects stacked behind each other, because a failed step skips
+the rest:
+
+1. *Config defaults are in sync* failed because `config/search.yaml` was
+   edited by hand (`land.preferred_min_sqm` 2000 -> 1000, commit 3768df7)
+   without running `scripts/sync_config_defaults.py`, so the copy bundled into
+   the package still carried 2000. The guard working, not a flaky check: the
+   installed wheel is what a container reads, and it would have scored against
+   the old number.
+2. *Test* then failed collection outright - see the invocation trap below.
+
+So the tests and both smoke steps had never run in CI at all until run 74.
+Read the run before assuming a red check is infrastructure again.
 
 The suite was also green locally and uncollectable in CI, for a reason with
 the same shape: four modules import their sibling conftest absolutely (`from
