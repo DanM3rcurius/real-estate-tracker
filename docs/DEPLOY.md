@@ -5,6 +5,7 @@
 | Where | Works? | Why |
 |---|---|---|
 | **Your own machine + Tailscale** | ✅ best fit | Free, private, no public attack surface, disk is real |
+| **A Raspberry Pi at home** | ✅ the same fit, dedicated | The above, on hardware that does nothing else; `deploy/raspberrypi/bootstrap.sh` builds it in one command |
 | **Fly.io** | ✅ recommended cloud | Persistent volume, always-on process, `fly.toml` is already in the repo |
 | **Hetzner VPS** | ✅ most control | A real disk and a real cron for ~€4/month; `deploy/hetzner/cloud-init.yaml` builds the box unattended |
 | **Railway / Render** | ✅ browser-only path | Deploy straight from GitHub, add a persistent disk, no CLI needed |
@@ -115,6 +116,39 @@ leaves it in `/home/hofradar/INITIAL_PASSWORD.txt`; the gate is never simply
 absent on a public IP. Details, day-to-day commands and the private-repo case
 are in `deploy/hetzner/README.md`.
 
+### Option E — a Raspberry Pi in a cupboard
+
+Option C, but on a machine whose only job this is. A Pi 4 or 5 with a USB SSD
+is the nicest home for a database that has to remember things for years: no
+bill, no provider, no public attack surface, and a disk you can hold.
+
+```bash
+# on a freshly flashed 64-bit Raspberry Pi OS Lite
+sudo git clone https://github.com/DanM3rcurius/real-estate-tracker.git /opt/hofradar/app
+sudo install -m 0600 /opt/hofradar/app/deploy/raspberrypi/hofradar.env.example \
+                     /opt/hofradar/hofradar.env
+sudo bash /opt/hofradar/app/deploy/raspberrypi/bootstrap.sh
+```
+
+Same shape as the Hetzner box — service user, ufw, fail2ban, unattended
+upgrades, a `hofradar.service`, a nightly online backup, and a generated
+password if you supply no hash. Three things are genuinely different, and they
+are the whole reason that folder exists rather than a note in this one:
+
+1. **A 64-bit OS is mandatory.** On 32-bit ARM the dependencies have no wheels
+   and pip tries to compile them. The bootstrap refuses to run.
+2. **The database should not live on the SD card.** Point
+   `HOFRADAR_DATA_MOUNT` at a USB SSD, and send the backups off the Pi with
+   `HOFRADAR_BACKUP_RSYNC_TARGET`.
+3. **A home line is not a server line.** The default is LAN-only, and the
+   recommended remote access is Tailscale. A public certificate needs a
+   routable IPv4 address, which a German DS-Lite connection does not have — no
+   port forward fixes that.
+
+There are two runtimes: `docker` (identical to the VPS) and `native` (a
+virtualenv and two systemd units, which is what a 2 GB Pi should use — no
+20-minute ARM image build). `deploy/raspberrypi/README.md` is the full guide.
+
 ## The password gate
 
 One password, one signed cookie. There is exactly one user, so there is no
@@ -165,8 +199,10 @@ docker compose exec hofradar sh -c 'sqlite3 /data/hofradar.sqlite3 ".backup /dat
 docker compose cp hofradar:/data/backup.sqlite3 ./hofradar-backup.sqlite3
 ```
 
-On the Hetzner box this already runs nightly — `hofradar-backup`, landing in
-`/var/backups/hofradar`.
+On the Hetzner box and on the Pi this already runs nightly —
+`hofradar-backup`, landing in `/var/backups/hofradar`. On the Pi, set
+`HOFRADAR_BACKUP_RSYNC_TARGET` as well: a backup that only exists on the
+machine it is backing up is not a backup.
 
 On Fly: `fly ssh console` then the same, or snapshot the volume
 (`fly volumes snapshots list`). Do this before changing the schema.

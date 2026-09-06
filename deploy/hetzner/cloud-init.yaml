@@ -79,7 +79,10 @@ write_files:
       # Optional. Without it the deterministic pipeline still runs end to end.
       ANTHROPIC_API_KEY=
       HOFRADAR_LLM_MODEL=claude-sonnet-5
-      HOFRADAR_SCHEDULE_CRON=0 6 * * 1
+      # Quoted because bootstrap.sh sources this file with bash: an unquoted
+      # `0 6 * * 1` is parsed as the command `6` with HOFRADAR_SCHEDULE_CRON=0
+      # in its environment, which under `set -e` aborts the whole first boot.
+      HOFRADAR_SCHEDULE_CRON="0 6 * * 1"
 
   - path: /etc/ssh/sshd_config.d/99-hofradar.conf
     permissions: "0644"
