@@ -138,6 +138,8 @@ your own regional feeds — which is where the hidden listings actually are.
 
 - [docs/DECISIONS.md](docs/DECISIONS.md) — the load-bearing architecture calls and why
 - [docs/DEPLOY.md](docs/DEPLOY.md) — hosting, the password gate, backups
+- [deploy/raspberrypi/README.md](deploy/raspberrypi/README.md) — the full guide for a Pi at home
+- [deploy/hetzner/README.md](deploy/hetzner/README.md) — the same, for a VPS
 - [docs/SOURCES.md](docs/SOURCES.md) — source strategy, legality, adding your own
 - [docs/MODULE_API.md](docs/MODULE_API.md) — the internal package contract
 
