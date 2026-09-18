@@ -74,6 +74,11 @@ class PriceType(StrEnum):
     NEGOTIABLE = "negotiable"    # "VB" / "Verhandlungsbasis"
     ON_REQUEST = "on_request"    # "Preis auf Anfrage"
     AUCTION_MIN = "auction_min"  # Verkehrswert / Mindestgebot (ZVG)
+    #: A monthly figure - the listing is for rent, not for sale. Kept as a
+    #: price *type* rather than an exclusion keyword because nothing about a
+    #: rented farm contradicts it: a Vierseithof "zu vermieten" is still not
+    #: for sale, however much Hofsubstanz it carries. See docs/DECISIONS.md 22.
+    RENT = "rent"
     UNKNOWN = "unknown"
 
 

@@ -18,8 +18,13 @@ from hofradar.contracts import (
     NormalizedListing,
     RawListing,
 )
+from hofradar.db.enums import PriceType
 from hofradar.normalize.dates import parse_german_date
-from hofradar.normalize.features import classify_property_type, extract_features
+from hofradar.normalize.features import (
+    RENTAL_EXCLUSION_FLAG,
+    classify_property_type,
+    extract_features,
+)
 from hofradar.normalize.location import find_location_in_text, parse_location
 from hofradar.normalize.numbers import parse_area, parse_german_number, parse_price
 from hofradar.normalize.text import text_hash
@@ -216,6 +221,18 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
     listing.is_monument = features.is_monument
     listing.is_private_seller = features.is_private_seller
     listing.is_off_market_signal = features.is_off_market_signal
+    # A rental is a fact about the offer, not a keyword that farm substance
+    # can talk its way past: whether the price string or the prose said it,
+    # the type is RENT and the flag is set, so both the scoring gate and the
+    # paste box see the same thing (docs/DECISIONS.md entry 22).
+    if features.is_rental or listing.price_type == PriceType.RENT:
+        listing.price_type = PriceType.RENT.value
+        if RENTAL_EXCLUSION_FLAG not in listing.exclusion_flags:
+            listing.exclusion_flags = sorted([*listing.exclusion_flags, RENTAL_EXCLUSION_FLAG])
+        listing.warnings.append(
+            "Mietobjekt: das Inserat bietet zur Miete an, nicht zum Kauf - "
+            "es wird nicht ins Radar aufgenommen"
+        )
     if listing.exclusion_flags:
         listing.warnings.append(
             f"exclusion flags matched: {', '.join(listing.exclusion_flags)}"

@@ -29,6 +29,8 @@ services:
       HOFRADAR_SCHEDULE_CRON: ${HOFRADAR_SCHEDULE_CRON:-0 6 * * 1}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       HOFRADAR_LLM_MODEL: ${HOFRADAR_LLM_MODEL:-claude-sonnet-5}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      HOFRADAR_JEV_MODEL: ${HOFRADAR_JEV_MODEL:-jev-latest}
     logging: *journal
 
   caddy:

@@ -125,6 +125,18 @@ def _extract_price_value(text: str) -> float | None:
 
 _AUCTION_MARKERS = ("verkehrswert", "mindestgebot")
 
+#: Markers that make a figure a monthly one. Matched on the normalised string
+#: (see :mod:`hofradar.normalize.text`), where "1.250 €/Monat" arrives as
+#: "1 250 monat" - the currency sign and the slash are punctuation and gone -
+#: so a bare "monat" has to count. That is safe only because this pattern is
+#: applied to the *price field*, never to the prose. A bare "miete" is
+#: deliberately absent: "derzeitige Miete 800 EUR" describes a tenant in a
+#: house that *is* for sale.
+_RENT_MARKER_RE = re.compile(
+    r"\b(?:kalt|warm|nettokalt|monats|grund)miete\b|\bmietpreis\b|\bzur miete\b"
+    r"|\bzu vermieten\b|\bmtl\b|\bmonatlich\b|\bmonat\b"
+)
+
 
 def parse_price(text: str | None) -> tuple[float | None, str]:
     """Parse a German real-estate price string into ``(value_eur, price_type)``.
@@ -132,7 +144,8 @@ def parse_price(text: str | None) -> tuple[float | None, str]:
     ``price_type`` is always one of :class:`hofradar.db.enums.PriceType`'s
     values. Recognised markers: "Verkehrswert"/"Mindestgebot" -> AUCTION_MIN;
     "Preis auf Anfrage"/"auf Anfrage" -> ON_REQUEST; "VB"/"Verhandlungsbasis"/
-    "VHB" -> NEGOTIABLE; a concrete number with no such marker -> ASKING.
+    "VHB" -> NEGOTIABLE; "Kaltmiete"/"Warmmiete"/"mtl."/"pro Monat" -> RENT;
+    a concrete number with no such marker -> ASKING.
     "Festpreis" ("fixed price") is the semantic opposite of negotiable and
     does not change the type away from ASKING.
 
@@ -150,7 +163,11 @@ def parse_price(text: str | None) -> tuple[float | None, str]:
 
     norm = normalize_text(stripped)
     price_type = PriceType.ASKING
-    if any(marker in norm for marker in _AUCTION_MARKERS):
+    # Rent first: "Kaltmiete 1.250 € VB" is a negotiable *rent*, and a monthly
+    # figure read as a purchase price is the cheapest farm in Bavaria.
+    if _RENT_MARKER_RE.search(norm):
+        price_type = PriceType.RENT
+    elif any(marker in norm for marker in _AUCTION_MARKERS):
         price_type = PriceType.AUCTION_MIN
     elif "auf anfrage" in norm:
         price_type = PriceType.ON_REQUEST
@@ -165,6 +182,12 @@ def parse_price(text: str | None) -> tuple[float | None, str]:
     if value is None and price_type is PriceType.ASKING:
         price_type = PriceType.UNKNOWN
     return value, price_type.value
+
+
+def is_rent_price(text: str | None) -> bool:
+    """Does this price string describe a monthly figure? Same markers as
+    :func:`parse_price`, exposed so the label lifter can keep the label."""
+    return bool(text) and bool(_RENT_MARKER_RE.search(normalize_text(text)))
 
 
 # --------------------------------------------------------------------------- #

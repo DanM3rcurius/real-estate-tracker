@@ -96,7 +96,10 @@ that a naive search makes every single week:
    text similarity and perceptual image hashes — never by URL alone, and never
    on a title match alone.
 7. **The LLM may not change a number.** It reads prose and flags risks. Prices,
-   areas and distances come from the deterministic stages.
+   areas and distances come from the deterministic stages. The same holds for
+   the optional System One triage (`TYPESAFE_API_KEY`): it answers typed
+   questions - for sale or for rent, farm or flat - and a thresholded rule
+   reads its probabilities. It never writes a figure.
 
 ## Commands
 

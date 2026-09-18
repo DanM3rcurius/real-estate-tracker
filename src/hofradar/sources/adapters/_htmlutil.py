@@ -46,6 +46,16 @@ _LABEL_FIELD_MAP: dict[str, str] = {
     "kaufpreisvorstellung": "price_raw",
     "preisvorstellung": "price_raw",
     "price": "price_raw",
+    # Rent labels map to the same field, but the label is kept in the value
+    # (see _LABELS_KEPT_IN_VALUE): "1.250 €" alone would parse as an asking
+    # price, and a monthly figure read as a purchase price is exactly the
+    # rental that reaches the radar looking like a bargain.
+    "kaltmiete": "price_raw",
+    "warmmiete": "price_raw",
+    "nettokaltmiete": "price_raw",
+    "monatsmiete": "price_raw",
+    "mietpreis": "price_raw",
+    "miete": "price_raw",
     "grundstück": "land_raw",
     "grundstueck": "land_raw",
     "grundstücksfläche": "land_raw",
@@ -73,6 +83,13 @@ _LABEL_FIELD_MAP: dict[str, str] = {
     "address": "location_raw",
 }
 
+
+#: Labels whose meaning is lost if only the value is kept. The lifted string
+#: for these reads "Kaltmiete: 1.250 €", which ``hofradar.normalize.parse_price``
+#: types as RENT.
+_LABELS_KEPT_IN_VALUE: frozenset[str] = frozenset(
+    {"kaltmiete", "warmmiete", "nettokaltmiete", "monatsmiete", "mietpreis", "miete"}
+)
 
 #: A trailing parenthetical qualifier on a label, e.g. "Wohnfläche (Bauernhaus)"
 #: or "Nutzfläche (Wirtschaftsteil)" - owner-written exposés for a Hofstelle
@@ -102,11 +119,15 @@ def extract_labeled_fields(text: str) -> dict[str, str]:
         if not value:
             continue
         field = _LABEL_FIELD_MAP.get(key)
+        base_key = key
         if field is None:
             base_key = _TRAILING_PARENTHETICAL_RE.sub("", key).strip()
             if base_key != key:
                 field = _LABEL_FIELD_MAP.get(base_key)
         if field and field not in found:
+            lookup_key = key if key in _LABEL_FIELD_MAP else base_key
+            if lookup_key in _LABELS_KEPT_IN_VALUE:
+                value = f"{label.strip()}: {value}"
             found[field] = value
     return found
 

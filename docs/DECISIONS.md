@@ -646,3 +646,115 @@ So the ranked path and the degraded path cannot drift.
 requested `/` with parameters in the same `TestClient` — cookies are kept across
 requests in the test harness, so a following bare `/` may redirect and the response
 will carry the saved filters in its redirect target.
+
+---
+
+## 22. A rental is a price type, not an exclusion keyword, and substance cannot override it
+
+**Decision.** `PriceType.RENT` (`"rent"`) is a value of `price_type`.
+`parse_price` returns it for any monthly marker in the price string
+("Kaltmiete", "Warmmiete", "/Monat", "mtl.", "zu vermieten"), and
+`extract_features` sets `is_rental` for phrasings in the prose that describe
+the *offer* ("zu vermieten", "zur Miete", "Kaltmiete", "Kaution", ...).
+`normalize_listing` folds both into one fact: `price_type == "rent"`, the
+`mietobjekt` tag in `exclusion_flags`, and a German `warnings` line. The
+scoring engine rejects on `price_type` alone (`REJECT_RENTAL`,
+`RENTAL_NOT_FOR_SALE`) and the crawl loop drops an *unknown* rental before
+geocoding, counted as `rental` in the NORMALIZE entry. A rental the database
+already holds is not dropped but ingested, so the row learns the fact and the
+gate retires it. `_htmlutil.extract_labeled_fields` keeps a rent label in the
+lifted value (`"Kaltmiete: 1.250 €"`), because the label is the fact.
+
+**Why.** "Bauernhaus, 1.800 € Kaltmiete" parsed as an asking price of 1,800 €
+and reached the top ten as the cheapest farm in Bavaria - the deal score
+divides price by area, and nothing anywhere asked whether the figure was
+monthly. The negative keyword list had "Wohnung zur Miete" and nothing else
+about rent, and even a match there is overridable by farm substance
+(`FLAG_EXCLUSION_OVERRIDDEN`, entry on the exclusion gate), which is exactly
+wrong for a rental: a Vierseithof "zu vermieten" has all the substance in the
+world and is still not for sale. So rent is modelled on the axis it belongs
+to - what the number *means* - rather than as one more word in a list whose
+matches a Stadel can cancel.
+
+**Why the value is kept.** `price` stays 1,800 with `price_type = rent`
+rather than being nulled. The source said it; dropping a fact is the silence
+this codebase keeps producing (entries 17-19). The UI renders the type beside
+the figure, and a rejected row is off the radar anyway.
+
+**Why "vermietet" does not fire.** "Teilweise vermietet" is a hidden-market
+phrase in `config/keywords.yaml` (a farm with a tenant in the Austragshaus is
+a farm being sold), and "Mieteinnahmen" is a selling point. Only the offer
+counts. The price-field pattern may match a bare "Monat" because it only
+ever sees the price field; the prose pattern may not.
+
+**Flats.** The same crawl yielded "3-Zimmer-Wohnung" by the dozen from broker
+sitemaps. Those are a *type*, so they went where types go: the `negative`
+vocabulary gained the flat words the list never had (Etagenwohnung,
+Dachgeschosswohnung, Maisonette, Penthouse, Apartment, "Zimmer-Wohnung" /
+"Zi-Whg", matched punctuation-insensitively so "2-Zimmer-Wohnung" and
+"2 Zimmer Wohnung" are one term). A farm advertising "zwei Wohnungen" keeps
+its substance override; that is the existing gate working as designed.
+
+---
+
+## 23. A System One model answers the typed questions a regex cannot, as evidence read by one rule
+
+**Decision.** `hofradar.triage` asks TypeSafe's Jev (a System One model:
+typed questions in, a probability distribution over the allowed labels out,
+one fast call) three things about every listing the deterministic filters
+could not reject: *is this for sale or for rent?* (`angebotsart`: kauf /
+miete / unklar), *what is it?* (`objektart`: hofstelle / haus / wohnung /
+grundstueck / gewerbe / sonstiges) and *does the text show real farm
+substance?* (`hofsubstanz`, a 0-1 noul). The whole answer - model version,
+every probability - is stored as `evidence["triage"]`. One deterministic
+function, `triage.decide(verdict, gates, has_substance=...)`, turns it into
+a rejection (`miete` or `wohnung` at or above
+`gates.triage_reject_min_probability`, default 0.85), a flag
+(`TRIAGE_DOUBTS_FARMSTEAD` when the likeliest answer is a rental or a flat
+but under the threshold), or nothing. The crawl loop applies it before
+geocoding (counted as `triage:miete` / `triage:wohnung`, same known-row rule
+as entry 22) and `scoring.engine` applies it again on every rescore
+(`TRIAGE_SAYS_RENTAL` / `TRIAGE_SAYS_FLAT`), so a property remembered before
+the gate existed meets it the next time it is scored. Without
+`TYPESAFE_API_KEY` the stage is absent and the NORMALIZE entry says
+`triage: {enabled: false}`; with it, `asked` and `failed` are logged per run.
+
+**Why a System One model and not the LLM review.** The review (entry 9)
+runs last on ≤100 survivors because a frontier model call per crawled page
+is the cost the ordering exists to avoid. This question is the opposite
+shape: every page, three fixed labels, no prose wanted back. Jev is priced
+and built for that (its answers are constrained to the labels we chose, so
+it cannot invent a fourth kind of dwelling or write a number), which is why
+it can sit *before* geocoding, where a Nominatim call per rental is the
+expensive thing.
+
+**Why it is not the scoring engine.** The question came up whether scoring
+itself should move to the model. No: scores are arithmetic over facts and
+two sliders, recomputed per `profile_hash` when a slider moves (entry 1),
+and a model verdict per slider position is neither recomputable nor
+explainable. The model decides *classification* questions; the numbers stay
+deterministic. Invariant 6 is unchanged.
+
+**Why the rule is thresholded and lives in one place.** A verdict is
+evidence, and evidence is read through a rule the user can see and tune
+(`triage_reject_min_probability` is a gate, so it is part of
+`profile_hash`; set it to 1.0 and the reject is off, the flag stays). The
+rule for a flat verdict has the same escape hatch as the keyword gate:
+deterministic farm substance (outbuildings the normaliser found) turns a
+reject into a flag, because "Wohnung im Austragshaus" of a farm sold whole is
+still the farm. The rental verdict has no escape hatch, per entry 22. Putting
+`decide` in `triage.rules` with no network import lets the scoring engine
+call it without pulling in the client.
+
+**Why our own POST and not `typesafe-sdk`.** The SDK is built on `httpx2`,
+which `respx` cannot mock, and this suite's rule is that every outbound call
+is mocked with `respx` and asserted on the request that would have been made.
+The documented call is one endpoint, one bearer header and one JSON body;
+owning it keeps the question texts - the part that actually decides what is
+rejected - in `triage/jev.py` under version control. `TYPESAFE_BASE_URL`
+and `HOFRADAR_JEV_MODEL` (default `jev-latest`) are honoured.
+
+**What it may not do.** It never verifies availability (invariant 4: its
+silence proves nothing and it is not a source), never writes a number, and a
+failed call is counted and the listing proceeds unasked - a triage outage
+must not become an empty radar.

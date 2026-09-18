@@ -26,7 +26,8 @@ Edit three lines in `cloud-init.yaml`:
 3. `ACME_EMAIL` — where Let's Encrypt sends expiry warnings.
 
 Optionally set `ANTHROPIC_API_KEY` (enables the LLM review stage; everything
-else runs without it) and `HOFRADAR_PASSWORD_HASH` (from
+else runs without it), `TYPESAFE_API_KEY` (enables the System One triage that
+keeps rentals and flats out of the radar during the crawl) and `HOFRADAR_PASSWORD_HASH` (from
 `hofradar hash-password`). If you leave the hash empty, first boot generates a
 password, hashes it, and writes the plaintext to
 `/home/hofradar/INITIAL_PASSWORD.txt` — the gate is never left off, because a
