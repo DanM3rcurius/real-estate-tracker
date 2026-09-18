@@ -70,6 +70,7 @@ def head_revision() -> str | None
 ```python
 def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedListing: ...
 def parse_price(text: str | None) -> tuple[float | None, str]:   # (value, PriceType)
+def is_rent_price(text: str | None) -> bool                       # same monthly markers
 def parse_area(text: str | None) -> float | None                  # -> square metres
 def parse_german_number(text: str | None) -> float | None
 def parse_german_date(text: str | None) -> datetime | None
@@ -95,8 +96,16 @@ the page actually was — the fact every other field below it depends on. It doe
 not refuse: refusing is `hofradar.lifecycle.ingest`'s call (entry 19).
 
 `FeatureExtraction` is a dataclass with: `building_features, outbuildings,
-special_features, exclusion_flags, hidden_signals, is_foreclosure, is_monument,
-is_private_seller, is_off_market_signal` (lists of canonical lowercase tags / bools).
+special_features, exclusion_flags, hidden_signals, is_rental, is_foreclosure,
+is_monument, is_private_seller, is_off_market_signal` (lists of canonical
+lowercase tags / bools).
+
+A rental is one fact however it was said: `parse_price` returns
+`PriceType.RENT` for a monthly marker in the price string, `extract_features`
+sets `is_rental` for an offer to rent in the prose, and `normalize_listing`
+folds both into `price_type == "rent"` plus the
+`normalize.features.RENTAL_EXCLUSION_FLAG` (`"mietobjekt"`) tag in
+`exclusion_flags` and a German `warnings` line. See `docs/DECISIONS.md` entry 22.
 
 ## `hofradar.dedupe`
 
@@ -244,6 +253,44 @@ SUPPORTED_FILTERS: frozenset[str]
 `rescore_all` writes `Score` rows keyed by `profile.profile_hash`, and is the
 function the web UI calls after a slider moves.
 
+Two gates are not subject to the farm-substance override that saves a
+keyword-excluded farm: `REJECT_RENTAL` (`RENTAL_NOT_FOR_SALE`, fires on
+`price_type == "rent"`) and the rental half of the triage verdict
+(`REJECT_TRIAGE[OFFER_RENT]`, `TRIAGE_SAYS_RENTAL`). The flat half
+(`REJECT_TRIAGE[DWELLING_FLAT]`, `TRIAGE_SAYS_FLAT`) keeps the override.
+Both triage gates read `Property.evidence["triage"]` through
+`hofradar.triage.decide`, the same function the crawl loop uses, so the two
+cannot drift. See `docs/DECISIONS.md` entries 22 and 23.
+
+## `hofradar.triage`
+
+```python
+class JevTriage:
+    @classmethod
+    def from_env(cls) -> JevTriage            # raises TriageUnavailable without TYPESAFE_API_KEY
+    async def classify(self, listing: NormalizedListing) -> TriageVerdict | None
+    def stats(self) -> dict                  # {"enabled": True, "model", "asked", "failed"}
+    async def aclose(self) -> None
+
+class TriageUnavailable(RuntimeError)
+class TriageVerdict            # model, offer_kind, offer_probabilities, dwelling_kind,
+                               # dwelling_probabilities, farm_substance, observed_at
+    def to_evidence(self) -> dict            # the Evidence shape plus the answers
+def verdict_from_evidence(entry: dict | None) -> TriageVerdict | None
+class TriageDecision           # reject_reason: "miete" | "wohnung" | None, flags, warnings
+def decide(verdict: TriageVerdict, gates: GateConfig, *, has_substance: bool) -> TriageDecision
+TRIAGE_EVIDENCE_KEY = "triage"
+OFFER_RENT = "miete"; DWELLING_FLAT = "wohnung"
+TYPESAFE_API_KEY_ENV, TYPESAFE_BASE_URL_ENV, JEV_MODEL_ENV   # the environment it reads
+```
+
+`classify` never raises into the crawl loop: a failed call is logged, counted
+in `stats()` and answered with `None`. `decide` lives in `hofradar.triage.rules`
+with no network import so the scoring engine can apply it to stored evidence.
+The threshold is `GateConfig.triage_reject_min_probability` (default 0.85, part
+of `profile_hash`; 1.0 disables the reject and keeps the flag). See
+`docs/DECISIONS.md` entry 23.
+
 ## `hofradar.sources`
 
 ```python
@@ -343,6 +390,13 @@ observations over the same window) - see docs/coverage.md.
 async def run_pipeline(profile: SearchProfile, *, trigger: str = "manual",
                        source_keys: list[str] | None = None, dry_run: bool = False) -> SearchRun
 ```
+
+The NORMALIZE entry of `SearchRun.log` always carries `rejected`, `reasons`
+(`exclusion_flags`, `out_of_radius`, `not_a_listing:<kind>`, `rental`,
+`triage:miete`, `triage:wohnung`) and `triage` (`{"enabled": false}` without a
+key, else `{"enabled": true, "model", "asked", "failed"}`). A rental or a
+triage-rejected listing the database already knows is not counted there: it is
+ingested so the row learns the fact, and the scoring gate retires it.
 
 ## `hofradar.search`
 

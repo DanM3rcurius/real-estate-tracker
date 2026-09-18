@@ -51,6 +51,7 @@ src/hofradar/
   scoring/       fit / deal / hidden / freshness / confidence + gates
   sources/       SourceAdapter base + adapters/
   llm/           the last stage, advisory only
+  triage/        System One (Jev) second opinion: typed questions, thresholded by gates
   pipeline/      the orchestrator
   report/        weekly digest (max 10 entries, everything else counted)
   web/           FastAPI + Jinja + HTMX + Leaflet
@@ -151,6 +152,16 @@ a bare `/` — no localStorage, no server table, no Javascript. A test must not
 assert defaults on `GET /` after it has requested `GET /?...` in the same
 `TestClient`, because cookies are preserved and the second request may redirect.
 See decision 21.
+
+**Rentals and flats.** A monthly figure is `price_type="rent"`, set by
+`parse_price` (price field) or `extract_features.is_rental` (prose), and it is
+the one exclusion farm substance cannot override - `REJECT_RENTAL` in scoring,
+`rental` in the run log. Flat words live in `keywords.negative` like any other
+type. With `TYPESAFE_API_KEY` set, `hofradar.triage` asks Jev the three typed
+questions before geocoding and stores the distribution in `evidence["triage"]`;
+`triage.decide` is the only reader, used by both the crawl loop and the scoring
+engine. A known row is never dropped at the crawl loop - it is ingested so it
+learns, and the gate retires it. Decisions 22 and 23.
 
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing

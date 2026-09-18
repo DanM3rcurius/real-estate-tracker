@@ -112,6 +112,9 @@ you care about. The ones that actually matter on day one:
   part. This is the one setting that is annoying to change later.
 - `ANTHROPIC_API_KEY` — optional; without it the deterministic pipeline still
   runs end to end and the LLM review stage is skipped.
+- `TYPESAFE_API_KEY` — optional; enables the System One (Jev) triage that asks
+  every crawled listing whether it is for sale or for rent, farm or flat, and
+  keeps the rentals and flats out of the radar. Without it the run log says so.
 
 You do **not** need a domain, a certificate, a port forward or a password —
 the bootstrap generates the password and leaves it in a file.

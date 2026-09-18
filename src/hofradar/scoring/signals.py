@@ -141,6 +141,7 @@ PRICE_TYPE_POINTS: dict[str, float] = {
     PriceType.NEGOTIABLE: 80.0,
     PriceType.AUCTION_MIN: 70.0,
     PriceType.ON_REQUEST: 35.0,
+    PriceType.RENT: 0.0,  # a monthly figure says nothing about a purchase
     PriceType.UNKNOWN: 0.0,
 }
 DUPLICATE_MULTI_SOURCE_POINTS = 100.0

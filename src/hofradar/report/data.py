@@ -257,6 +257,7 @@ POSITIVE_FLAG_LABELS: dict[str, str] = {
 #: separate problems.
 WARNING_FLAG_LABELS: dict[str, str] = {
     "SANIERUNGSRISIKO": "Sanierungskosten übersteigen den Kaufpreis deutlich",
+    "TRIAGE_DOUBTS_FARMSTEAD": "Triage hält das Inserat eher für Mietangebot oder Wohnung",
 }
 
 

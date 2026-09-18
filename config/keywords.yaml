@@ -130,6 +130,24 @@ keywords:
     - Lagerhalle
     - Bürofläche
     - Wohnung zur Miete
+    - Wohnung zu vermieten
+    - Mietwohnung
+    - Etagenwohnung
+    - Erdgeschosswohnung
+    - Dachgeschosswohnung
+    - Souterrainwohnung
+    - Maisonette
+    - Maisonettewohnung
+    - Penthouse
+    - Apartment
+    - Appartement
+    # "2-Zimmer-Wohnung", "3 Zimmer Wohnung", "2,5-Zi.-Whg." - the flats a
+    # broker sitemap yields by the dozen. Matching is punctuation-insensitive,
+    # so the hyphenated and the spaced spelling are one term each.
+    - Zimmer-Wohnung
+    - Zimmer-Whg
+    - Zi-Wohnung
+    - Zi-Whg
     - Ferienwohnung
     - Zeitwohnen
     - Mikroapartment

@@ -90,6 +90,38 @@ def test_sparse_listing_produces_warnings_not_crashes():
     assert result.town is None
 
 
+def test_rental_listing_is_typed_rent_flagged_and_warned():
+    """Whichever field said it, a rental leaves normalisation as one fact."""
+    from_text = normalize_listing(
+        RawListing(
+            source_key="test_source",
+            url="https://example.test/listings/miete-1",
+            title="Bauernhaus zu vermieten",
+            description="Mit Stadel und Stall. Kaltmiete 1.800 €.",
+            price_raw="1.800 €",
+        ),
+        KEYWORDS,
+    )
+    assert from_text.price_type == PriceType.RENT.value
+    assert "mietobjekt" in from_text.exclusion_flags
+    assert from_text.outbuildings, "substance is still recorded - it just cannot override rent"
+    assert any("Mietobjekt" in w for w in from_text.warnings)
+
+    from_price = normalize_listing(
+        RawListing(
+            source_key="test_source",
+            url="https://example.test/listings/miete-2",
+            title="Haus im Gruenen",
+            description="Ruhige Lage.",
+            price_raw="Kaltmiete: 1.250 €",
+        ),
+        KEYWORDS,
+    )
+    assert from_price.price_type == PriceType.RENT.value
+    assert from_price.price == pytest.approx(1250.0)
+    assert "mietobjekt" in from_price.exclusion_flags
+
+
 def test_foreclosure_and_monument_listing():
     result = normalize_listing(FORECLOSURE_DENKMAL, KEYWORDS)
 

@@ -234,6 +234,10 @@ class GateConfig(BaseModel):
     reject_excluded: bool = True
     #: A property with no road route measured yet is held back, not silently passed.
     reject_unrouted: bool = False
+    #: A System One triage verdict (hofradar.triage) rejects a listing as a
+    #: rental or a flat only at or above this probability; below it the
+    #: verdict is a flag for a human. 1.0 turns the reject off, the flag stays.
+    triage_reject_min_probability: float = 0.85
     shortlist_size: int = 10
     llm_review_size: int = 100
 

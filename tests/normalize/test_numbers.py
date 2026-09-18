@@ -114,6 +114,17 @@ PRICE_TYPE_CASES = [
     ),
     pytest.param("Mindestgebot 300.000 EUR", 300000.0, PriceType.AUCTION_MIN, id="mindestgebot"),
     pytest.param("650.000 € Festpreis", 650000.0, PriceType.ASKING, id="festpreis-is-asking"),
+    # A monthly figure is a rent, whatever else the string says - "Kaltmiete
+    # 1.250 € VB" is a negotiable rent, not a negotiable purchase.
+    pytest.param("Kaltmiete: 1.250 €", 1250.0, PriceType.RENT, id="kaltmiete-label"),
+    pytest.param("1.250 € / Monat", 1250.0, PriceType.RENT, id="euro-per-month"),
+    pytest.param("950 EUR mtl.", 950.0, PriceType.RENT, id="mtl"),
+    pytest.param("Warmmiete 1.400 € VB", 1400.0, PriceType.RENT, id="rent-beats-vb"),
+    pytest.param("zu vermieten", None, PriceType.RENT, id="zu-vermieten-bare"),
+    # A tenant in a house that is for sale is not a rental.
+    pytest.param(
+        "750.000 €, derzeitige Miete 800 €", 750000.0, PriceType.ASKING, id="tenant-not-rental"
+    ),
 ]
 
 
@@ -125,6 +136,14 @@ def test_parse_price_types(text, expected_value, expected_type):
     else:
         assert value == pytest.approx(expected_value)
     assert price_type == expected_type.value
+
+
+def test_is_rent_price_shares_the_markers():
+    from hofradar.normalize import is_rent_price
+
+    assert is_rent_price("Kaltmiete: 1.250 €") is True
+    assert is_rent_price("750.000 €") is False
+    assert is_rent_price(None) is False
 
 
 def test_parse_price_none_and_empty():

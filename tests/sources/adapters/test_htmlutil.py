@@ -14,6 +14,18 @@ from __future__ import annotations
 from hofradar.sources.adapters._htmlutil import extract_labeled_fields
 
 
+def test_rent_labels_keep_the_label_in_the_value():
+    """"1.250 €" alone would parse as an asking price; the label is the fact."""
+    fields = extract_labeled_fields("Kaltmiete: 1.250 €\nWohnfläche: 65 m²")
+    assert fields["price_raw"] == "Kaltmiete: 1.250 €"
+    assert fields["living_raw"] == "65 m²"
+
+
+def test_sale_labels_are_unchanged_by_the_rent_rule():
+    fields = extract_labeled_fields("Kaufpreis: 750.000 €")
+    assert fields["price_raw"] == "750.000 €"
+
+
 def test_a_parenthetical_suffixed_known_label_matches_its_base_field() -> None:
     fields = extract_labeled_fields("Wohnfläche (Bauernhaus): ca. 110 m²")
     assert fields == {"living_raw": "ca. 110 m²"}
