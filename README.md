@@ -132,6 +132,10 @@ under **Einstellungen** and saved as a named profile.
 Enabled by default: manual paste-in, CSV import, the official ZVG foreclosure
 register, and generic RSS/sitemap adapters for regional brokers.
 
+The paste box under **Hinzufügen** also takes an exposé PDF — upload the file
+or paste a URL that points straight at it — and keeps the file itself with the
+property, alongside anything you typed.
+
 The big portals (Kleinanzeigen, ImmobilienScout24, Immowelt) ship **disabled**.
 Their terms restrict automated access and they are actively bot-defended. See
 [docs/SOURCES.md](docs/SOURCES.md) for what that means for you and how to add

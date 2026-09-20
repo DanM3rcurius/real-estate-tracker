@@ -758,3 +758,67 @@ and `HOFRADAR_JEV_MODEL` (default `jev-latest`) are honoured.
 silence proves nothing and it is not a source), never writes a number, and a
 failed call is counted and the listing proceeds unasked - a triage outage
 must not become an empty radar.
+
+---
+
+## 24. A PDF exposé is the listing's own words, read behind the link and accepted at the door
+
+**Decision.** A PDF is lifted the same way an HTML page is: text out,
+labelled lines picked up, typed parsing left to `hofradar.normalize`. The
+lift lives once, in `hofradar.sources.adapters._pdfutil`, and is used in
+three places. `DenkmalboerseAdapter.fetch_detail` follows the "zum Exposé"
+link on every detail page, downloads the PDF through the polite client and
+merges it into the listing - the page's own Kurzinfo keeps precedence, the
+PDF fills the holes and its full text is appended to the description.
+`/add` accepts an uploaded PDF next to the URL and the text box, and a pasted
+URL that answers with a PDF is read as one. Every document a listing's facts
+were read from rides along as a `DocumentRef` (`RawListing.documents` ->
+`NormalizedListing.documents`) and `lifecycle.ingest` remembers it as a
+`Document` row, one per (property, url), so the dossier's "Dokumente" list
+links to the exposé and an uploaded file is kept under
+`$HOFRADAR_DATA_DIR/uploads/` by content hash. `pypdf` is a core dependency
+now; the `[pdf]` extra remains as an empty alias so existing install lines
+keep working.
+
+**Why.** On a live sample of 30 in-scope Denkmalbörse objects (2026-09-20),
+29 linked an exposé PDF. The HTML alone left the room count empty on all 30,
+the usable area on 24 and the living area on 9 - the "k. A." cells the reader
+sees on the dossier - while the same facts sat one click away in a document
+the adapter never opened. The prose is the bigger loss: `Gewölbekeller`,
+`stark sanierungsbedürftig`, `Scheune`, `Alleinlage` are what
+`extract_features` and the cost model key off, and they live in the exposé,
+not in the Kurzinfo box. And the reader's own case is the same shape: a
+broker sends an exposé as a PDF, and until now the only way in was to copy
+its text into the box by hand.
+
+**Why the label reader changed with it.** Exposés set facts in layouts an
+HTML detail page does not: two on one line
+(`Wohnfläche: ca. 1.050 m²          Grundstücksfläche: ca. 7.112 m²`, BLfD's
+own template), a label above its value (`Wohnfläche` / `~118 m²`, every
+broker's "Eckdaten" table), and a bare count (`28 Zimmer`).
+`extract_labeled_fields` now reads all three, under guards that keep it a
+string matcher and not a guesser: a run of two spaces or a tab separates
+facts on a line, a single space never does; a label-above-value pair is only
+taken for the numeric fields and only when the value line is short and
+carries a digit or a price marker - never for `Lage`/`Ort`, whose next line
+is prose on every exposé and would block the address recovery of entry 18;
+a bare room count is only read off a line short enough to be a fact-box
+entry, so "die 3-Zimmer-Wohnung im DG" never becomes the house. The same
+work found that a recovered town could span a line ("Vogtareuth\nKaufpreis"
+was one town); it cannot any more.
+
+**What is refused loudly.** A scanned PDF with no text layer yields nothing,
+and that is a `warnings` line on the listing (shown on `/add` and stored on
+the observation), not an empty description that looks like a thin advert. A
+PDF over `PDF_MAX_BYTES` (40 MB) is not read at all. A failed exposé fetch on
+the Denkmalbörse - HTTP error, not a PDF, unreadable - is a warning on the
+listing and never a reason to `mark_enumeration_incomplete`: the listing
+exists, only the enrichment failed, and invariant 4b is about absence, not
+about thin facts. The adapter option `expose_pdf: false` switches the
+2-14 MB-per-object download off for an operator on a metered line, and says
+so in `config/sources.yaml`.
+
+**What it may not do.** The lift parses nothing - "ca. 1.050 m²" is still
+`hofradar.normalize`'s to type, and a PDF's page kind is `listing` because a
+reader or a detail page handed it over as one advert. It is not OCR: a scan
+is reported, not guessed at.

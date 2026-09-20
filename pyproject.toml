@@ -20,10 +20,15 @@ dependencies = [
     "feedparser>=6.0",
     "apscheduler>=3.10",
     "anthropic>=0.40",
+    # The paste box reads uploaded exposés and the Denkmalbörse adapter reads
+    # the exposé behind every detail page: a base install without it would
+    # leave both silently thin (see docs/DECISIONS.md entry 24).
+    "pypdf>=5.1",
 ]
 
 [project.optional-dependencies]
 images = ["Pillow>=11.0", "ImageHash>=4.3"]
+# Kept so existing install lines (`.[pdf,images]`) keep working; pypdf is core now.
 pdf = ["pypdf>=5.1"]
 postgres = ["psycopg[binary]>=3.2"]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.21", "ruff>=0.8", "mypy>=1.13"]
@@ -39,7 +44,7 @@ build-backend = "hatchling.build"
 packages = ["src/hofradar"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]

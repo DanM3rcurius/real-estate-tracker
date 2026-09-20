@@ -52,6 +52,20 @@ class Evidence:
 
 
 @dataclass(slots=True)
+class DocumentRef:
+    """A document the listing's facts were read from - an exposé PDF behind
+    the detail page's link, a reader's upload, an Amtsblatt page. Carried
+    from the adapter to ``lifecycle.ingest``, which remembers it as a
+    ``Document`` row so the dossier can link to it."""
+
+    kind: str
+    url: str
+    title: str | None = None
+    page_count: int | None = None
+    local_path: str | None = None
+
+
+@dataclass(slots=True)
 class RawListing:
     """What a source adapter yields. Deliberately unopinionated and stringy."""
 
@@ -82,6 +96,12 @@ class RawListing:
     #: nothing; only a full-page lift has to classify what it fetched.
     page_kind: PageKind = PAGE_KIND_LISTING
     extra: dict[str, Any] = field(default_factory=dict)
+    #: What the adapter could not do with this listing, in the reader's
+    #: language: an exposé PDF it could not fetch, a scan with no text
+    #: layer. ``hofradar.normalize`` carries these into
+    #: ``NormalizedListing.warnings`` so they reach /add and the observation.
+    warnings: list[str] = field(default_factory=list)
+    documents: list[DocumentRef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -136,6 +156,7 @@ class NormalizedListing:
     text_hash: str | None = None
     evidence: dict[str, dict[str, Any]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    documents: list[DocumentRef] = field(default_factory=list)
 
     def add_evidence(self, field_name: str, ev: Evidence) -> None:
         self.evidence[field_name] = ev.to_dict()

@@ -23,7 +23,12 @@ def main() -> int:
     for path in sorted(SOURCE.glob("*.yaml")):
         destination = TARGET / path.name
         if not destination.exists() or not filecmp.cmp(path, destination, shallow=False):
-            shutil.copy2(path, destination)
+            # copyfile, not copy2: copy2 carries the source's mtime across, and
+            # a value edit that keeps the byte length ("2000" -> "1000") then
+            # leaves the copy with the same size and mtime git's index already
+            # has - so `git add` sees nothing to stage and the drift reaches CI
+            # anyway. A fresh mtime is what makes git re-hash the file.
+            shutil.copyfile(path, destination)
             changed.append(path.name)
     for stale in sorted(TARGET.glob("*.yaml")):
         if not (SOURCE / stale.name).exists():

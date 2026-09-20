@@ -93,10 +93,16 @@ def parse_location(text: str | None) -> LocationParts:
 #: five digits *and* a town-shaped word after them is what keeps this from
 #: matching a price: "595.000" has separators, and "95000 EUR" fails the town
 #: test below.
+#: A town name never spans a line: only a space or a hyphen joins its words
+#: ("Neumarkt-Sankt Veit", "Bad Feilnbach"), so the capitalised line after an
+#: address ("83569 Vogtareuth\nKaufpreis: ...") is not read as its second
+#: half. The Landkreis may sit on its own line below the address - BLfD's
+#: Kurzinfo box renders "63825 Schöllkrippen" and "Landkreis Aschaffenburg" as
+#: two paragraphs - and is normalised onto one line by the caller.
 _POSTCODE_TOWN_RE = re.compile(
-    r"\b(?!00)(\d{5})\s+"
-    r"([A-ZÄÖÜ][a-zäöüß]+(?:[-\s][A-ZÄÖÜ][a-zäöüß]+)*)"
-    r"(\s*[,(]?\s*(?:Landkreis|Lkr\.?|Kreis)\s+[A-ZÄÖÜ][a-zäöüß]+\)?)?"
+    r"\b(?!00)(\d{5})[ \t]+"
+    r"([A-ZÄÖÜ][a-zäöüß]+(?:[- ][A-ZÄÖÜ][a-zäöüß]+)*)"
+    r"(\s*[,(]?\s*(?:Landkreis|Lkr\.?|Kreis)[ \t]+[A-ZÄÖÜ][a-zäöüß]+\)?)?"
 )
 
 #: Words that are shaped like a town but are plainly not one. The capitalised
@@ -121,5 +127,10 @@ def find_location_in_text(text: str | None) -> str | None:
         postcode, town, district = match.group(1), match.group(2), match.group(3)
         if town.split()[0].casefold() in _NOT_A_TOWN:
             continue
-        return f"{postcode} {town}{district.rstrip() if district else ''}"
+        if not district:
+            return f"{postcode} {town}"
+        # Whatever separated the Landkreis from the town (a comma, a bracket,
+        # a paragraph break) becomes the one form parse_location reads.
+        district = " ".join(district.split()).lstrip(",( ").rstrip(") ")
+        return f"{postcode} {town}, {district}"
     return None

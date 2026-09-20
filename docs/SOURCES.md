@@ -240,6 +240,37 @@ one of the two Mühldorf objects, and Niedertaufkirchen - Arbing) resolve
 through `lookup()`'s postcode fallback, which the boundary-anchoring fix
 does not touch.
 
+**`fetch_detail` now reads the exposé PDF, because the detail page barely
+says anything.** A BLfD object page is a "Kurzinfo" box and a link - `<a
+href="/mam/information_und_service/denkmal_boerse/<bezirk>/<name>.pdf">zum
+Exposé</a>` - and the facts scoring keys off are in the PDF, not the HTML. On
+a live sample of 30 in-scope objects, 29 had an exposé, while the HTML alone
+left the room count empty on **30 of 30**, the usable area on **24 of 30**
+and the living area on **9 of 30**: that is the "many Denkmal properties show
+k. A." complaint, in numbers. The adapter follows that link (preferring the
+`/mam/` media-area asset when a page carries more than one PDF), fetches it
+through the same polite client as everything else - rate limit and robots
+included - lifts its text with `hofradar.sources.adapters._pdfutil`, and
+merges it in. **The page's Kurzinfo keeps precedence**: a labelled field the
+HTML already filled is never overwritten, only holes are filled, because the
+HTML is the current Kurzinfo while an exposé PDF can be a year older. The
+PDF's text is appended to the description (so keyword extraction and the
+dossier see the prose about outbuildings and condition), and the document is
+recorded so the dossier can link to it under "Dokumente".
+
+A failed exposé fetch is **a warning on the listing, never silence and never
+a failed detail fetch**: a 404, a body that is not a PDF, a file over the
+size limit, a missing `pypdf`, a scanned PDF with no text layer - each
+appends a German warning the reader sees on the dossier, and the listing is
+still yielded with whatever the Kurzinfo said. It does *not* call
+`mark_enumeration_incomplete`: the object itself was read, only its
+enrichment was not, and invariant 4b is about whether this run saw everything
+the index promised. The cost is bandwidth: **2-14 MB per object, re-fetched
+every run**, since nothing is cached between runs. An operator who cannot pay
+that (a metered line, a Raspberry Pi) sets `options.expose_pdf: false` in
+`config/sources.yaml`, which skips the download entirely - and gets the old
+"k. A." on most objects back in exchange.
+
 ## OVBimmo (OVB Heimatzeitungen): terms check complete, source enabled
 
 `hofradar.sources.adapters.ovbimmo.OvbimmoAdapter` is written and tested
