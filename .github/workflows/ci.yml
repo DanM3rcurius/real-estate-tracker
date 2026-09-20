@@ -36,13 +36,20 @@ jobs:
       - name: Test
         run: pytest -q
 
+      # HOFRADAR_OFFLINE only covers geocoding and routing; it does not stop the
+      # source crawl. A bare `run --dry-run` therefore walks every enabled
+      # source's live site from a CI runner on each push - slow, and outside
+      # the private-use terms the Denkmalbörse is read under (docs/SOURCES.md).
+      # The manual source has no inventory, so limiting the run to it boots
+      # the whole pipeline (schema, registry, run bookkeeping, scoring, report)
+      # without a single outbound request.
       - name: Smoke - boot the app
         env:
           HOFRADAR_OFFLINE: "1"
         run: |
           hofradar init-db
           hofradar config
-          hofradar run --dry-run
+          hofradar run --dry-run --sources manual
           python -c "from hofradar.web.app import app; print('web app imports OK')"
 
       # Booting against an EXISTING database is the deployment's actual shape,
