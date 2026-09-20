@@ -368,8 +368,19 @@ def _write_score(
         setattr(row, key, value)
 
 
-def rescore_all(session: Session, profile: SearchProfile, *, only_dirty: bool = True) -> int:
+def rescore_all(
+    session: Session,
+    profile: SearchProfile,
+    *,
+    only_dirty: bool = True,
+    now: datetime | None = None,
+) -> int:
     """Recompute ``CostEstimate`` and ``Score`` for every property. Idempotent.
+
+    ``now`` is the clock every freshness and confidence band is measured
+    against; it defaults to the wall clock and exists so a test can score a
+    fixture built around a fixed date without the result drifting as the
+    calendar moves past it.
 
     Returns the number of properties actually (re)scored. With
     ``only_dirty=True`` a property whose ``Score`` row for this profile is newer
@@ -408,7 +419,7 @@ def rescore_all(session: Session, profile: SearchProfile, *, only_dirty: bool = 
         if only_dirty and not _is_dirty(prop, score_row, cost_row):
             continue
         cost = estimate_costs(prop, profile)
-        result = score_property(prop, profile, cost=cost)
+        result = score_property(prop, profile, cost=cost, now=now)
         _write_cost(session, prop, cost, cost_row)
         _write_score(session, prop, profile_hash, result, score_row)
         written += 1

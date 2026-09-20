@@ -238,7 +238,10 @@ def deal_score(prop, profile, cost) -> tuple[float, dict]
 def hidden_score(prop, profile, now) -> tuple[float, dict]
 def freshness_score(prop, now) -> tuple[float, dict]
 def confidence_score(prop) -> tuple[float, dict]
-def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True) -> int
+def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True,
+                now: datetime | None = None) -> int
+    # now: the clock freshness/confidence bands are measured against
+    # (default wall clock); tests pass their fixed fixture clock.
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
                       include_rejected: bool = False, include_hidden: bool = False,
                       filters: dict | None = None) -> list[tuple[Property, Score]]
