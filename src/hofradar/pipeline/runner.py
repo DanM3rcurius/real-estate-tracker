@@ -27,7 +27,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from hofradar.config import KeywordConfig, SearchProfile, load_config
-from hofradar.contracts import PAGE_KIND_LISTING
 from hofradar.db.enums import PriceType, RunStage, SourceRole
 from hofradar.db.models import Property, PropertySource, SearchRun, Source
 from hofradar.db.session import session_scope
@@ -93,7 +92,7 @@ async def run_pipeline(
     from hofradar.report import build_report, render_html, render_markdown
     from hofradar.scoring import rescore_all
     from hofradar.sources import get_adapter, sync_sources_to_db
-    from hofradar.triage import TRIAGE_EVIDENCE_KEY, JevTriage, TriageUnavailable, decide
+    from hofradar.triage import JevTriage, TriageUnavailable, annotate
 
     cfg = load_config()
     profile = profile or cfg.profile
@@ -170,21 +169,17 @@ async def run_pipeline(
                         # The typed second opinion on what the regex could not
                         # settle. A failed call is counted in triage.stats()
                         # and the listing proceeds unasked; nothing here may
-                        # abort the crawl. Only a page that is a listing is
-                        # worth a call - a portal index is refused by ingest.
-                        if triage is not None and listing.page_kind == PAGE_KIND_LISTING:
-                            verdict = await triage.classify(listing)
-                            if verdict is not None:
-                                listing.evidence[TRIAGE_EVIDENCE_KEY] = verdict.to_evidence()
-                                decision = decide(
-                                    verdict,
-                                    profile.gates,
-                                    has_substance=bool(listing.outbuildings),
-                                )
-                                listing.warnings.extend(decision.warnings)
-                                if decision.reject_reason is not None and known_id is None:
-                                    rejected[f"{REJECT_TRIAGE}:{decision.reject_reason}"] += 1
-                                    continue
+                        # abort the crawl. The paste box asks through the same
+                        # annotate(), so both paths leave the same evidence.
+                        if triage is not None:
+                            decision = await annotate(listing, profile.gates, triage)
+                            if (
+                                decision is not None
+                                and decision.reject_reason is not None
+                                and known_id is None
+                            ):
+                                rejected[f"{REJECT_TRIAGE}:{decision.reject_reason}"] += 1
+                                continue
 
                         geo = await locate(session, listing, profile)
                         if geo.distance_air_km is not None and not within_air_radius(

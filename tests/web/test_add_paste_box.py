@@ -256,3 +256,83 @@ def test_the_same_expose_uploaded_twice_is_one_property(
     assert db_session.query(Property).count() == 1
     assert db_session.query(Document).count() == 1
     assert len(list((data_dir / "uploads").glob("*.pdf"))) == 1
+
+#: A rental the regex cannot see: no rent vocabulary, a warm rent with no label.
+SUBTLE_RENTAL = """Bauernhaus in Bad Aibling
+Preis: 1.400 EUR
+Wohnfläche: 120 m2
+83043 Bad Aibling
+
+Charmantes Bauernhaus, 1.400 warm, ab sofort frei."""
+
+_JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+
+
+def _jev_says_rental() -> dict:
+    from hofradar.triage.jev import Q_DWELLING, Q_OFFER, Q_SUBSTANCE
+
+    return {
+        "model": "jev-1.13.0",
+        "answers": {
+            Q_OFFER: {
+                "type": "choice",
+                "choice": "miete",
+                "confidence": 0.8,
+                "probabilities": {"kauf": 0.05, "miete": 0.94, "unklar": 0.01},
+            },
+            Q_DWELLING: {
+                "type": "choice",
+                "choice": "haus",
+                "confidence": 0.7,
+                "probabilities": {"hofstelle": 0.1, "haus": 0.9},
+            },
+            Q_SUBSTANCE: {"type": "noul", "noul": 0.1},
+        },
+        "usage": {"input_tokens": 100, "output_tokens": 20},
+    }
+
+
+def test_a_pasted_rental_gets_the_triage_verdict_and_is_still_saved(
+    client: TestClient, db_session, monkeypatch
+) -> None:
+    """The paste box never drops what a human pasted; the verdict rides along
+    as evidence and a warning, and the scoring gate does the rejecting."""
+    monkeypatch.setenv("TYPESAFE_API_KEY", "sk-test")
+    with respx.mock(assert_all_called=False) as mock:
+        jev = mock.post(_JEV_ENDPOINT).mock(return_value=httpx.Response(200, json=_jev_says_rental()))
+        mock.route(url__regex=_ANY_HTTP).mock(return_value=httpx.Response(200, json=[]))
+        response = client.post("/add", data={"url": "", "text": SUBTLE_RENTAL})
+
+    assert response.status_code == 200
+    assert jev.call_count == 1
+    assert "Mietangebot mit 94%" in response.text
+
+    prop = db_session.query(Property).one()
+    assert prop.evidence["triage"]["offer_kind"] == "miete"
+    assert prop.evidence["triage"]["source"] == "jev"
+
+
+def test_without_a_key_the_paste_box_asks_nothing(client: TestClient, monkeypatch) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with respx.mock(assert_all_called=False) as mock:
+        jev = mock.post(_JEV_ENDPOINT)
+        mock.route(url__regex=_ANY_HTTP).mock(return_value=httpx.Response(200, json=[]))
+        response = client.post("/add", data={"url": "", "text": SUBTLE_RENTAL})
+
+    assert response.status_code == 200
+    assert not jev.called
+    assert "Triage" not in response.text
+
+
+def test_a_triage_outage_is_said_on_the_confirmation_page(
+    client: TestClient, db_session, monkeypatch
+) -> None:
+    monkeypatch.setenv("TYPESAFE_API_KEY", "sk-test")
+    with respx.mock(assert_all_called=False) as mock:
+        mock.post(_JEV_ENDPOINT).mock(return_value=httpx.Response(503, text="down"))
+        mock.route(url__regex=_ANY_HTTP).mock(return_value=httpx.Response(200, json=[]))
+        response = client.post("/add", data={"url": "", "text": SUBTLE_RENTAL})
+
+    assert response.status_code == 200
+    assert "ohne Zweitmeinung" in response.text
+    assert db_session.query(Property).count() == 1, "an outage must not lose the paste"

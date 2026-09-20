@@ -43,6 +43,7 @@ from hofradar.triage.jev import (
     JevTriage,
     TriageUnavailable,
     TriageVerdict,
+    annotate,
 )
 from hofradar.triage.rules import (
     DWELLING_FLAT,
@@ -64,6 +65,7 @@ __all__ = [
     "TriageDecision",
     "TriageUnavailable",
     "TriageVerdict",
+    "annotate",
     "decide",
     "verdict_from_evidence",
 ]

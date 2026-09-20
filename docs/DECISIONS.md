@@ -759,6 +759,26 @@ silence proves nothing and it is not a source), never writes a number, and a
 failed call is counted and the listing proceeds unasked - a triage outage
 must not become an empty radar.
 
+**One entry point, and the paste box is one of them.** `triage.annotate` is
+the only way a listing gets its verdict: classify, write the evidence, append
+the warnings, return the decision. The crawl loop calls it and drops an
+unknown row on a rejection; the paste box calls it and drops nothing - a
+human chose to paste it - so the verdict shows on the confirmation page and
+the scoring gate retires the row. A configured-but-failing triage is said on
+that page (`TRIAGE_FAILED_NOTICE`); an unconfigured one is silent there,
+exactly as in the crawl, because the run log already carries that fact.
+
+**The threshold is measured, not believed.** `scripts/backtest_triage.py`
+asks the model about every property already judged by a human and prints,
+per verdict group and per threshold, how many would be rejected or flagged.
+The groups are deliberately not summed into one accuracy number: "archived"
+covers too-far and too-dear as well as flat-and-rented, so the table has to
+be read, not scored. The Merkliste column is the one that must show zero.
+With `--store` the same run backfills `evidence["triage"]` on rows that have
+none - the pasted and CSV rows the crawl never re-asks about - which is the
+one write the script makes, on the precedent of the LLM review writing its
+summary; it creates nothing (invariant 1).
+
 ---
 
 ## 24. A PDF exposé is the listing's own words, read behind the link and accepted at the door
