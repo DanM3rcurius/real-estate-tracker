@@ -4,7 +4,15 @@ Every package below MUST expose exactly these names from its `__init__.py`.
 Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
-GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
+GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence,
+DocumentRef).
+`RawListing.warnings` is what the *adapter* could not do, in the reader's
+language (an exposé PDF it could not fetch, a scan with no text layer);
+`normalize_listing` carries it into `NormalizedListing.warnings` ahead of its
+own. `RawListing.documents` / `NormalizedListing.documents` are the
+`DocumentRef`s (`kind`, `url`, `title`, `page_count`, `local_path`) the facts
+were read from; `lifecycle.ingest` remembers each as a `Document` row. See
+`docs/DECISIONS.md` entry 24.
 `RawListing.page_kind` and `NormalizedListing.page_kind` are `PageKind`
 (`PAGE_KIND_LISTING` / `PAGE_KIND_INDEX` / `PAGE_KIND_UTILITY`, all defined in
 `hofradar.contracts`), defaulting to `"listing"` so a source that hands over
@@ -131,6 +139,9 @@ def ingest(session, listing: NormalizedListing, *, run_id: int | None = None,
     # Raises NotAListing - writing nothing at all, not even the Observation -
     # when listing.page_kind is not PAGE_KIND_LISTING. Checked before
     # find_duplicate: docs/DECISIONS.md entry 19.
+    # Writes one Document row per listing.documents entry, keyed by
+    # (property, document_url): re-ingesting the same exposé updates the row
+    # rather than stacking copies. Entry 24.
 def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
@@ -325,6 +336,35 @@ MAPPABLE_ENTRY_FIELDS: frozenset[str]
 def raw_listing_from_html(source_key, url, html, *, http_status=None,
                           extra=None) -> RawListing
 def extract_labeled_fields(text: str) -> dict[str, str]
+    # "Label: value" lines, several per line when set apart by a tab or a
+    # run of two spaces; a label on its own line with a short numeric value
+    # on the next (numeric fields only, never location_raw); a bare room
+    # count ("28 Zimmer") on a short line. First value per field wins.
+    # Strings only - it parses nothing. DECISIONS entry 24.
+
+# hofradar.sources.adapters._pdfutil - the shared PDF lift, same station as
+# _htmlutil for the other container. Used by denkmalboerse, pdf_bulletin,
+# manual and web.routes.add:
+PDF_MAX_BYTES: int                      # 40 MB; larger is refused unread
+DOCUMENT_KIND_EXPOSE, DOCUMENT_KIND_UPLOAD: str
+WARNING_NO_TEXT_LAYER, WARNING_PDF_UNAVAILABLE: str   # German, reader-facing
+class PdfError(ValueError); class PdfUnavailable(PdfError)   # pypdf missing
+class PdfTooLarge(PdfError); class PdfUnreadable(PdfError)
+@dataclass class PdfText: pages: list[str]; warnings: list[str]
+    .page_count .has_text .text          # non-empty pages joined by a blank line
+def extract_pdf_text(data: bytes) -> PdfText           # raises PdfError
+def raw_listing_from_pdf(source_key, url, data, *, http_status=None, extra=None,
+                         kind=DOCUMENT_KIND_EXPOSE, document_title=None) -> RawListing
+    # The PDF *is* the listing (an upload, a pasted link to one): title from
+    # the first headline-like line, labelled fields, full text, a DocumentRef.
+def merge_pdf_into_listing(listing: RawListing, text: PdfText, *, document_url,
+                           document_title=None, kind=DOCUMENT_KIND_EXPOSE) -> None
+    # The page wins: only empty raw fields are filled; the PDF text is
+    # appended to description; warnings and a DocumentRef are added.
+def find_pdf_links(html, base_url) -> list[tuple[str, str]]
+def looks_like_pdf(data: bytes) -> bool
+def is_pdf_response(content_type, url, body=None) -> bool
+def pdf_title(text: PdfText) -> str | None
 def listing_title(tree: HTMLParser, url: str) -> str | None
     # JSON-LD name -> <h1> -> og:title -> <title>, with a trailing site name
     # stripped only when it matches og:site_name or the URL's own host.

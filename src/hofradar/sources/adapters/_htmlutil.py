@@ -99,36 +99,149 @@ _LABELS_KEPT_IN_VALUE: frozenset[str] = frozenset(
 #: bypassed when the plain label alone would otherwise fail to match below.
 _TRAILING_PARENTHETICAL_RE = re.compile(r"\s*\([^)]*\)\s*$")
 
+#: Two labelled facts on one line. The BLfD exposé template sets
+#: "Wohnfläche: ca. 1.050 m²          Grundstücksfläche: ca. 7.112 m²" as one
+#: line of text, and ``partition(":")`` read the second fact as part of the
+#: first value. A tab or a run of two or more spaces separates such
+#: segments; a single space never does, because "Kaufpreis: 500.000, - EUR"
+#: is one value with spaces in it.
+_SEGMENT_SPLIT_RE = re.compile(r"\t|[ \u00a0]{2,}")
 
-def extract_labeled_fields(text: str) -> dict[str, str]:
-    """Scan "Label: value" lines for the fields exposés almost always spell out.
+#: A label on a line of its own with the value on the next line - the
+#: "Eckdaten" table a broker's PDF exposé renders as "Wohnfläche" /
+#: "~118 m²", and a portal's ``<th>``/``<td>`` pair once the HTML is flattened
+#: to text. Only a short value that carries a digit or a recognised
+#: non-numeric price marker is taken, so a heading followed by prose is never
+#: read as a fact. Deliberately not applied to ``location_raw``: a "Lage"
+#: heading is followed by prose on every exposé, and a prose "location" would
+#: block the normaliser's own address recovery (decision 18).
+_VALUE_LINE_RE = re.compile(r"\d|auf anfrage|verhandlungsbasis", re.IGNORECASE)
+_MAX_VALUE_LINE_LEN = 40
+_NEXT_LINE_FIELDS: frozenset[str] = frozenset(
+    {"price_raw", "land_raw", "living_raw", "usable_raw", "rooms_raw", "year_raw"}
+)
+
+#: "28 Zimmer" or "6 Zi." on a short line of its own - a room count that no
+#: label precedes, the way the BLfD template's fact box and most bullet lists
+#: write it. Restricted to a line no longer than a fact box entry so a room
+#: count inside a paragraph ("die 3-Zimmer-Wohnung im DG") is never taken for
+#: the whole house. Two digits at most: "1984 Zimmer" is not a room count.
+_ROOM_COUNT_RE = re.compile(r"(?<![\d.,])(\d{1,2}(?:[.,]5)?)\s+(?:Zimmer\b|Zi\.)", re.IGNORECASE)
+
+
+def _field_for_label(key: str) -> tuple[str | None, str]:
+    """Resolve a lower-cased label to its RawListing field.
 
     A label with a trailing parenthetical qualifier matches the same field as
     its unqualified form *only when that unqualified form is already a known
     key* - this fills in the common "which part of the building" qualifier
     without turning the lookup into a fuzzy match for labels this map has
-    never heard of in any form.
+    never heard of in any form. Returns ``(field, lookup_key)`` where
+    ``lookup_key`` is the map key that matched (the qualified label, or its
+    base), for the rent rule below.
+    """
+    field = _LABEL_FIELD_MAP.get(key)
+    if field is not None:
+        return field, key
+    base_key = _TRAILING_PARENTHETICAL_RE.sub("", key).strip()
+    if base_key != key:
+        field = _LABEL_FIELD_MAP.get(base_key)
+        if field is not None:
+            return field, base_key
+    return None, key
+
+
+def _label_key(label: str) -> str:
+    return label.strip().lower().rstrip(".")
+
+
+def _labelled_segments(line: str) -> Iterator[str]:
+    """Split one line into its "Label: value" segments - usually just one.
+
+    A segment with no colon is the first half of a label ("Wohnfläche" +
+    "(Bauernhaus): 110") unless what follows is a known label by itself, in
+    which case it was prose and is dropped; a segment ending in a colon is a
+    label whose value follows ("Kaufpreis:" + "59.000 €").
+    """
+    pending = ""
+    for segment in _SEGMENT_SPLIT_RE.split(line):
+        segment = segment.strip()
+        if not segment:
+            continue
+        if pending and ":" not in pending and ":" in segment:
+            own_label, _, _ = segment.partition(":")
+            if _field_for_label(_label_key(own_label))[0] is not None:
+                pending = ""
+        pending = f"{pending} {segment}" if pending else segment
+        if ":" not in pending or pending.endswith(":"):
+            continue
+        yield pending
+        pending = ""
+    if pending and ":" in pending and not pending.endswith(":"):
+        yield pending
+
+
+def _take(found: dict[str, str], label: str, value: str) -> None:
+    key = _label_key(label)
+    value = value.strip()
+    if not value:
+        return
+    field, lookup_key = _field_for_label(key)
+    if field is None or field in found:
+        return
+    if lookup_key in _LABELS_KEPT_IN_VALUE:
+        value = f"{label.strip()}: {value}"
+    found[field] = value
+
+
+def extract_labeled_fields(text: str) -> dict[str, str]:
+    """Scan "Label: value" lines for the fields exposés almost always spell out.
+
+    Three layouts are read, in this order of trust: "Label: value" on one
+    line (several per line when set apart by a tab or a run of spaces); a
+    label on its own line with a short numeric value on the next; and a bare
+    room count ("28 Zimmer") on a short line. The first value found for a
+    field wins - a page's Kurzinfo box beats a figure repeated deeper in the
+    exposé - and nothing here parses: the raw substring is kept for
+    ``hofradar.normalize`` to type.
     """
     found: dict[str, str] = {}
-    for line in text.splitlines():
+    lines = text.splitlines()
+    for line in lines:
         if ":" not in line:
             continue
-        label, _, value = line.partition(":")
-        key = label.strip().lower().rstrip(".")
-        value = value.strip()
-        if not value:
+        for segment in _labelled_segments(line):
+            label, _, value = segment.partition(":")
+            _take(found, label, value)
+
+    for index, line in enumerate(lines[:-1]):
+        stripped = line.strip()
+        if not stripped or ":" in stripped:
             continue
-        field = _LABEL_FIELD_MAP.get(key)
-        base_key = key
-        if field is None:
-            base_key = _TRAILING_PARENTHETICAL_RE.sub("", key).strip()
-            if base_key != key:
-                field = _LABEL_FIELD_MAP.get(base_key)
-        if field and field not in found:
-            lookup_key = key if key in _LABEL_FIELD_MAP else base_key
-            if lookup_key in _LABELS_KEPT_IN_VALUE:
-                value = f"{label.strip()}: {value}"
-            found[field] = value
+        field, lookup_key = _field_for_label(_label_key(stripped))
+        if field is None or field not in _NEXT_LINE_FIELDS or field in found:
+            continue
+        value = lines[index + 1].strip()
+        if (
+            not value
+            or ":" in value
+            or len(value) > _MAX_VALUE_LINE_LEN
+            or not _VALUE_LINE_RE.search(value)
+        ):
+            continue
+        if lookup_key in _LABELS_KEPT_IN_VALUE:
+            value = f"{stripped}: {value}"
+        found[field] = value
+
+    if "rooms_raw" not in found:
+        for line in lines:
+            stripped = line.strip()
+            if len(stripped) > _MAX_VALUE_LINE_LEN:
+                continue
+            match = _ROOM_COUNT_RE.search(stripped)
+            if match:
+                found["rooms_raw"] = match.group(1)
+                break
     return found
 
 

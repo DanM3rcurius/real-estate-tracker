@@ -163,6 +163,17 @@ questions before geocoding and stores the distribution in `evidence["triage"]`;
 engine. A known row is never dropped at the crawl loop - it is ingested so it
 learns, and the gate retires it. Decisions 22 and 23.
 
+**PDFs are listings too.** `sources/adapters/_pdfutil.py` is the one PDF
+lift (pypdf, core dependency); the Denkmalbörse adapter fetches the exposé
+behind every detail page's "zum Exposé" link and merges it (Kurzinfo wins,
+PDF fills holes, full text appended), `/add` takes an upload and a pasted PDF
+URL, and `lifecycle.ingest` writes a `Document` row per `DocumentRef` so the
+dossier links to it. A scan without a text layer is a `warnings` line, never
+an empty description. `extract_labeled_fields` reads two facts on one line,
+a label above its value (numeric fields only) and a bare "28 Zimmer"; keep
+it a string matcher. Tests build PDFs with `tests/fixtures/pdf.py::make_pdf`,
+never from real files. Decision 24.
+
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing
 it must not be able to mark a listing verified. `init-db` syncs the YAML, so

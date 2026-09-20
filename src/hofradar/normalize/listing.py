@@ -101,7 +101,13 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
         http_status=raw.http_status,
         fetched_at=raw.fetched_at,
         page_kind=raw.page_kind,
+        documents=list(raw.documents),
     )
+
+    # What the adapter already knows it could not do (an exposé PDF that
+    # would not download, a scan with no text layer) is said before anything
+    # this stage finds, in the same list, so one place on /add shows both.
+    listing.warnings.extend(raw.warnings)
 
     # Said first, because it is the fact every other one below depends on: a
     # page that is not a listing is not a listing with missing fields.

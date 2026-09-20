@@ -9,58 +9,38 @@ adapter emits is deliberately not a listing in the usual sense: it is a
 matched text so the claim is traceable back to "Gemeindeblatt X, KW 34, page
 17" - not to a vague "somewhere in this PDF".
 
-``pypdf`` is only needed here, so it is imported lazily: a base install
-(without the ``[pdf]`` extra) works fine for every other source, and only
-using this one requires the extra.
+The PDF reading itself is ``hofradar.sources.adapters._pdfutil``'s, shared
+with the Denkmalbörse exposé fetch and the paste box's upload; a missing
+``pypdf`` surfaces here as a :class:`SourceDiscoveryError` because this
+source cannot do anything at all without it.
 """
 
 from __future__ import annotations
 
-import io
 import logging
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urljoin
-
-from selectolax.parser import HTMLParser
 
 from hofradar.config import KeywordConfig, SearchProfile
 from hofradar.contracts import RawListing
+from hofradar.sources.adapters._pdfutil import (
+    PdfError,
+    PdfUnavailable,
+    extract_pdf_text,
+    find_pdf_links,
+)
 from hofradar.sources.base import SourceAdapter
 from hofradar.sources.exceptions import SourceDiscoveryError
+
+__all__ = ["PdfBulletinAdapter", "find_pdf_links", "scan_page_for_hits"]
 
 logger = logging.getLogger(__name__)
 
 _DATE_RE = re.compile(r"\d{1,2}\.\d{1,2}\.\d{2,4}")
 _ISSUE_RE = re.compile(r"KW\s*\d{1,2}(?:\s*/\s*\d{2,4})?", re.IGNORECASE)
 _CONTEXT_RADIUS = 80
-
-
-def _lazy_pypdf() -> Any:
-    try:
-        import pypdf
-    except ImportError as exc:  # pragma: no cover - exercised only without the extra
-        raise SourceDiscoveryError(
-            "pdf_bulletin adapter requires the optional [pdf] extra: "
-            "pip install 'hofradar[pdf]'"
-        ) from exc
-    return pypdf
-
-
-def find_pdf_links(html: str, base_url: str) -> list[tuple[str, str]]:
-    """Return (absolute_pdf_url, link_text) for every PDF link on an index page."""
-    tree = HTMLParser(html)
-    links: list[tuple[str, str]] = []
-    for anchor in tree.css("a[href]"):
-        href = anchor.attributes.get("href") or ""
-        if ".pdf" not in href.lower():
-            continue
-        absolute = urljoin(base_url, href)
-        text = anchor.text(strip=True) or absolute
-        links.append((absolute, text))
-    return links
 
 
 def _context_snippet(text: str, index: int, term_len: int) -> str:
@@ -102,7 +82,6 @@ class PdfBulletinAdapter(SourceAdapter):
             logger.info("%s: keyword vocabulary is empty - nothing to scan for", self.key)
             return
 
-        pypdf: Any | None = None
         any_readable = False
 
         for index_url in bulletins:
@@ -127,13 +106,15 @@ class PdfBulletinAdapter(SourceAdapter):
                     logger.warning("%s: could not download %s: %s", self.key, pdf_url, exc)
                     continue
 
-                if pypdf is None:
-                    pypdf = _lazy_pypdf()
-
                 try:
-                    reader = pypdf.PdfReader(io.BytesIO(pdf_response.content))
-                except Exception as exc:  # noqa: BLE001 - a corrupt/odd PDF must not stop the run
-                    logger.warning("%s: could not open PDF %s: %s", self.key, pdf_url, exc)
+                    document = extract_pdf_text(pdf_response.content)
+                except PdfUnavailable as exc:
+                    raise SourceDiscoveryError(
+                        "pdf_bulletin adapter requires the optional [pdf] extra: "
+                        "pip install 'hofradar[pdf]'"
+                    ) from exc
+                except PdfError as exc:  # a corrupt/odd/oversized PDF must not stop the run
+                    logger.warning("%s: could not read PDF %s: %s", self.key, pdf_url, exc)
                     continue
 
                 date_match = _DATE_RE.search(link_text)
@@ -141,19 +122,7 @@ class PdfBulletinAdapter(SourceAdapter):
                 issue_match = _ISSUE_RE.search(link_text)
                 issue = issue_match.group(0) if issue_match else None
 
-                for page_number, page in enumerate(reader.pages, start=1):
-                    try:
-                        text = page.extract_text() or ""
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning(
-                            "%s: could not extract text from %s page %d: %s",
-                            self.key,
-                            pdf_url,
-                            page_number,
-                            exc,
-                        )
-                        continue
-
+                for page_number, text in enumerate(document.pages, start=1):
                     for term, snippet in scan_page_for_hits(text, terms):
                         extra: dict[str, Any] = {
                             "page_number": page_number,
