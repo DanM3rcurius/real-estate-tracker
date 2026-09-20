@@ -12,6 +12,7 @@ from hofradar.contracts import (
     PAGE_KIND_INDEX,
     PAGE_KIND_LISTING,
     PAGE_KIND_UTILITY,
+    DocumentRef,
     RawListing,
 )
 from hofradar.db.enums import PriceType
@@ -201,3 +202,25 @@ def test_an_ordinary_listing_is_not_warned_about():
 
     assert result.page_kind == PAGE_KIND_LISTING
     assert not any("Seitentyp" in w for w in result.warnings)
+
+
+def test_raw_warnings_and_documents_are_carried_through():
+    """A PDF-derived warning and its DocumentRef must survive normalisation
+    unchanged, and the raw warning must come first - it is what the adapter
+    already knows it could not do, said before anything this stage finds."""
+    ref = DocumentRef(kind="expose", url="https://example.test/expose.pdf", page_count=3)
+    raw = RawListing(
+        source_key="test_source",
+        url="https://example.test/listings/pdf-1",
+        title="Hofstelle mit Exposé",
+        description="Siehe angehängtes Exposé.",
+        warnings=["PDF: das Dokument enthält keinen lesbaren Text (vermutlich gescannt)"],
+        documents=[ref],
+    )
+
+    result = normalize_listing(raw, KEYWORDS)
+
+    assert result.documents == [ref]
+    assert result.warnings[0] == (
+        "PDF: das Dokument enthält keinen lesbaren Text (vermutlich gescannt)"
+    )

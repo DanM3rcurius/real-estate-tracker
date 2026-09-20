@@ -70,6 +70,12 @@ _MIN_TITLE_LETTERS = 6
 
 _LETTERS_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 
+#: A "Label: value" line is a fact, not a headline - "E&V ID: W-047ZVH" opens
+#: a broker's cover page and "Kaufpreis: 59.000 €" its fact box. A colon
+#: after a short label is what marks it; a headline that merely contains a
+#: colon deep in its text ("Wasserschloss: ein Refugium") is left alone.
+_LABEL_LINE_RE = re.compile(r"^[^:]{1,30}:(?:\s|$)")
+
 #: Warnings are German because they reach the reader on /add and in the
 #: observation's raw record - same rule as ``hofradar.normalize``.
 WARNING_NO_TEXT_LAYER = (
@@ -204,6 +210,8 @@ def pdf_title(text: PdfText) -> str | None:
         for line in page.splitlines():
             candidate = line.strip()
             if len(_LETTERS_RE.findall(candidate)) < _MIN_TITLE_LETTERS:
+                continue
+            if _LABEL_LINE_RE.match(candidate):
                 continue
             if len(candidate) > _MAX_PDF_TITLE_LEN:
                 candidate = candidate[:_MAX_PDF_TITLE_LEN].rstrip() + "..."
