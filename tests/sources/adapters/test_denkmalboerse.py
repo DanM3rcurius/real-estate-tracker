@@ -27,12 +27,41 @@ import respx
 
 from hofradar.config import RadiusConfig
 from hofradar.sources import get_adapter
-from hofradar.sources.adapters.denkmalboerse import _town_from_title
+from hofradar.sources.adapters._pdfutil import DOCUMENT_KIND_EXPOSE
+from hofradar.sources.adapters.denkmalboerse import (
+    EXPOSE_DOCUMENT_TITLE,
+    WARNING_PDF_NOT_A_PDF,
+    _town_from_title,
+)
 from hofradar.sources.exceptions import SourceDiscoveryError
+from tests.fixtures.pdf import make_pdf
 
 BASE = "https://www.blfd.bayern.de"
 DETAIL = f"{BASE}/information-service/denkmalboerse/objekte/005816/index.html"
 FIXTURE_NAME = "denkmalboerse_object_005816.html"
+#: The exposé the real fixture page links, from its own "zum Exposé" anchor.
+EXPOSE_PDF_URL = (
+    f"{BASE}/mam/information_und_service/denkmal_boerse/oberbayern/"
+    "ob_wm-altenstadt-am_bichl_1.pdf"
+)
+#: Written in BLfD's own exposé shapes: two labelled facts on one line, a
+#: bare room count, and prose the Kurzinfo box does not carry. Every area and
+#: year here deliberately DISAGREES with the page's own Kurzinfo values, so a
+#: test that finds the page's figures intact has proven precedence rather
+#: than coincidence.
+EXPOSE_PAGES = [
+    [
+        "Kleinbauernhof in Altenstadt bei Schongau",
+        "Wohnfläche: ca. 1.050 m²          Grundstücksfläche: ca. 7.112 m²",
+        "Baujahr: 1510",
+        "28 Zimmer",
+        "Zustand: Altbau, stark sanierungsbedürftig",
+    ],
+    [
+        "Nutzfläche: ca. 900 m²",
+        "teilweise unterkellert mit Gewölbekeller",
+    ],
+]
 INDEX = f"{BASE}/cgi-bin/fts_search_verkauf.pl"
 SEARCH_FIXTURE_NAME = "denkmalboerse_search_cgi.html"
 #: Matches any object detail URL under BASE - used as a respx catch-all so a
@@ -55,10 +84,19 @@ async def test_fetch_detail_requests_the_static_object_page(
         route = respx.get(DETAIL).mock(
             return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME))
         )
+        # fetch_detail follows the page's "zum Exposé" link. The route is
+        # mocked here so this test keeps asserting the clean path: an
+        # unmocked request would be swallowed into a warning on the listing
+        # and the page's own facts would still pass, proving less.
+        expose = respx.get(EXPOSE_PDF_URL).mock(
+            return_value=httpx.Response(200, content=make_pdf(EXPOSE_PAGES))
+        )
         listing = await adapter.fetch_detail(DETAIL)
 
     assert route.called
+    assert expose.called
     assert listing is not None
+    assert listing.warnings == []
     assert listing.source_key == "denkmalboerse"
     assert listing.url == DETAIL
     assert listing.external_id == "005816"
@@ -90,6 +128,137 @@ async def test_fetch_detail_requests_the_static_object_page(
     # contact field to check.
     assert "Eigentümer des Anwesens" in (listing.description or "")
     assert "hofstelle-bayern@web.de" in (listing.description or "")
+
+
+@pytest.mark.asyncio
+async def test_fetch_detail_reads_the_expose_pdf_without_overwriting_the_kurzinfo(
+    make_source_config, read_fixture
+) -> None:
+    """The point of the whole exposé fetch: the Kurzinfo box carries no room
+    count at all (and on the live sample no usable area on 24 of 30 objects,
+    no living area on 9), while the PDF one click away does. The page still
+    outranks it for anything it did state - BLfD's HTML is the current
+    Kurzinfo, an exposé PDF can be a year older.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(DETAIL).mock(return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME)))
+        expose = respx.get(EXPOSE_PDF_URL).mock(
+            return_value=httpx.Response(200, content=make_pdf(EXPOSE_PAGES))
+        )
+        listing = await adapter.fetch_detail(DETAIL)
+
+    assert expose.called, "the /mam/ exposé link must be followed"
+    assert listing is not None
+    # The hole the HTML left: no room count anywhere in the Kurzinfo box.
+    assert listing.rooms_raw == "28"
+    # Everything the page did state keeps its own value, though the exposé
+    # states a different one for each.
+    assert listing.price_raw == "auf Anfrage"
+    assert listing.land_raw == "ca. 435 m²"
+    assert listing.living_raw == "ca. 110 m²"
+    assert listing.usable_raw == "ca. 112 m²"
+    assert listing.year_raw == "2. Hälfte 18. Jahrhundert"
+    # The prose is what scoring keys off (condition, outbuildings) - it only
+    # exists in the PDF, and it is appended to, not substituted for, the page.
+    assert "Eigentümer des Anwesens" in (listing.description or "")
+    assert "stark sanierungsbedürftig" in (listing.description or "")
+    assert "Gewölbekeller" in (listing.description or "")
+    # The dossier links what it read the facts from.
+    assert len(listing.documents) == 1
+    document = listing.documents[0]
+    assert document.url == EXPOSE_PDF_URL
+    assert document.kind == DOCUMENT_KIND_EXPOSE
+    assert document.title == EXPOSE_DOCUMENT_TITLE
+    assert document.page_count == len(EXPOSE_PAGES)
+    assert listing.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_detail_warns_when_the_expose_pdf_is_missing(
+    make_source_config, read_fixture
+) -> None:
+    """A withdrawn or moved exposé must not turn into a listing that merely
+    looks thin - the reader is told the facts came from the Kurzinfo alone.
+    The listing itself is still returned: the detail page was read fine, so
+    this is not a failed detail fetch.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(DETAIL).mock(return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME)))
+        respx.get(EXPOSE_PDF_URL).mock(return_value=httpx.Response(404))
+        listing = await adapter.fetch_detail(DETAIL)
+
+    assert listing is not None
+    assert any("404" in warning for warning in listing.warnings)
+    # What the page itself said survives untouched.
+    assert listing.price_raw == "auf Anfrage"
+    assert listing.living_raw == "ca. 110 m²"
+    assert listing.usable_raw == "ca. 112 m²"
+    assert listing.rooms_raw is None
+    assert listing.documents == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_detail_warns_when_the_expose_link_returns_html(
+    make_source_config, read_fixture
+) -> None:
+    """A CERN httpd error page or a redirect to a landing page arrives as
+    HTTP 200 with an HTML body. There is no document behind that link, and
+    saying nothing would leave the same silent "k. A." this fetch exists to
+    remove.
+    """
+    adapter = get_adapter(
+        make_source_config(key="denkmalboerse", adapter="denkmalboerse", base_url=BASE)
+    )
+
+    with respx.mock:
+        respx.get(DETAIL).mock(return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME)))
+        respx.get(EXPOSE_PDF_URL).mock(
+            return_value=httpx.Response(200, text="<html><body>Seite nicht gefunden</body></html>")
+        )
+        listing = await adapter.fetch_detail(DETAIL)
+
+    assert listing is not None
+    assert WARNING_PDF_NOT_A_PDF in listing.warnings
+    assert listing.documents == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_detail_skips_the_expose_pdf_when_the_option_is_off(
+    make_source_config, read_fixture
+) -> None:
+    """``options.expose_pdf: false`` is the operator's opt-out from a 2-14 MB
+    download per object per run - it must actually stop the request, not just
+    discard what came back.
+    """
+    adapter = get_adapter(
+        make_source_config(
+            key="denkmalboerse",
+            adapter="denkmalboerse",
+            base_url=BASE,
+            options={"expose_pdf": False},
+        )
+    )
+
+    with respx.mock:
+        respx.get(DETAIL).mock(return_value=httpx.Response(200, text=read_fixture(FIXTURE_NAME)))
+        expose = respx.get(EXPOSE_PDF_URL).mock(
+            return_value=httpx.Response(200, content=make_pdf(EXPOSE_PAGES))
+        )
+        listing = await adapter.fetch_detail(DETAIL)
+
+    assert not expose.called
+    assert listing is not None
+    assert listing.documents == []
+    assert listing.warnings == []
+    assert listing.price_raw == "auf Anfrage"
 
 
 @pytest.mark.asyncio

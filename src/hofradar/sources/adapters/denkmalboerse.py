@@ -12,6 +12,14 @@ pages are plain HTML at a predictable path keyed by a stable six-digit id, so
 ``fetch_detail`` and ``verify`` are ordinary cheap GETs and the id is a
 first-class external identifier for deduplication.
 
+The detail page itself is thin: a "Kurzinfo" box and a link to the exposé
+PDF. Reading only the HTML is what made so many Denkmal properties render
+"k. A." - on a live 30-object in-scope sample the HTML alone left rooms empty
+on 30 of 30, usable area on 24 and living area on 9, while 29 of the 30 had
+an exposé carrying exactly those facts plus the prose (outbuildings,
+condition) that scoring keys off. So ``fetch_detail`` follows that link, and
+``options.expose_pdf`` exists for an operator who cannot pay the bandwidth.
+
 BLfD disclaims the accuracy of what owners submit, which is modelled as a
 *reliability* below 1.0 in the registry - never as a lower role. Accuracy and
 provenance are different questions.
@@ -44,13 +52,23 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from selectolax.parser import HTMLParser, Node
 
 from hofradar.contracts import RawListing
 from hofradar.geo import town_in_radius
 from hofradar.sources.adapters._htmlutil import raw_listing_from_html
+from hofradar.sources.adapters._pdfutil import (
+    WARNING_PDF_UNAVAILABLE,
+    PdfTooLarge,
+    PdfUnavailable,
+    PdfUnreadable,
+    extract_pdf_text,
+    find_pdf_links,
+    looks_like_pdf,
+    merge_pdf_into_listing,
+)
 from hofradar.sources.base import SourceAdapter
 from hofradar.sources.exceptions import SourceDiscoveryError
 
@@ -103,6 +121,42 @@ BAVARIAN_REGIERUNGSBEZIRKE: frozenset[str] = frozenset(
 #: ``options.regierungsbezirke`` to match, since this constant does not
 #: derive itself from the profile at runtime.
 DEFAULT_IN_SCOPE_REGIERUNGSBEZIRKE: tuple[str, ...] = ("Oberbayern", "Niederbayern", "Schwaben")
+
+
+#: BLfD serves every exposé PDF out of its media area, at
+#: /mam/information_und_service/denkmal_boerse/<bezirk>/<name>.pdf. A detail
+#: page can carry a second PDF (a Denkmalliste extract, a broker's own flyer),
+#: so the media-area path is what identifies the exposé among them.
+MAM_PATH_PREFIX = "/mam/"
+
+#: The adapter option that switches the exposé download off. One exposé is
+#: 2-14 MB and is re-fetched every run, which an operator on a metered line or
+#: a Raspberry Pi may not want to pay for - at the cost of the facts below.
+OPTION_EXPOSE_PDF = "expose_pdf"
+DEFAULT_EXPOSE_PDF = True
+
+#: What the exposé is called in the dossier's "Dokumente" list.
+EXPOSE_DOCUMENT_TITLE = "Exposé (PDF)"
+
+#: German, because these reach the reader on the dossier: a listing whose
+#: facts could not be read must say so rather than look like a thin advert
+#: (see the module docstring of ``_pdfutil``).
+WARNING_PDF_HTTP_STATUS = (
+    "Exposé-PDF konnte nicht geladen werden (HTTP {status}) – "
+    "Angaben stammen nur aus der Kurzinfo"
+)
+WARNING_PDF_NOT_A_PDF = (
+    "Exposé-Link lieferte kein PDF – Angaben stammen nur aus der Kurzinfo"
+)
+WARNING_PDF_UNREACHABLE = (
+    "Exposé-PDF konnte nicht abgerufen werden – Angaben stammen nur aus der Kurzinfo"
+)
+WARNING_PDF_TOO_LARGE = (
+    "Exposé-PDF ist zu groß und wurde nicht gelesen – Angaben stammen nur aus der Kurzinfo"
+)
+WARNING_PDF_UNREADABLE = (
+    "Exposé-PDF konnte nicht gelesen werden – Angaben stammen nur aus der Kurzinfo"
+)
 
 
 def _resolve_in_scope_bezirke(options: dict[str, object]) -> frozenset[str]:
@@ -181,6 +235,23 @@ def _town_from_row(row: Node, title: str | None) -> str | None:
         if _ADDRESS_PARAGRAPH_RE.match(text):
             return text
     return _town_from_title(title)
+
+
+def _expose_pdf_url(html: str, page_url: str) -> str | None:
+    """The object's exposé PDF link - BLfD's own media-area asset preferred.
+
+    A page may link more than one PDF, so the ``/mam/`` path wins rather than
+    document order. Any other PDF link is taken only when there is no
+    media-area one at all: a template that moved the asset elsewhere should
+    still yield the exposé rather than silently leave the listing thin.
+    """
+    links = find_pdf_links(html, page_url)
+    if not links:
+        return None
+    for absolute, _text in links:
+        if urlsplit(absolute).path.startswith(MAM_PATH_PREFIX):
+            return absolute
+    return links[0][0]
 
 
 def _regierungsbezirk_from_row(row: Node) -> str | None:
@@ -340,4 +411,73 @@ class DenkmalboerseAdapter(SourceAdapter):
         # Owners publish their own contact details in the exposé; the Amt does
         # not broker the sale and there is no Chiffre intermediary.
         listing.contact_kind = "private"
+        if bool(self.options.get(OPTION_EXPOSE_PDF, DEFAULT_EXPOSE_PDF)):
+            # Never inside the try/except above and never a reason to return
+            # None: the detail page itself was read, so the listing exists.
+            # Only the enrichment can fail here, and a failed enrichment must
+            # not travel to mark_enumeration_incomplete - invariant 4b is
+            # about whether this run saw everything the index promised, not
+            # about how much of each advert could be read.
+            await self._attach_expose_pdf(listing, response.text, url)
         return listing
+
+    async def _attach_expose_pdf(self, listing: RawListing, html: str, page_url: str) -> None:
+        """Read the exposé PDF behind the page's "zum Exposé" link into the listing.
+
+        Why this exists: the detail page is a Kurzinfo box and a link, and the
+        facts scoring keys off are in the PDF. On a live 30-object in-scope
+        sample, 29 had an exposé, while the HTML alone left rooms empty on 30
+        of 30, usable area on 24 and living area on 9 - that is the "k. A."
+        the reader sees.
+
+        Why every failure is said out loud: a listing enriched from nothing
+        looks exactly like a genuinely thin advert. Each failure appends a
+        German warning to the listing instead, and the listing is still
+        returned - the Kurzinfo is real, it is just all there is.
+        """
+        pdf_url = _expose_pdf_url(html, page_url)
+        if pdf_url is None:
+            logger.debug("%s: no exposé PDF linked on %s", self.key, page_url)
+            return
+
+        try:
+            response = await self.client.get(pdf_url)
+        except Exception as exc:  # noqa: BLE001 - a missing exposé is a warning, not a failure
+            logger.warning("%s: exposé fetch failed for %s: %s", self.key, pdf_url, exc)
+            listing.warnings.append(WARNING_PDF_UNREACHABLE)
+            return
+        if not response.is_success:
+            logger.warning(
+                "%s: exposé %s returned HTTP %s", self.key, pdf_url, response.status_code
+            )
+            listing.warnings.append(
+                WARNING_PDF_HTTP_STATUS.format(status=response.status_code)
+            )
+            return
+        if not looks_like_pdf(response.content):
+            # An error page served with HTTP 200, or a link that now points at
+            # a landing page - either way there is no document behind it.
+            logger.warning("%s: exposé %s did not return a PDF", self.key, pdf_url)
+            listing.warnings.append(WARNING_PDF_NOT_A_PDF)
+            return
+
+        try:
+            text = extract_pdf_text(response.content)
+        except PdfUnavailable:
+            logger.warning("%s: pypdf is not installed - %s was not read", self.key, pdf_url)
+            listing.warnings.append(WARNING_PDF_UNAVAILABLE)
+            return
+        except PdfTooLarge as exc:
+            logger.warning("%s: exposé %s is too large: %s", self.key, pdf_url, exc)
+            listing.warnings.append(WARNING_PDF_TOO_LARGE)
+            return
+        except PdfUnreadable as exc:
+            logger.warning("%s: exposé %s could not be read: %s", self.key, pdf_url, exc)
+            listing.warnings.append(WARNING_PDF_UNREADABLE)
+            return
+
+        # A PDF with no text layer carries its own warning in text.warnings,
+        # which merge_pdf_into_listing moves onto the listing.
+        merge_pdf_into_listing(
+            listing, text, document_url=pdf_url, document_title=EXPOSE_DOCUMENT_TITLE
+        )

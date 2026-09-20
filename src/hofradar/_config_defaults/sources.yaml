@@ -91,6 +91,14 @@ sources:
       BLfD's consent. Hofradar does not publish: the weekly digest and the web
       UI must stay private to the household running it, never republished or
       exposed outside that gate.
+    options:
+      # fetch_detail follows the detail page's "zum Exposé" link and reads the
+      # PDF behind it: the Kurzinfo box alone left rooms empty on 30 of 30
+      # objects in a live sample, usable area on 24 and living area on 9. Set
+      # false to skip that download - 2-14 MB per object, re-fetched every run
+      # - and accept "k. A." on most objects in return. A failed download is
+      # always a warning on the listing, never a silently thin advert.
+      expose_pdf: true
 
   - key: generic_rss
     name: "Regionale Makler (RSS/Atom)"
