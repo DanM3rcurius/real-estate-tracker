@@ -7,6 +7,20 @@ import pytest
 import respx
 
 from hofradar.sources.adapters.manual import ManualAdapter
+from tests.fixtures.pdf import make_pdf
+
+#: The lines a broker's exposé PDF actually carries: a headline, then the
+#: same labelled fields an HTML detail page would have put in a table.
+PDF_EXPOSE_LINES = [
+    [
+        "Hofstelle mit Stadel bei Vogtareuth",
+        "Kaufpreis: 595.000 EUR",
+        "Wohnflaeche: 240 m2",
+        "Grundstueck: 8.000 m2",
+        "Baujahr: 1891",
+    ],
+    ["Scheune, Stall und Tenne. Obstgarten. Teilung moeglich."],
+]
 
 PLAIN_EXPOSE = """\
 Gepflegte Hofstelle mit Scheune in Alleinlage
@@ -100,3 +114,68 @@ async def test_ingest_url_handles_fetch_failure_gracefully(adapter):
 async def test_discover_yields_nothing(adapter, search_profile, sample_keywords):
     results = [item async for item in adapter.discover(search_profile, sample_keywords)]
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_ingest_url_reads_a_pdf_behind_the_link(adapter):
+    """A URL that answers with a PDF is a listing, not an unreadable page."""
+    pdf = make_pdf(PDF_EXPOSE_LINES)
+    with respx.mock:
+        respx.get("https://makler.example/expose-1.pdf").mock(
+            return_value=httpx.Response(
+                200, content=pdf, headers={"content-type": "application/pdf"}
+            )
+        )
+        listing = await adapter.ingest_url("https://makler.example/expose-1.pdf")
+
+    assert listing is not None
+    assert listing.http_status == 200
+    assert listing.listing_visible is True
+    assert listing.title == "Hofstelle mit Stadel bei Vogtareuth"
+    assert listing.price_raw == "595.000 EUR"
+    assert listing.living_raw == "240 m2"
+    assert listing.land_raw == "8.000 m2"
+    assert listing.year_raw == "1891"
+    assert "Obstgarten" in listing.description
+    assert [doc.url for doc in listing.documents] == ["https://makler.example/expose-1.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_url_reads_a_pdf_served_as_octet_stream(adapter):
+    """Download links answer ``application/octet-stream`` more often than not."""
+    pdf = make_pdf(PDF_EXPOSE_LINES)
+    with respx.mock:
+        respx.get("https://makler.example/download/expose.pdf").mock(
+            return_value=httpx.Response(
+                200, content=pdf, headers={"content-type": "application/octet-stream"}
+            )
+        )
+        listing = await adapter.ingest_url("https://makler.example/download/expose.pdf")
+
+    assert listing is not None
+    assert listing.price_raw == "595.000 EUR"
+    assert listing.listing_visible is True
+    assert [doc.url for doc in listing.documents] == [
+        "https://makler.example/download/expose.pdf"
+    ]
+
+
+def test_ingest_pdf_marks_the_document_as_an_upload(adapter):
+    listing = adapter.ingest_pdf(
+        "upload:0123456789abcdef", make_pdf(PDF_EXPOSE_LINES), filename="expose.pdf"
+    )
+
+    assert listing.url == "upload:0123456789abcdef"
+    assert listing.price_raw == "595.000 EUR"
+    assert len(listing.documents) == 1
+    document = listing.documents[0]
+    assert document.kind == "upload"
+    assert document.title == "expose.pdf"
+    assert document.page_count == 2
+
+
+def test_ingest_pdf_warns_about_a_scan_instead_of_returning_nothing(adapter):
+    listing = adapter.ingest_pdf("upload:deadbeef", make_pdf([[]]), filename="scan.pdf")
+
+    assert listing.description is None
+    assert any("gescannt" in warning for warning in listing.warnings)
