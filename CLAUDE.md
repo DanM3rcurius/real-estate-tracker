@@ -125,7 +125,14 @@ finishes - which is why `/runs` shows no progress and why killing a run mid-way
 loses all of it. `POST /api/run` also has no guard against starting a second
 concurrent run, and `_execute` swallows every exception with a bare `return`.
 Fixing the visibility means deciding what a crashed run should leave behind;
-that is a design call, not a patch.
+that is a design call, not a patch. The visible symptom while a run holds
+SQLite's write lock: every web write (a rescore for a slider position with no
+scores yet, a paste, a Merkliste click) waits out `SQLITE_BUSY_TIMEOUT_MS`
+and fails with "database is locked". The radar used to 500 on that because
+the failed flush left the session in pending-rollback; `web/query._rescore`
+now rolls back and renders the last stored scores with a notice naming the
+crawl. The triage stage makes runs longer (one HTTP call per listing), so the
+window is wider than it was.
 
 **Local development needs no Docker.** `hofradar init-db && hofradar serve`
 against the venv is the whole loop; the `/opt/hofradar`, `hofradar-update` and

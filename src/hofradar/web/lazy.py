@@ -55,8 +55,26 @@ class ModuleUnavailable(RuntimeError):
         return isinstance(self.original, SQLAlchemyError)
 
     @property
+    def is_locked_database(self) -> bool:
+        """SQLite refused a write because another connection holds the lock.
+
+        On this application that connection is the crawl: ``pipeline.runner``
+        runs a whole search as one transaction, so for its duration every
+        web write - a rescore, a paste, a Merkliste click - waits out
+        ``SQLITE_BUSY_TIMEOUT_MS`` and fails. Telling the reader to run a
+        migration for that would be exactly wrong.
+        """
+        return self.is_database_error and "database is locked" in str(self.original).lower()
+
+    @property
     def user_message(self) -> str:
         label = MODULE_LABELS.get(self.module_name, self.module_name)
+        if self.is_locked_database:
+            return (
+                f"Die Datenbank ist gerade gesperrt – vermutlich läuft ein Crawl. "
+                f"„{label}“ wurde übersprungen; angezeigt wird der zuletzt gespeicherte "
+                "Stand, beim nächsten Aufruf wird nachgeholt."
+            )
         if self.is_database_error:
             return (
                 f"Die Datenbank passt nicht zum Programm – {type(self.original).__name__} "
