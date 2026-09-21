@@ -160,8 +160,12 @@ the one exclusion farm substance cannot override - `REJECT_RENTAL` in scoring,
 type. With `TYPESAFE_API_KEY` set, `hofradar.triage` asks Jev the three typed
 questions before geocoding and stores the distribution in `evidence["triage"]`;
 `triage.decide` is the only reader, used by both the crawl loop and the scoring
-engine. A known row is never dropped at the crawl loop - it is ingested so it
-learns, and the gate retires it. Decisions 22 and 23.
+engine, and `triage.annotate` the only writer, used by the crawl loop and the
+paste box (which never drops a paste - the gate retires it). A known row is
+never dropped at the crawl loop - it is ingested so it learns, and the gate
+retires it. `scripts/backtest_triage.py` (dry run by default) prints what each
+threshold would reject per human verdict and, with `--call --store`, backfills
+`evidence["triage"]` on rows the crawl never re-asks about. Decisions 22 and 23.
 
 **PDFs are listings too.** `sources/adapters/_pdfutil.py` is the one PDF
 lift (pypdf, core dependency); the Denkmalbörse adapter fetches the exposé

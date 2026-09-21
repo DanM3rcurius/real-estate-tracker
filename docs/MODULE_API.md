@@ -286,6 +286,13 @@ class JevTriage:
     def stats(self) -> dict                  # {"enabled": True, "model", "asked", "failed"}
     async def aclose(self) -> None
 
+async def annotate(listing: NormalizedListing, gates: GateConfig, triage: JevTriage) -> TriageDecision | None
+    # The one path every entry point takes: classify, write the verdict to
+    # listing.evidence["triage"], append the decision's warnings, return the
+    # decision. None for a non-listing page or a failed call. The crawl loop
+    # and the paste box both call it; what a rejection means is the caller's
+    # (the crawl drops an unknown row, the paste box never drops anything).
+
 class TriageUnavailable(RuntimeError)
 class TriageVerdict            # model, offer_kind, offer_probabilities, dwelling_kind,
                                # dwelling_probabilities, farm_substance, observed_at
@@ -299,7 +306,12 @@ TYPESAFE_API_KEY_ENV, TYPESAFE_BASE_URL_ENV, JEV_MODEL_ENV   # the environment i
 ```
 
 `classify` never raises into the crawl loop: a failed call is logged, counted
-in `stats()` and answered with `None`. `decide` lives in `hofradar.triage.rules`
+in `stats()` and answered with `None`. `scripts/backtest_triage.py` asks the
+model about every property already in the database, grouped by the human
+verdict it carries (Merkliste, watched, rejected, archived, regex-typed rent,
+unjudged), and prints how many each threshold would reject or flag; with
+`--call --store` it also backfills `evidence["triage"]` on rows that have none
+- the pasted and CSV-imported rows the crawl never re-asks about - and rescores. `decide` lives in `hofradar.triage.rules`
 with no network import so the scoring engine can apply it to stored evidence.
 The threshold is `GateConfig.triage_reject_min_probability` (default 0.85, part
 of `profile_hash`; 1.0 disables the reject and keeps the flag). See

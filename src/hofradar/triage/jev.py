@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from hofradar.contracts import NormalizedListing
-from hofradar.triage.rules import TriageVerdict
+from hofradar.contracts import PAGE_KIND_LISTING, NormalizedListing
+from hofradar.triage.rules import TRIAGE_EVIDENCE_KEY, TriageDecision, TriageVerdict, decide
+
+if TYPE_CHECKING:  # pragma: no cover
+    from hofradar.config import GateConfig
 
 log = logging.getLogger(__name__)
 
@@ -205,3 +208,27 @@ class JevTriage:
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+
+async def annotate(
+    listing: NormalizedListing, gates: GateConfig, triage: JevTriage
+) -> TriageDecision | None:
+    """Ask, record, decide - the one path every entry point takes.
+
+    The crawl loop and the paste box both call this, so a pasted rental and a
+    crawled one carry the same evidence and the same warning. The verdict goes
+    into ``listing.evidence["triage"]`` (ingest merges it onto the row) and
+    the decision's warnings onto ``listing.warnings``. ``None`` means the call
+    failed or the page is not a listing; the caller decides what a rejection
+    means for it - the crawl loop drops an unknown row, the paste box never
+    drops anything a human chose to paste and leaves it to the scoring gate.
+    """
+    if listing.page_kind != PAGE_KIND_LISTING:
+        return None
+    verdict = await triage.classify(listing)
+    if verdict is None:
+        return None
+    listing.evidence[TRIAGE_EVIDENCE_KEY] = verdict.to_evidence()
+    decision = decide(verdict, gates, has_substance=bool(listing.outbuildings))
+    listing.warnings.extend(decision.warnings)
+    return decision

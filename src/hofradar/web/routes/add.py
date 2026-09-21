@@ -163,6 +163,38 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+#: What the confirmation page says when the triage was configured but the call
+#: failed. Not saying it would make an outage look like a clean bill of health.
+TRIAGE_FAILED_NOTICE = (
+    "Die Triage (Jev) war nicht erreichbar - das Objekt wurde ohne Zweitmeinung gespeichert."
+)
+
+
+async def _triage_paste(listing: Any, profile: Any, degraded: list[lazy.Degraded]) -> None:
+    """The System One second opinion, through the same ``annotate`` the crawl
+    loop uses (decision 23). The paste box never drops a listing - a human
+    chose to paste it - so the verdict rides along as evidence and a warning
+    on the confirmation page, and the scoring gate does the rejecting. Without
+    ``TYPESAFE_API_KEY`` nothing happens, exactly as in the crawl."""
+    try:
+        triage_cls = lazy.load("hofradar.triage:JevTriage")
+        unavailable = lazy.load("hofradar.triage:TriageUnavailable")
+        annotate = lazy.load("hofradar.triage:annotate")
+    except lazy.ModuleUnavailable as exc:
+        degraded.append(lazy.Degraded(exc.user_message, detail=repr(exc.original)))
+        return
+    try:
+        triage = triage_cls.from_env()
+    except unavailable:
+        return
+    try:
+        await annotate(listing, profile.gates, triage)
+        if triage.failed:
+            degraded.append(lazy.Degraded(TRIAGE_FAILED_NOTICE))
+    finally:
+        await triage.aclose()
+
+
 def _get_adapter(source: Source) -> Any:
     """Build the manual adapter for this source row.
 
@@ -435,6 +467,7 @@ async def add_submit(
             keywords = KeywordConfig()
 
         listing = lazy.call("hofradar.normalize:normalize_listing", raw, keywords)
+        await _triage_paste(listing, profile, degraded)
 
         # Geocode and route before ingesting. Without this the property has no
         # road distance, the scorer caps its confidence below the shortlist
