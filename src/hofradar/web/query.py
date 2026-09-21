@@ -250,8 +250,19 @@ def _fallback_pairs(
 
 
 def _rescore(session: Session, profile: SearchProfile) -> tuple[int | None, lazy.Degraded | None]:
+    """Score what needs scoring; degrade, never die, when the write fails.
+
+    A rescore that fails mid-flush (a crawl holding SQLite's write lock is
+    the everyday case) leaves the session in "pending rollback": the notice
+    is built correctly and then the very next SELECT raises
+    ``PendingRollbackError`` and the page 500s before the notice is shown -
+    an error that comes and goes with the crawl. Rolling back here keeps the
+    session usable, so the reader gets the last stored scores plus the
+    notice saying why they are not fresh.
+    """
     count, degraded = lazy.call_or("hofradar.scoring:rescore_all", None, session, profile)
     if degraded is not None:
+        session.rollback()
         return None, degraded
     # A brand-new profile hash has no cached rows at all; if the incremental
     # pass found nothing, force a full recompute so the sliders really bite.
@@ -265,7 +276,10 @@ def _rescore(session: Session, profile: SearchProfile) -> tuple[int | None, lazy
             forced, forced_degraded = lazy.call_or(
                 "hofradar.scoring:rescore_all", None, session, profile, only_dirty=False
             )
-            if forced_degraded is None and forced:
+            if forced_degraded is not None:
+                session.rollback()
+                return None, forced_degraded
+            if forced:
                 return int(forced), None
     return int(count or 0), None
 
