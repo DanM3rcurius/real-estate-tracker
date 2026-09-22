@@ -28,7 +28,9 @@ Edit three lines in `cloud-init.yaml`:
 Optionally set `ANTHROPIC_API_KEY` (enables the LLM review stage; everything
 else runs without it), `TYPESAFE_API_KEY` (enables the System One triage that
 keeps rentals and flats out of the radar during the crawl) and `HOFRADAR_PASSWORD_HASH` (from
-`hofradar hash-password`). If you leave the hash empty, first boot generates a
+`hofradar hash-password`, **in single quotes**: the file is sourced by bash and
+the hash is full of `$`, and first boot refuses a hash that arrives with a part
+missing). If you leave the hash empty, first boot generates a
 password, hashes it, and writes the plaintext to
 `/home/hofradar/INITIAL_PASSWORD.txt` — the gate is never left off, because a
 public URL with no gate is exactly what invariant 8 forbids.
