@@ -162,6 +162,14 @@ hofradar hash-password          # prompts, prints a pbkdf2_sha256$… string
 Put the result in `HOFRADAR_PASSWORD_HASH`. A plain `HOFRADAR_PASSWORD` also
 works for a quick local test.
 
+**In a compose `.env` file, single-quote it:**
+`HOFRADAR_PASSWORD_HASH='pbkdf2_sha256$240000$...'`. Compose expands `$NAME` in
+an unquoted value, so a salt or digest that starts with a letter silently
+becomes an empty string, and the gate then refuses every password - including
+yours. The only trace is a compose warning that a 64-character hex "variable" is
+not set. A platform's secret store (Fly, Render, Railway) takes the value
+as-is and needs no quotes.
+
 **With neither set, there is no gate** and the app logs a warning at startup.
 That is deliberate — `hofradar serve` on localhost should not make you type a
 password — but it means you must set one before the app has a public URL.

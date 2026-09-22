@@ -75,6 +75,8 @@ write_files:
       HOFRADAR_REPO=https://github.com/DanM3rcurius/real-estate-tracker.git
       HOFRADAR_BRANCH=trunk
       # Leave empty to have a password generated on first boot (see the header).
+      # A hash goes in single quotes - this file is sourced by bash, and the hash
+      # is full of $: HOFRADAR_PASSWORD_HASH='pbkdf2_sha256$240000$...'
       HOFRADAR_PASSWORD_HASH=
       # Optional. Without it the deterministic pipeline still runs end to end.
       ANTHROPIC_API_KEY=
@@ -276,7 +278,9 @@ write_files:
       [ -n "$hash" ] || { echo "no hash produced" >&2; exit 1; }
       tmp="$(mktemp)"
       grep -v '^HOFRADAR_PASSWORD_HASH=' .env > "$tmp" || true
-      printf 'HOFRADAR_PASSWORD_HASH=%s\n' "$hash" >> "$tmp"
+      # Quoted, or compose expands the $salt / $digest parts to nothing and the
+      # gate refuses every password (see "---- .env" in bootstrap.sh).
+      printf "HOFRADAR_PASSWORD_HASH='%s'\n" "$hash" >> "$tmp"
       install -m 0600 -o hofradar -g hofradar "$tmp" .env && rm -f "$tmp"
       rm -f /home/hofradar/INITIAL_PASSWORD.txt
       sudo systemctl reload hofradar
@@ -341,13 +345,27 @@ write_files:
         pw_note="$generated"
       fi
 
+      # A hash is pbkdf2_sha256$rounds$salt$digest, and compose expands $NAME in
+      # an unquoted .env value: a salt or digest that starts with a letter is read
+      # as an unset variable and becomes nothing. The app then holds a malformed
+      # hash and refuses every password - a public gate that locks out its owner,
+      # with only a compose warning to show for it. So every write below quotes
+      # it, and a hash that already lost a part to bash sourcing app.env stops us.
+      hash_re='^pbkdf2_sha256\$[0-9]+\$[^$]+\$[0-9a-f]{64}$'
+      if [ -n "${HOFRADAR_PASSWORD_HASH:-}" ] && ! [[ "$HOFRADAR_PASSWORD_HASH" =~ $hash_re ]]; then
+        echo "FATAL: HOFRADAR_PASSWORD_HASH is not a whole pbkdf2 hash" \
+             "('${HOFRADAR_PASSWORD_HASH}'). Single-quote it in /opt/hofradar/app.env," \
+             "or leave it empty and use hofradar-set-password." >&2
+        exit 1
+      fi
+
       umask 077
       cat > /opt/hofradar/app/.env <<ENV
       HOFRADAR_DATA_DIR=/data
       HOFRADAR_DOMAIN=${HOFRADAR_DOMAIN:-}
       ACME_EMAIL=${ACME_EMAIL:-}
       HOFRADAR_SECRET_KEY=${secret_key}
-      HOFRADAR_PASSWORD_HASH=${HOFRADAR_PASSWORD_HASH:-}
+      HOFRADAR_PASSWORD_HASH='${HOFRADAR_PASSWORD_HASH:-}'
       ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       HOFRADAR_LLM_MODEL=${HOFRADAR_LLM_MODEL:-claude-sonnet-5}
       TYPESAFE_API_KEY=${TYPESAFE_API_KEY:-}
@@ -386,7 +404,7 @@ write_files:
           python -c "import os; from hofradar.web.auth import hash_password; print(hash_password(os.environ['HOFRADAR_NEW_PASSWORD']))" \
           | grep -o 'pbkdf2_sha256\$[^[:space:]]*' | tail -n1)"
         if [ -n "$hash" ]; then
-          sed -i "s|^HOFRADAR_PASSWORD_HASH=.*|HOFRADAR_PASSWORD_HASH=${hash}|" /opt/hofradar/app/.env
+          sed -i "s|^HOFRADAR_PASSWORD_HASH=.*|HOFRADAR_PASSWORD_HASH='${hash}'|" /opt/hofradar/app/.env
           printf 'Hofradar login password (generated on first boot):\n\n    %s\n\nChange it with: sudo hofradar-set-password\nThen delete this file.\n' \
             "$pw_note" > /home/hofradar/INITIAL_PASSWORD.txt
           chown hofradar:hofradar /home/hofradar/INITIAL_PASSWORD.txt
