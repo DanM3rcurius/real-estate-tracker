@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Nothing here should take five minutes. A step that hangs is a step to
+    # kill, not one to let run for six hours.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

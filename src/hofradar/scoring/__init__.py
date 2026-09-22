@@ -37,7 +37,7 @@ Public surface, per ``docs/MODULE_API.md``::
     hidden_score(prop, profile, now) -> tuple[float, dict]
     freshness_score(prop, now) -> tuple[float, dict]
     confidence_score(prop) -> tuple[float, dict]
-    rescore_all(session, profile, *, only_dirty=True) -> int
+    rescore_all(session, profile, *, only_dirty=True, now=None) -> int
     ranked_properties(session, profile, *, limit=None, include_rejected=False,
                       include_hidden=False, filters=None) -> list[tuple[Property, Score]]
 """

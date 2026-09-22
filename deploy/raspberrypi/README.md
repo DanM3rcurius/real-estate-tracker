@@ -78,21 +78,60 @@ uname -m                        # must say aarch64
 
 If `uname -m` says `armv7l`, stop and reflash with the 64-bit image.
 
-**If you have an SSD, mount it now**, before the bootstrap, so the database is
-born in the right place:
+### Where is your SSD, exactly?
+
+**Find this out before touching anything.** There are two layouts and they need
+opposite things, so answer the question rather than assuming:
 
 ```bash
-lsblk                                        # find it, e.g. sda1
-sudo mkfs.ext4 /dev/sda1                     # ONLY if it is a blank disk
+findmnt -no SOURCE /     # what the root filesystem is actually on
+lsblk -f
+```
+
+**Layout A - the Pi boots from the SSD** (an M.2 HAT, or a USB-SATA adapter as
+the boot device). `findmnt` says `/dev/sda2`, `/dev/nvme0n1p2` or similar, and
+`/boot/firmware` sits on partition 1 of that same disk.
+
+Then you are already done: the whole system, database included, lives on the
+SSD. **Mount nothing, and leave `HOFRADAR_DATA_MOUNT` empty.** Do not try to
+mount a partition of the boot disk at `/mnt/ssd` - partition 1 is the firmware
+partition, not a spare, and pointing an `ext4` fstab entry at that `vfat`
+partition earns you an emergency shell on the next boot.
+
+**Layout B - the OS is on the SD card and the SSD is a second disk.**
+`findmnt` says `/dev/mmcblk0p2`. This is the layout worth fixing, and the one
+`HOFRADAR_DATA_MOUNT` exists for. Identify the SSD in `lsblk -f` by size and by
+the fact that it is *not* the disk carrying `/`; the commands below assume that
+came out as `sda`, with one partition `sda1`. Substitute what you actually saw.
+
+```bash
+sudo mkfs.ext4 /dev/sda1        # DESTROYS /dev/sda1. Only on the blank SSD,
+                                # never on a partition that lsblk shows mounted
 sudo mkdir -p /mnt/ssd
-echo "UUID=$(sudo blkid -s UUID -o value /dev/sda1) /mnt/ssd ext4 defaults,noatime 0 2" \
+echo "UUID=$(sudo blkid -s UUID -o value /dev/sda1) /mnt/ssd ext4 defaults,nofail,noatime 0 2" \
   | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload
 sudo mount -a && df -h /mnt/ssd
 ```
 
+Then set `HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar` in step 3.
+
 `noatime` because there is no reason to write a timestamp every time something
-is read. Mount by UUID, not by `/dev/sda1`: USB device names move around
-between boots and a fstab entry that points at the wrong disk is a bad morning.
+is read. `nofail` so a disk that is missing at boot costs you the mount rather
+than the whole boot. Mount by UUID, not by `/dev/sda1`: USB device names move
+around between boots and a fstab entry that points at the wrong disk is a bad
+morning.
+
+**If you already added an fstab line you should not have**, remove it before
+rebooting - a failing entry drops Ubuntu into an emergency shell:
+
+```bash
+sudo cp /etc/fstab /etc/fstab.bak
+grep -n "/mnt/ssd" /etc/fstab            # look at it first
+sudo sed -i '\|/mnt/ssd|d' /etc/fstab
+sudo systemctl daemon-reload
+sudo findmnt --verify --verbose          # no errors = safe to reboot
+```
 
 ## Step 3 — the source and the settings
 
@@ -108,8 +147,11 @@ Every value in there has a working default; read the comments and change what
 you care about. The ones that actually matter on day one:
 
 - `HOFRADAR_RUNTIME` — `docker` or `native`, per the table above.
-- `HOFRADAR_DATA_MOUNT` — set to `/mnt/ssd/hofradar` if you did step 2's SSD
-  part. This is the one setting that is annoying to change later.
+- `HOFRADAR_DATA_MOUNT` — only for step 2's **layout B**: the OS on an SD card
+  and the database to be moved onto a separate SSD, e.g. `/mnt/ssd/hofradar`.
+  **Leave it empty if the Pi boots from the SSD** — the default location is
+  already on that disk, and a bind mount would add nothing. This is the one
+  setting that is annoying to change later, so get the layout right first.
 - `ANTHROPIC_API_KEY` — optional; without it the deterministic pipeline still
   runs end to end and the LLM review stage is skipped.
 - `TYPESAFE_API_KEY` — optional; enables the System One (Jev) triage that asks
@@ -134,6 +176,10 @@ On the `docker` runtime, the image build is most of the wall-clock time. Go and
 do something else; `tail -f /var/log/hofradar-bootstrap.log` if you want to
 watch.
 
+**Moving an existing database from another machine?** Read *Bringing an
+existing database with you* below before you run this — seeding the file first
+is less work than swapping it afterwards.
+
 ## Step 5 — open it
 
 The last thing the bootstrap prints is the URL and where the password is.
@@ -154,8 +200,11 @@ out. A card that dies takes the memory — *the product* — with it.
 
 Three defences, in order of how much they help:
 
-1. **Put the database on a USB SSD** (`HOFRADAR_DATA_MOUNT`, step 2). Best.
-   Even a cheap SSD outlives an SD card by years under this load.
+1. **Get the database onto an SSD.** Best by a distance — even a cheap SSD
+   outlives an SD card by years under this load. Booting the Pi from the SSD
+   outright (an M.2 HAT) is the cleanest version and needs no configuration at
+   all; a second SSD beside an SD-card system is `HOFRADAR_DATA_MOUNT`, step 2.
+   If neither applies, this section is about you.
 2. **Take the backups off the Pi.** Set `HOFRADAR_BACKUP_RSYNC_TARGET` to a NAS
    or another machine — `user@nas:/volume1/backup/hofradar/` — with an SSH key
    in `/home/hofradar/.ssh`. A backup that only exists on the Pi does not
@@ -285,11 +334,142 @@ journalctl -u hofradar -f                  # native runtime
 journalctl -u hofradar-scheduler -f        # native: the weekly crawl
 ```
 
-Pull a backup down to your laptop:
+Pull a backup down to your laptop. `dan@hofradar.local` here and throughout is
+the user and hostname from step 1 — substitute your own. If `.local` does not
+resolve, the Pi's IP (`hostname -I` on the Pi) always works: mDNS needs
+`avahi-daemon`, which Ubuntu Server does not ship and the bootstrap installs.
 
 ```bash
 scp dan@hofradar.local:/var/backups/hofradar/hofradar-*.sqlite3.gz .
 ```
+
+Note the direction: this **fetches** the Pi's nightly backups. Sending a
+database the other way, from a laptop to a new Pi, is *Bringing an existing
+database with you* above.
+
+## Bringing an existing database with you
+
+If you have been running Hofradar on a laptop, the database there is the thing
+worth moving: it is the months of memory that let the radar say *„kennen wir
+seit Februar"* instead of showing you the same twelve farms again. It is one
+file, and three details decide whether it arrives intact.
+
+**Never `cp` the database.** SQLite runs in WAL mode here (`PRAGMA
+journal_mode=WAL`, `db/session.py`), so committed rows may still be sitting in
+the `hofradar.sqlite3-wal` sidecar. A copy of the main file alone can arrive
+quietly short — which is this codebase's favourite failure, silence that looks
+like success. `scripts/backup_db.py` uses SQLite's own backup API: consistent
+with WAL active, and safe to run while the app is up.
+
+**Only the database travels.** The data directory holds three things:
+
+| File | Travels? |
+|---|---|
+| `hofradar.sqlite3` | **Yes** — all of it, saved UI settings included: `search_profiles` is a table, not a file |
+| `secret_key` | No. The Pi has its own, and `HOFRADAR_SECRET_KEY` in its `.env` wins over the file anyway. You log in once more, that is all. |
+| `hofradar.sqlite3.migrate-lock` | No. A lock; it holds no data. |
+
+`config/*.yaml` does not travel either — the Pi gets that from git. **Commit
+any local YAML edits first**, or the Pi will run a different search DNA than
+your laptop and you will wonder why the scores moved.
+
+**The schema migrates up, never down.** The database carries an Alembic stamp
+and the Pi brings it to head on boot. If your laptop is on a branch with a
+migration the Pi's checkout has never seen, `ensure_schema` refuses to start
+rather than guess. Check before you copy: `git log --oneline -1` on both, and
+put the Pi on the same branch if they differ.
+
+### On the laptop
+
+```bash
+cd ~/…/real-estate-tracker
+hofradar migrate --check          # note the "revision <X>, head <Y>" line
+python scripts/backup_db.py       # -> backups/hofradar-<stamp>.db
+```
+
+Count what you are carrying, from the snapshot rather than the original — that
+checks the snapshot itself, which is the file that is actually travelling:
+
+```bash
+python - <<'COUNT'
+import sqlite3, glob
+snap = sorted(glob.glob("backups/hofradar-*.db"))[-1]
+db = sqlite3.connect(snap)
+print(snap)
+for t in ("properties", "observations", "price_history", "scores", "search_profiles"):
+    print(f"  {t:16s}", db.execute(f"select count(*) from {t}").fetchone()[0])
+COUNT
+scp backups/hofradar-<stamp>.db dan@hofradar.local:/tmp/
+```
+
+Keep those numbers. They are the proof at the other end.
+
+### On the Pi, before the first bootstrap
+
+The tidy path: put the file where the database is going to live, then let the
+first boot migrate it. Nothing to stop, nothing to swap.
+
+```bash
+# docker runtime: uid 10001 is the image's user (see the Dockerfile)
+sudo install -d -o 10001 -g 10001 /mnt/ssd/hofradar
+sudo install -o 10001 -g 10001 -m 0600 /tmp/hofradar-<stamp>.db \
+     /mnt/ssd/hofradar/hofradar.sqlite3
+
+# native runtime: the service user owns it instead
+sudo install -d -o hofradar -g hofradar /mnt/ssd/hofradar
+sudo install -o hofradar -g hofradar -m 0600 /tmp/hofradar-<stamp>.db \
+     /mnt/ssd/hofradar/hofradar.sqlite3
+```
+
+Set `HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar` in `/opt/hofradar/hofradar.env` to
+match, then run the bootstrap as in step 4. `init-db` brings the schema current
+before `serve` ever starts.
+
+### On the Pi, if it is already running
+
+Stop it first — restoring under a running crawl is how you get a database that
+is half one thing and half another.
+
+```bash
+sudo systemctl stop hofradar                     # native: add hofradar-scheduler
+sudo install -o 10001 -g 10001 -m 0600 /tmp/hofradar-<stamp>.db \
+     /mnt/ssd/hofradar/hofradar.sqlite3
+sudo rm -f /mnt/ssd/hofradar/hofradar.sqlite3-wal \
+           /mnt/ssd/hofradar/hofradar.sqlite3-shm
+sudo systemctl start hofradar
+```
+
+Do not skip the `rm`. Those sidecars belong to the database you just replaced,
+and leaving them beside a different file is a real way to corrupt it.
+
+If you left `HOFRADAR_DATA_MOUNT` empty, the database is in a Docker volume
+rather than on a path — use the `docker run --rm -v hofradar_hofradar-data`
+recipe in *Restoring a backup* below to get the file in.
+
+### Verify, then decide which machine is real
+
+The paths below assume `HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar`. If you left it
+empty, `grep HOFRADAR_DATA_DIR /opt/hofradar/app/.env` says where the database
+actually is — and on the `docker` runtime an empty mount means a Docker volume,
+not a path, so use the `docker run --rm -v hofradar_hofradar-data` form from
+*Restoring a backup* instead.
+
+```bash
+sudo hofradar-cli migrate --check    # "schema is current", exit 0
+sudo sqlite3 /mnt/ssd/hofradar/hofradar.sqlite3 \
+  "select count(*) from properties; select count(*) from observations;"
+sudo hofradar-health
+sudo hofradar-backup                 # prove the backup loop works on real data
+```
+
+The counts must match the ones from the laptop. If `migrate --check` still
+reports pending work after a restart, stop and find out why before adding
+anything new — a half-migrated database is the one state worth refusing.
+
+Then **retire the laptop copy**. Invariant 2 — never report a known property as
+new — assumes one memory. Keep both running and they diverge silently: each
+will call things NEW that the other has known since February, and there is no
+merge path back.
 
 ## Restoring a backup
 
@@ -302,6 +482,9 @@ that is half one thing and half another.
 sudo systemctl stop hofradar hofradar-scheduler
 sudo -u hofradar sh -c 'gunzip -c /var/backups/hofradar/hofradar-20260901T032000Z.sqlite3.gz \
   > /var/lib/hofradar/hofradar.sqlite3'
+# The sidecars belong to the database you just overwrote - WAL is on, so
+# leaving them next to a different file is a way to corrupt it.
+sudo rm -f /var/lib/hofradar/hofradar.sqlite3-wal /var/lib/hofradar/hofradar.sqlite3-shm
 sudo systemctl start hofradar hofradar-scheduler
 ```
 
@@ -311,7 +494,9 @@ sudo systemctl start hofradar hofradar-scheduler
 gunzip -c /var/backups/hofradar/hofradar-20260901T032000Z.sqlite3.gz > /tmp/restore.sqlite3
 sudo systemctl stop hofradar
 sudo docker run --rm -v hofradar_hofradar-data:/data -v /tmp:/host alpine \
-  sh -c 'cp /host/restore.sqlite3 /data/hofradar.sqlite3 && chown 10001:10001 /data/hofradar.sqlite3'
+  sh -c 'cp /host/restore.sqlite3 /data/hofradar.sqlite3 \
+      && rm -f /data/hofradar.sqlite3-wal /data/hofradar.sqlite3-shm \
+      && chown 10001:10001 /data/hofradar.sqlite3'
 sudo systemctl start hofradar
 ```
 
@@ -338,12 +523,12 @@ A restored database that predates the code is migrated on the next start
 - **Nominatim and OSRM are public services** being used politely by default.
   A Pi crawling weekly is well inside that, but the endpoints are configurable
   (`.env.example`) if you ever run your own.
-- **CI has never actually run in this repo** (see `CLAUDE.md`), so a red check
-  on a PR is not evidence of anything. Local green is the verification that
-  exists. This folder is no exception: it is written against the Hetzner
-  deployment that does work, and the Pi-specific paths — the ARM image build,
-  `dphys-swapfile`, `vcgencmd` — have not been exercised on real hardware.
-  Read the bootstrap before you run it; it is commented for exactly that.
+- **CI does not cover any of this.** The workflow lints and tests the Python
+  package; no shell here is linted and no path here is booted by it. This
+  folder is written against the Hetzner deployment that does work, and the
+  Pi-specific parts — the ARM image build, `dphys-swapfile`, `vcgencmd` — are
+  reasoned, not exercised on real hardware. Read the bootstrap before you run
+  it; it is commented for exactly that.
 
 ## Troubleshooting
 

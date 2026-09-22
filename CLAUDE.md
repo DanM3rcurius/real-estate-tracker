@@ -81,8 +81,8 @@ lands in `src/hofradar/migrations/versions/` so the installed wheel carries it.
 pip install -e ".[dev,pdf,images]"
 hofradar init-db && hofradar serve
 hofradar migrate --check          # pending schema work? (exit 1 if so)
-PYTHONPATH=src python -m pytest -q
-ruff check src tests
+pytest -q                         # exactly what CI runs, no PYTHONPATH needed
+ruff check src tests scripts      # CI lints scripts/ too
 ```
 
 Tests must never hit the network: they mock every outbound call with `respx`
@@ -112,11 +112,49 @@ database from the models with `create_all()`, where a missing migration is
 invisible. `tests/db/test_migrations.py` builds one from the migrations alone
 and compares - that is the test that would have caught #7, so do not weaken it.
 
-**CI has never run.** All 44 workflow runs to date fail in 2-4 seconds with no
-step logs and a 404 on the job log: the job never reaches a runner (Actions
-billing / repo settings, not the code). Green locally is currently the only
-verification that exists. Do not read a red check on a PR as a real failure
-without opening the run first.
+**CI runs, and is green.** Runs 1-44 really did die in 2-4 seconds without
+reaching a runner; that ended at run 45 (2026-09-04) and every run since
+executes its steps. Do not read a red check as infrastructure without opening
+the run.
+
+Two real defects were hiding behind each other, because a failed step skips the
+rest - so the tests and both smoke steps had never executed in CI at all until
+they were fixed (`a0fd490`, `cd5bd77`, `e95403c`):
+
+1. *Config defaults are in sync* failed on drift `scripts/sync_config_defaults.py`
+   could not stage: it copied with `copy2`, which carries the source mtime
+   across, and `2000` -> `1000` keeps the byte length, so git's index saw the
+   same size and mtime and `git add` staged nothing. It copies without metadata
+   now. The guard itself was right - the packaged copy is what an installed
+   wheel reads, which is every container deployment.
+2. *Test* then failed collection outright: four modules import their sibling
+   conftest absolutely (`from tests.web.conftest import ...`), which needs the
+   repo root on `sys.path`. `python -m pytest` adds the working directory and
+   the plain `pytest` CI runs does not, so the documented local command was the
+   one invocation that could not fail. The root is in `pythonpath` now. Keep the
+   documented command and CI's command identical.
+
+Two traps worth keeping in mind:
+
+- **`hofradar run --dry-run` is not a dry run of the crawl.** `dry_run` only
+  skips the writes, so discovery and fetching still hit the live portals. The
+  smoke step passes `--sources manual`, which enumerates nothing and still walks
+  every stage. Do not widen it back without deciding that CI should crawl the
+  real web on every push.
+- **A fixed test clock and a wall-clock function make a time bomb.** The scoring
+  fixtures are dated against `tests/scoring/conftest.py`'s frozen
+  `2026-09-03`, and `rescore_all` scored against the wall clock, so a property
+  aged past a freshness band and the confidence gate dropped it out of the
+  ranking - a test that passed for eleven days and then could not. `rescore_all`
+  takes `now` for this reason; pass it whenever the answer must not depend on
+  what day it is.
+
+**Check `origin/trunk` before diagnosing anything.** Several Claude sessions
+work this repo in parallel and branches sit unmerged for weeks. Both CI defects
+above were diagnosed and fixed twice, independently, because the second session
+reasoned from a stale `origin/trunk` ref rather than fetching first. `git fetch
+origin trunk` costs nothing; re-solving a solved problem and then resolving the
+merge conflicts costs a session.
 
 **`pipeline/runner.py` has no `commit()` at all.** The whole run is one
 `session_scope()` transaction, so the `SearchRun(status="running")` row and
