@@ -78,21 +78,60 @@ uname -m                        # must say aarch64
 
 If `uname -m` says `armv7l`, stop and reflash with the 64-bit image.
 
-**If you have an SSD, mount it now**, before the bootstrap, so the database is
-born in the right place:
+### Where is your SSD, exactly?
+
+**Find this out before touching anything.** There are two layouts and they need
+opposite things, so answer the question rather than assuming:
 
 ```bash
-lsblk                                        # find it, e.g. sda1
-sudo mkfs.ext4 /dev/sda1                     # ONLY if it is a blank disk
+findmnt -no SOURCE /     # what the root filesystem is actually on
+lsblk -f
+```
+
+**Layout A - the Pi boots from the SSD** (an M.2 HAT, or a USB-SATA adapter as
+the boot device). `findmnt` says `/dev/sda2`, `/dev/nvme0n1p2` or similar, and
+`/boot/firmware` sits on partition 1 of that same disk.
+
+Then you are already done: the whole system, database included, lives on the
+SSD. **Mount nothing, and leave `HOFRADAR_DATA_MOUNT` empty.** Do not try to
+mount a partition of the boot disk at `/mnt/ssd` - partition 1 is the firmware
+partition, not a spare, and pointing an `ext4` fstab entry at that `vfat`
+partition earns you an emergency shell on the next boot.
+
+**Layout B - the OS is on the SD card and the SSD is a second disk.**
+`findmnt` says `/dev/mmcblk0p2`. This is the layout worth fixing, and the one
+`HOFRADAR_DATA_MOUNT` exists for. Identify the SSD in `lsblk -f` by size and by
+the fact that it is *not* the disk carrying `/`; the commands below assume that
+came out as `sda`, with one partition `sda1`. Substitute what you actually saw.
+
+```bash
+sudo mkfs.ext4 /dev/sda1        # DESTROYS /dev/sda1. Only on the blank SSD,
+                                # never on a partition that lsblk shows mounted
 sudo mkdir -p /mnt/ssd
-echo "UUID=$(sudo blkid -s UUID -o value /dev/sda1) /mnt/ssd ext4 defaults,noatime 0 2" \
+echo "UUID=$(sudo blkid -s UUID -o value /dev/sda1) /mnt/ssd ext4 defaults,nofail,noatime 0 2" \
   | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload
 sudo mount -a && df -h /mnt/ssd
 ```
 
+Then set `HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar` in step 3.
+
 `noatime` because there is no reason to write a timestamp every time something
-is read. Mount by UUID, not by `/dev/sda1`: USB device names move around
-between boots and a fstab entry that points at the wrong disk is a bad morning.
+is read. `nofail` so a disk that is missing at boot costs you the mount rather
+than the whole boot. Mount by UUID, not by `/dev/sda1`: USB device names move
+around between boots and a fstab entry that points at the wrong disk is a bad
+morning.
+
+**If you already added an fstab line you should not have**, remove it before
+rebooting - a failing entry drops Ubuntu into an emergency shell:
+
+```bash
+sudo cp /etc/fstab /etc/fstab.bak
+grep -n "/mnt/ssd" /etc/fstab            # look at it first
+sudo sed -i '\|/mnt/ssd|d' /etc/fstab
+sudo systemctl daemon-reload
+sudo findmnt --verify --verbose          # no errors = safe to reboot
+```
 
 ## Step 3 — the source and the settings
 
@@ -108,8 +147,11 @@ Every value in there has a working default; read the comments and change what
 you care about. The ones that actually matter on day one:
 
 - `HOFRADAR_RUNTIME` — `docker` or `native`, per the table above.
-- `HOFRADAR_DATA_MOUNT` — set to `/mnt/ssd/hofradar` if you did step 2's SSD
-  part. This is the one setting that is annoying to change later.
+- `HOFRADAR_DATA_MOUNT` — only for step 2's **layout B**: the OS on an SD card
+  and the database to be moved onto a separate SSD, e.g. `/mnt/ssd/hofradar`.
+  **Leave it empty if the Pi boots from the SSD** — the default location is
+  already on that disk, and a bind mount would add nothing. This is the one
+  setting that is annoying to change later, so get the layout right first.
 - `ANTHROPIC_API_KEY` — optional; without it the deterministic pipeline still
   runs end to end and the LLM review stage is skipped.
 
@@ -155,8 +197,11 @@ out. A card that dies takes the memory — *the product* — with it.
 
 Three defences, in order of how much they help:
 
-1. **Put the database on a USB SSD** (`HOFRADAR_DATA_MOUNT`, step 2). Best.
-   Even a cheap SSD outlives an SD card by years under this load.
+1. **Get the database onto an SSD.** Best by a distance — even a cheap SSD
+   outlives an SD card by years under this load. Booting the Pi from the SSD
+   outright (an M.2 HAT) is the cleanest version and needs no configuration at
+   all; a second SSD beside an SD-card system is `HOFRADAR_DATA_MOUNT`, step 2.
+   If neither applies, this section is about you.
 2. **Take the backups off the Pi.** Set `HOFRADAR_BACKUP_RSYNC_TARGET` to a NAS
    or another machine — `user@nas:/volume1/backup/hofradar/` — with an SSH key
    in `/home/hofradar/.ssh`. A backup that only exists on the Pi does not
@@ -392,6 +437,12 @@ rather than on a path — use the `docker run --rm -v hofradar_hofradar-data`
 recipe in *Restoring a backup* below to get the file in.
 
 ### Verify, then decide which machine is real
+
+The paths below assume `HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar`. If you left it
+empty, `grep HOFRADAR_DATA_DIR /opt/hofradar/app/.env` says where the database
+actually is — and on the `docker` runtime an empty mount means a Docker volume,
+not a path, so use the `docker run --rm -v hofradar_hofradar-data` form from
+*Restoring a backup* instead.
 
 ```bash
 sudo hofradar-cli migrate --check    # "schema is current", exit 0
