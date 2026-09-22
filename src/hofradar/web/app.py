@@ -43,8 +43,13 @@ NAV_ITEMS = (
 
 
 def build_templates() -> Jinja2Templates:
+    from hofradar.web.query import is_web_url
+
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     templates.env.filters.update(JINJA_FILTERS)
+    # ``{% if url is web_url %}``: no template may put an ``upload:``/``manual:``
+    # identity in an href, because a browser does nothing with one.
+    templates.env.tests["web_url"] = is_web_url
     templates.env.globals.update(
         app_title=APP_TITLE,
         app_subtitle=APP_SUBTITLE,
@@ -101,6 +106,7 @@ def create_app(
 
     from hofradar.web.routes import (
         add,
+        documents,
         dossier,
         health,
         login,
@@ -112,7 +118,18 @@ def create_app(
         settings,
     )
 
-    for module in (radar, dossier, map_view, merkliste, reports, runs, add, settings, health):
+    for module in (
+        radar,
+        dossier,
+        map_view,
+        merkliste,
+        reports,
+        runs,
+        add,
+        documents,
+        settings,
+        health,
+    ):
         app.include_router(module.router)
 
     # Authentication is opt-in: with no password configured the gate is not

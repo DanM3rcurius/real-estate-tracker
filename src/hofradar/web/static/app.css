@@ -339,6 +339,9 @@ small { color: var(--ink-soft); }
 .notice--ok { background: var(--ok-soft); color: var(--ok); }
 .notice__detail { display: block; font-size: .78rem; opacity: .8; margin-top: 4px; }
 
+/* An upload:/manual: identity is printed, never linked - see web/query.is_web_url. */
+.source__id { color: var(--ink-soft); font-size: .85em; word-break: break-all; }
+
 /* ---------- map ---------- */
 
 .map { height: min(70vh, 560px); border-radius: var(--radius); border: 1px solid var(--line); background: var(--bg-sunken); }

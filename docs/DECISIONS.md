@@ -842,3 +842,81 @@ so in `config/sources.yaml`.
 `hofradar.normalize`'s to type, and a PDF's page kind is `listing` because a
 reader or a detail page handed it over as one advert. It is not OCR: a scan
 is reported, not guessed at.
+
+
+## 25. An identity is not an address, and a mark is not a score
+
+**The rule.** A template may only put a URL in an `href` when a browser can
+follow it: `http://` or `https://` and nothing else, which is what
+`web/query.is_web_url` answers and the Jinja test `{% if url is web_url %}`
+enforces at the point of use. Everything else the system uses to *name* a
+listing - `upload:<digest>` for a PDF the reader handed over, `manual:<iso>`
+for a text paste with no page of its own - is printed as what it is, never
+offered as somewhere to go. The stored exposé is reachable instead, through
+`GET /document/{id}`, which serves files from `web/uploads.uploads_dir()` and
+refuses a `local_path` that resolves anywhere else.
+
+And: the Merkliste's candidate set comes from the `properties` table, not from
+the ranking. A marked property with no `Score` row for the live `profile_hash`
+is still the reader's, and is rendered unscored.
+
+**What went wrong.** Both halves were the same failure in two places, and both
+were reported from use in one sentence each: "the uploaded PDFs show nothing
+when clicking *Inserat öffnen*", and "*Merkliste* is not working any more".
+
+The first: `/add` writes the PDF to disk *before* anything parses it, because
+the file is the evidence (entry 24), and names the listing by the file's own
+digest so a re-upload lands on the same property (entry 16). That digest then
+went straight into the dossier's `href` - and into the fact table's *Quelle*
+link, the *Quellen* list and the *Dokument* link. A browser has no `upload:`
+scheme, so all four did nothing at all when clicked, without an error, a
+console message or a cursor that changed. Meanwhile the file itself sat on
+disk with **no route in the application serving it**: the one artefact that
+*was* the listing was the one thing unreachable.
+
+The second: `scoring.ranked_properties` joins `Score` on the live
+`profile_hash`, so a property nothing has scored under that hash is not in the
+ranking at all. A hand-added property is exactly that - `/add` stores, it does
+not score, and the first score is written by the next page load's rescore. Any
+rescore that cannot write leaves it unscored for longer: a crawl holding
+SQLite's write lock is the everyday case, and the fix that stopped the radar
+500ing on that (rolling back and rendering the last stored scores) turned a
+visible failure into a silent one for rows that had no stored scores yet. The
+marked property then vanished from the Merkliste under
+*"Alle gemerkten Objekte sind archiviert."* - a sentence stating a cause the
+page had never checked. A row merged into another was lost the same way:
+`/merken` happily wrote `shortlisted_at` on a row `build_results` skips.
+
+**Why the fix is shaped this way.** Neither half is a rendering detail.
+
+`best_url` keeps returning the identity, because that is what the JSON payload,
+the CSV export and the digest quote, and truncating it there would lose a fact.
+The decision about what is *clickable* belongs at the one place that builds a
+link - `open_link`, which prefers the listing's own page, falls back to the
+exposé we hold, and returns `None` when there is neither. `None` is then a
+sentence on the page (`NO_LINK_MANUAL`, `NO_LINK_NONE`), never a missing
+button: "there is no online listing, only the exposé" is information the reader
+needs, and entry 18's rule about dropped facts applies to links as well.
+`document_href` prefers our own stored copy over the remote URL, because the
+copy still opens after the broker takes the exposé down - which is the whole
+reason the file is written at all.
+
+For the Merkliste: `include_rejected` was already forced on and the slider gate
+already skipped (entry 21), on the reasoning that a mark is the human's and
+outranks the machine. A *missing score row* is not even a machine verdict - it
+is bookkeeping - so letting it hide a mark was strictly worse than the gate
+this entry's predecessor had already ruled out. `_marked_pairs` loads the
+marked, unmerged set directly and merges it into whatever the ranking returned;
+`_sort_key` already handles a `None` score and the card already says
+"noch nicht bewertet". `/merken` follows `merged_into_id` the way `ingest`
+does, so a click always lands on a row that can be shown, and `total_in_db`
+stops counting merged rows so the page's own numbers agree with it.
+
+**What it may not do.** Serving a stored file is not serving a path: anything
+outside the uploads directory is refused, and a `local_path` whose file is gone
+is a 410 naming the path, not a bare 404. The Merkliste still honours
+archiving, and still counts what it hides. And the empty page no longer names
+archiving as the cause unless the archived count actually accounts for every
+mark - the failure here was a true-sounding sentence, so a sentence that can
+only be true is part of the fix.
+

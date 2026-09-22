@@ -185,6 +185,31 @@ a label above its value (numeric fields only) and a bare "28 Zimmer"; keep
 it a string matcher. Tests build PDFs with `tests/fixtures/pdf.py::make_pdf`,
 never from real files. Decision 24.
 
+**A link is only a link when a browser can follow it.** `upload:<digest>`
+(a reader's PDF) and `manual:<timestamp>` (a text paste) are how a hand-added
+listing is *named*; they are not addresses, and putting one in an `href`
+produces a button that does nothing when clicked - which is how the dossier's
+"Inserat öffnen", its per-fact "Quelle", the Quellen list and the Dokument link
+all behaved until decision 25. `web/query.is_web_url` is the one answer, also
+registered as the Jinja test `{% if url is web_url %}`; `open_link` decides
+what the header button points at and `no_link_reason` says why when it points
+at nothing. `best_url` still returns the identity - the JSON, the CSV and the
+digest quote it. The uploaded file is served by `GET /document/{id}` out of
+`web/uploads.uploads_dir()`, and that module - not `routes/add.py` - now owns
+where uploads live.
+
+**A mark is not a score, and the Merkliste must never wait for one.**
+`scoring.ranked_properties` joins `Score` on the live `profile_hash`, so a
+property nothing has scored under it is not in the ranking. `/add` stores but
+never scores, and a rescore that cannot write (a crawl holding the lock) leaves
+rows unscored for longer - so hand-added properties vanished from the Merkliste
+under "Alle gemerkten Objekte sind archiviert", a cause the page had never
+checked. `web/query._marked_pairs` now loads the marked, unmerged set from the
+table and merges it into the ranking; an unscored card says "noch nicht
+bewertet". `/merken` follows `merged_into_id` the way `ingest` does, because a
+merged row is never rendered. When you touch `build_results`, the rule is: the
+Merkliste's rows come from `properties`, never only from the scorer.
+
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing
 it must not be able to mark a listing verified. `init-db` syncs the YAML, so
