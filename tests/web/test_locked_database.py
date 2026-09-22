@@ -34,6 +34,10 @@ from hofradar.web.app import create_app
 #: the failure, not the wait.
 TEST_BUSY_TIMEOUT_MS = 50
 
+#: How SQLAlchemy's SQLite dialect writes a ``DateTime`` column; a raw
+#: ``sqlite3`` write has to match it or the value never reads back.
+SQLITE_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+
 
 @pytest.fixture()
 def db_path(tmp_path: Path) -> Path:
@@ -105,6 +109,39 @@ def test_the_radar_renders_with_a_notice_while_a_crawl_holds_the_lock(
     assert "gesperrt" in response.text
     assert "Crawl" in response.text
     assert "hofradar migrate" not in response.text
+
+
+def test_the_merkliste_still_shows_a_mark_while_the_lock_is_held(
+    locked_client: tuple[TestClient, sqlite3.Connection],
+    db_path: Path,
+) -> None:
+    """A rescore that cannot write must not cost the reader their bookmarks.
+
+    ``ranked_properties`` joins ``Score`` on the live profile hash, so with no
+    score row written the marked property is simply not in the ranking. It
+    used to vanish from the Merkliste under the sentence "Alle gemerkten
+    Objekte sind archiviert", which was not true of it.
+    """
+    client, crawl = locked_client
+    # The reader marked it *before* the crawl started, which is the real
+    # sequence: while the crawl holds the lock no web write succeeds at all.
+    crawl.rollback()
+    marker = sqlite3.connect(db_path)
+    marker.execute(
+        "UPDATE properties SET shortlisted_at = ? WHERE public_id = 'hof-locked'",
+        # The format SQLite's DATETIME round-trips, not an ISO string.
+        (datetime.now(UTC).strftime(SQLITE_DATETIME_FORMAT),),
+    )
+    marker.commit()
+    marker.close()
+    crawl.execute("BEGIN IMMEDIATE")
+    crawl.execute("UPDATE properties SET town = town WHERE public_id = 'hof-locked'")
+
+    response = client.get("/merkliste")
+
+    assert response.status_code == 200
+    assert "hof-locked" in response.text
+    assert "archiviert" not in response.text
 
 
 def test_the_same_request_scores_normally_once_the_lock_is_released(

@@ -19,7 +19,16 @@ from hofradar.web import history
 from hofradar.web.charts import sparkline
 from hofradar.web.deps import get_db, profile_from_query, render
 from hofradar.web.filters import de_eur, de_km, de_number, de_sqm, de_tier
-from hofradar.web.query import best_url, change_chips, load_property, row_to_dict
+from hofradar.web.query import (
+    best_url,
+    change_chips,
+    document_href,
+    load_property,
+    no_link_reason,
+    open_link,
+    pick_document,
+    row_to_dict,
+)
 
 router = APIRouter(tags=["dossier"])
 
@@ -272,6 +281,12 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "sparkline": sparkline(prop),
         "chips": change_chips(prop),
         "best_url": best_url(prop),
+        # What the header button may actually point at. A hand-added listing
+        # has no page to open, so the exposé it was read from opens instead -
+        # and when nothing can, the page says so rather than dropping a button.
+        "open_link": open_link(prop, document=pick_document(prop.documents)),
+        "no_link_reason": no_link_reason(prop),
+        "document_href": document_href,
         "user_states": USER_STATES,
         "sources": sorted(
             prop.property_sources or [], key=lambda s: (not s.is_best, not s.is_primary_source)
@@ -333,6 +348,24 @@ def triage(
     )
 
 
+def _surviving(session: Session, prop: Property) -> Property:
+    """The row a merge left standing, following the chain like ``ingest`` does.
+
+    A property merged into another is never rendered anywhere - ``build_results``
+    skips it - so marking one would write a bookmark the Merkliste can never
+    show. The mark belongs on the survivor, which is also where ``dedupe.merge``
+    carries an older mark to.
+    """
+    seen: set[int] = set()
+    while prop.merged_into_id is not None and prop.id not in seen:
+        seen.add(prop.id)
+        keeper = session.get(Property, prop.merged_into_id)
+        if keeper is None:
+            break
+        prop = keeper
+    return prop
+
+
 @router.post("/property/{public_id}/merken")
 def merken(public_id: str, request: Request, session: Session = Depends(get_db)):
     """The Merkliste toggle. The only route that writes ``Property.
@@ -346,6 +379,7 @@ def merken(public_id: str, request: Request, session: Session = Depends(get_db))
             {"code": 404, "message": f"Kein Objekt mit der ID {public_id}."},
             status_code=404,
         )
+    prop = _surviving(session, prop)
     prop.shortlisted_at = None if prop.shortlisted_at else history.now_utc()
     session.add(prop)
     session.commit()
@@ -434,6 +468,7 @@ def api_property(public_id: str, request: Request, session: Session = Depends(ge
         chips=change_chips(prop),
         best_url=best_url(prop),
         price_delta_pct=history.total_price_delta_pct(prop),
+        open_link=open_link(prop, document=pick_document(prop.documents)),
     )
     payload = row_to_dict(row)
     payload["evidence"] = prop.evidence or {}
@@ -464,6 +499,7 @@ def api_property(public_id: str, request: Request, session: Session = Depends(ge
             "issue": d.issue,
             "page_number": d.page_number,
             "url": d.document_url,
+            "href": document_href(d),
             "matched_text": d.matched_text,
         }
         for d in prop.documents or []

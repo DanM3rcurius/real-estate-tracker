@@ -162,3 +162,71 @@ def test_exports_carry_the_mark(client, db, seeded):
     assert row["shortlisted_at"]
     csv = client.get("/api/export.csv").text
     assert "Merkliste" in csv.splitlines()[0]
+
+
+# --------------------------------------------------------------------------- #
+# A mark is the reader's, and no machine may lose it
+# --------------------------------------------------------------------------- #
+
+
+def test_a_marked_property_with_no_score_for_this_profile_still_appears(
+    client, db, seeded, default_profile
+):
+    """``ranked_properties`` joins ``Score`` on the live profile hash.
+
+    A property nothing has scored under that hash is not in the ranking at
+    all - a fresh paste (``/add`` stores, it does not score), or anything
+    whatever while a crawl holds the write lock and the rescore cannot run.
+    On the Merkliste that is not the machine's call to make: the mark is the
+    reader's (decision 21).
+    """
+    from hofradar.db.models import Score
+
+    client.post("/property/HF-0001/merken")
+    db.query(Score).delete()
+    db.commit()
+
+    # Pin the profile to one nothing will be rescored under, by locking the
+    # scorer out: the page must show the mark with no score, not swallow it.
+    import hofradar.web.query as query
+
+    real_rescore = query._rescore
+    query._rescore = lambda session, profile: (None, None)
+    try:
+        html = client.get("/merkliste").text
+    finally:
+        query._rescore = real_rescore
+
+    assert "HF-0001" in html
+    assert "noch nicht bewertet" in html
+    assert "archiviert" not in html
+
+
+def test_the_empty_page_does_not_blame_archiving_unless_that_is_the_reason(
+    client, db, seeded
+):
+    client.post("/property/HF-0001/merken")
+    prop = _prop(db, "HF-0001")
+    prop.user_state = "archived"
+    db.commit()
+
+    html = client.get("/merkliste").text
+    assert "Alle gemerkten Objekte sind archiviert." in html
+
+
+def test_marking_a_merged_away_row_marks_the_survivor(client, db, seeded):
+    """A merged row is never rendered, so a mark on it could never be shown."""
+    keep, drop = seeded["near"], seeded["far"]
+    drop.merged_into_id = keep.id
+    db.commit()
+
+    response = client.post(f"/property/{drop.public_id}/merken", headers={"HX-Request": "true"})
+    assert response.status_code == 200
+    assert "Gemerkt" in response.text
+    assert _prop(db, drop.public_id).shortlisted_at is None
+    assert _prop(db, keep.public_id).shortlisted_at is not None
+
+    html = client.get("/merkliste").text
+    assert keep.public_id in html
+    # ... and the page counts what it can show, not what it cannot.
+    assert "1 von 1" in html

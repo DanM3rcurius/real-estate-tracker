@@ -54,8 +54,9 @@
 
   <footer class="card__foot">
     <a class="btn btn--small" href="/property/{{ row.prop.public_id }}">Dossier</a>
-    {% if row.best_url %}
-    <a class="btn btn--small btn--ghost" href="{{ row.best_url }}" rel="noopener noreferrer nofollow" target="_blank">Quelle</a>
+    {% if row.open_link %}
+    <a class="btn btn--small btn--ghost" href="{{ row.open_link.href }}"
+       {% if row.open_link.external %}rel="noopener noreferrer nofollow" target="_blank"{% endif %}>Quelle</a>
     {% endif %}
     {% with prop = row.prop %}{% include "partials/merken_button.html" %}{% endwith %}
     {% if row.prop.user_state %}<span class="chip chip--user">{{ row.prop.user_state }}</span>{% endif %}

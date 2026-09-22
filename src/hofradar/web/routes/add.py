@@ -18,10 +18,8 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
@@ -33,6 +31,12 @@ from hofradar.db.enums import SourceRole
 from hofradar.db.models import Source
 from hofradar.web import lazy
 from hofradar.web.deps import get_db, profile_from_query, render
+from hofradar.web.uploads import (
+    MANUAL_URL_PREFIX,
+    UPLOAD_DIGEST_LEN,
+    UPLOAD_URL_PREFIX,
+    uploads_dir,
+)
 
 router = APIRouter(tags=["add"])
 
@@ -63,16 +67,9 @@ INGEST_REFUSAL_FALLBACK = "Die eingefügte Seite ist kein Inserat. Es wurde nich
 PDFUTIL_MODULE = "hofradar.sources.adapters._pdfutil"
 
 #: Uploaded exposés are kept next to the database, under the same data
-#: directory, and the environment is read per request rather than at import
-#: so a test (and a relocated deployment) can point it elsewhere.
-UPLOAD_DIR_NAME = "uploads"
-
-#: Enough of the SHA-256 to name a file without collisions, short enough to
-#: read in a URL. Both the stored file and the listing URL use it, which is
-#: what makes a re-upload land on the existing property (decision 16).
-UPLOAD_DIGEST_LEN = 16
-UPLOAD_URL_PREFIX = "upload:"
-
+#: directory. Where that is, and what the two pseudo-URL prefixes mean, is
+#: owned by ``hofradar.web.uploads``: ``routes/documents.py`` serves the same
+#: files back and the two must not disagree about where they are.
 _BYTES_PER_MB = 1024 * 1024
 
 #: Raw fields that, on their own, still make a listing worth remembering.
@@ -213,11 +210,6 @@ def _get_adapter(source: Source) -> Any:
         return get_adapter(manual)
 
 
-def _uploads_dir() -> Path:
-    """Where an uploaded exposé is kept - resolved now, not at import time."""
-    return Path(os.environ.get("HOFRADAR_DATA_DIR", "data")) / UPLOAD_DIR_NAME
-
-
 def _store_upload(data: bytes, digest: str) -> tuple[str | None, lazy.Degraded | None]:
     """Write the file to disk before a parser has looked at it.
 
@@ -225,7 +217,7 @@ def _store_upload(data: bytes, digest: str) -> tuple[str | None, lazy.Degraded |
     listing: the facts were in the bytes we already hold, so the paste is
     still processed and the reader is told what was lost.
     """
-    path = _uploads_dir() / f"{digest}.pdf"
+    path = uploads_dir() / f"{digest}.pdf"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -381,7 +373,7 @@ async def add_submit(
         # Only a bare text paste has nothing stable to be identified by.
         fallback_url = (
             upload.url if upload is not None
-            else f"manual:{datetime.now(UTC).isoformat(timespec='seconds')}"
+            else f"{MANUAL_URL_PREFIX}{datetime.now(UTC).isoformat(timespec='seconds')}"
         )
         raw = RawListing(
             source_key=MANUAL_SOURCE_KEY,

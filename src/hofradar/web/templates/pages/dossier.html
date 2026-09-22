@@ -15,8 +15,14 @@
     </p>
     {{ ui.chips(chips) }}
     <p class="dossier__sentence">{{ timeline_sentence }}</p>
-    {% if best_url %}
-    <p><a class="btn" href="{{ best_url }}" rel="noopener noreferrer nofollow" target="_blank">Inserat öffnen</a></p>
+    {# Only a link a browser can follow. A hand-added listing is identified by
+       upload:<digest> or manual:<timestamp>, which is a name, not an address -
+       rendering it produced a button that did nothing. #}
+    {% if open_link %}
+    <p><a class="btn" href="{{ open_link.href }}"
+          {% if open_link.external %}rel="noopener noreferrer nofollow" target="_blank"{% endif %}>{{ open_link.label }}</a></p>
+    {% else %}
+    <p class="hint">{{ no_link_reason }}</p>
     {% endif %}
     {% include "partials/merken_button.html" %}
   </header>
@@ -43,8 +49,10 @@
                 {% if fact.evidence.get('quote') %}
                 <blockquote class="evidence__quote">„{{ fact.evidence.get('quote') }}“</blockquote>
                 {% endif %}
-                {% if fact.evidence.get('url') %}
+                {% if fact.evidence.get('url') is web_url %}
                 <a href="{{ fact.evidence.get('url') }}" rel="noopener noreferrer nofollow" target="_blank">Quelle</a>
+                {% elif fact.evidence.get('url') %}
+                <code class="source__id" title="Kennung der Eingabe, keine aufrufbare Adresse">{{ fact.evidence.get('url') }}</code>
                 {% endif %}
                 {% if fact.evidence.get('observed_at') %}
                 <small>{{ fact.evidence.get('observed_at') | de_date }}</small>
@@ -182,7 +190,11 @@
         <span class="chip chip--role chip--role-{{ src.role }}">{{ src.role }}</span>
         {% if src.is_primary_source %}<span class="chip chip--primary">Primärquelle</span>{% endif %}
         {% if src.is_best %}<span class="chip">beste Quelle</span>{% endif %}
+        {% if src.url is web_url %}
         <a href="{{ src.url }}" rel="noopener noreferrer nofollow" target="_blank">{{ src.url }}</a>
+        {% else %}
+        <code class="source__id" title="Kennung der Eingabe, keine aufrufbare Adresse">{{ src.url }}</code>
+        {% endif %}
         <small>erstmals {{ src.first_seen | de_date }}, zuletzt {{ src.last_seen | de_date }}</small>
         {% if src.contact_name %}<small>Kontakt: {{ src.contact_name }} ({{ src.contact_kind or 'unbekannt' }})</small>{% endif %}
       </li>
@@ -204,7 +216,13 @@
         {% if doc.page_number %}, Seite {{ doc.page_number }}{% endif %}
         {% if doc.document_date %} <small>({{ doc.document_date | de_date }})</small>{% endif %}
         {% if doc.matched_text %}<blockquote class="evidence__quote">„{{ doc.matched_text }}“</blockquote>{% endif %}
-        <a href="{{ doc.document_url }}" rel="noopener noreferrer nofollow" target="_blank">Dokument</a>
+        {% set href = document_href(doc) %}
+        {% if href %}
+        <a href="{{ href }}"
+           {% if href is web_url %}rel="noopener noreferrer nofollow" target="_blank"{% endif %}>Dokument öffnen</a>
+        {% else %}
+        <span class="hint">Datei nicht hinterlegt – Kennung {{ doc.document_url }}</span>
+        {% endif %}
       </li>
       {% endfor %}
     </ul>

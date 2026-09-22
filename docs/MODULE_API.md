@@ -484,20 +484,55 @@ def redirect_to_saved(request: Request) -> RedirectResponse | None
     # Returns a 303 to the same path with the saved query string appended,
     # or None if the request already carries known parameters or reset=1 is set.
 
+# hofradar.web.query - what a template may put in an href
+def is_web_url(url: str | None) -> bool
+    # True only for http:// and https://. Registered on the Jinja environment
+    # as the test `{% if url is web_url %}`; an upload:<digest> / manual:<iso>
+    # identity is printed, never linked (docs/DECISIONS.md entry 25).
+
+@dataclass(slots=True)
+class OpenLink:
+    href: str; label: str; external: bool
+
+def open_link(prop, *, document=None) -> OpenLink | None
+    # The listing's own page when a source carries one, else the exposé we
+    # hold, else None - which the page renders as no_link_reason(prop), not as
+    # a missing button. ResultRow.open_link carries it for the cards.
+def document_href(document) -> str | None    # /document/{id}, or a web URL
+def pick_document(documents) -> Document | None   # local copy first
+def no_link_reason(prop) -> str                   # German, for the None case
+
+# hofradar.web.uploads - where a reader's upload lives
+def uploads_dir() -> Path                    # $HOFRADAR_DATA_DIR/uploads
+def stored_upload_path(local_path) -> Path | None
+    # The readable file behind Document.local_path, or None. Refuses anything
+    # resolving outside uploads_dir().
+
 # Routes
+GET /document/{document_id}
+    # The stored exposé, served inline as application/pdf from uploads_dir().
+    # 404 for an unknown id or a document that only has a remote URL; 410 when
+    # local_path is set but the file is gone - each with a German sentence
+    # saying which, never a bare status.
+
 GET /merkliste
     # The Merkliste page. Uses saved_profile_params() (the two sliders) only to
     # score and label the cards - never to filter them (decision 21): a mark
     # outside the radius or budget still appears. Never applies the view
     # filters from the query string either. Renders all shortlisted properties
-    # (Property.shortlisted_at is not None), including score-rejected ones but
-    # excluding archived ones. total_in_db and the archived count in the status
-    # line are scoped to the marked set, not the whole database.
+    # (Property.shortlisted_at is not None), including score-rejected ones and
+    # ones with no Score row for the live profile_hash at all, but excluding
+    # archived and merged-away ones. The marked set is loaded from the table,
+    # not taken from scoring.ranked_properties, which joins Score and would
+    # drop an unscored mark (decision 25). total_in_db and the archived count
+    # in the status line are scoped to the marked, unmerged set.
 
 POST /property/{public_id}/merken
     # Toggles Property.shortlisted_at: None ↔ now. The only route that writes
     # that column on a reader's action; the legacy-triage branch and
-    # dedupe.merge also set it (see docs/DECISIONS.md entry 21). Renders
+    # dedupe.merge also set it (see docs/DECISIONS.md entry 21). Follows
+    # merged_into_id first, the way lifecycle.ingest does, so the mark lands on
+    # the row that is actually rendered. Renders
     # partials/merken_button.html for HTMX (hx-swap="outerHTML"), or redirects
     # with 303 for a plain form post.
 
