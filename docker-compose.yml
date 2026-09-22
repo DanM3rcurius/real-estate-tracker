@@ -38,6 +38,12 @@ services:
       HOFRADAR_SCHEDULE_CRON: ${HOFRADAR_SCHEDULE_CRON:-0 6 * * 1}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+    # Same image as the web app, so it inherits the Dockerfile HEALTHCHECK - a
+    # curl to :8000/healthz, a port this container never opens. That reported
+    # "unhealthy" on every box forever, which only teaches people to ignore the
+    # column. No check beats a check that is always red.
+    healthcheck:
+      disable: true
     depends_on:
       - hofradar
     restart: unless-stopped

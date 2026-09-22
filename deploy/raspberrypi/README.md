@@ -588,4 +588,5 @@ A restored database that predates the code is migrated on the next start
 | Caddy never gets a certificate | 443 does not reach the Pi (*On a FritzBox*), the DNS record points somewhere else, or you are behind CGNAT and it never could. *Telling where it stops* narrows it down. |
 | A yellow triangle on the Pi's FritzBox Freigabe | The external port you asked for belongs to another device or to the box itself, so this rule got a different one. See *On a FritzBox*. |
 | `hofradar.local` does not resolve, `ubuntu.local` does | The OS kept its default hostname (step 2). Use the name that resolves, or the IP. |
+| The scheduler container shows `unhealthy` | On a checkout from before the fix: the image's health check polls the web port, which the scheduler container never opens. It meant nothing. `hofradar-update` picks up the fix. |
 | `hofradar-health` shows throttling ≠ `0x0` | Power supply or cable. Not software. |
