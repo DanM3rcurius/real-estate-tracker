@@ -166,9 +166,9 @@ class TestConfidenceGates:
         assert REJECT_OBSERVATION_ONLY in result.reject_reasons
 
     def test_it_is_still_kept_in_the_database(
-        self, session, observation_only, profile: SearchProfile
+        self, session, observation_only, profile: SearchProfile, now: datetime
     ) -> None:
-        assert rescore_all(session, profile) == 1
+        assert rescore_all(session, profile, now=now) == 1
         assert ranked_properties(session, profile) == []
         kept = ranked_properties(session, profile, include_rejected=True)
         assert [prop.id for prop, _ in kept] == [observation_only.id]
@@ -201,7 +201,10 @@ class TestConfidenceGates:
             land_sqm=1_200,
             year_built=1975,
         )
-        rescore_all(session, profile)
+        # Pinned to the same clock the fixtures are dated against. Without it
+        # this scores against the wall clock, and the borderline property falls
+        # out of the ranking entirely once it drifts past a freshness band.
+        rescore_all(session, profile, now=now)
 
         by_id = {prop.id: score for prop, score in ranked_properties(session, profile)}
         assert by_id[borderline.id].final_score > by_id[weak_but_trusted.id].final_score
