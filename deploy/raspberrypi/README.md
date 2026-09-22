@@ -78,6 +78,11 @@ uname -m                        # must say aarch64
 
 If `uname -m` says `armv7l`, stop and reflash with the 64-bit image.
 
+**Check the name while you are here:** `hostname`. Ubuntu Server's image does
+not always take the Imager's hostname and comes up as `ubuntu`, and then every
+`hofradar.local` in this guide is `ubuntu.local` for you. The bootstrap prints
+the addresses it actually found at the end, so trust that over this page.
+
 ### Where is your SSD, exactly?
 
 **Find this out before touching anything.** There are two layouts and they need
@@ -261,8 +266,11 @@ must all be true, and on a German home line the first one frequently is not:
    or serve on IPv6 only (which many mobile networks can reach, and many
    corporate ones cannot). Check by comparing the WAN address in your router's
    status page with `curl -4 ifconfig.me`: if they differ, you are behind CGNAT.
-2. **Ports 80 and 443 are forwarded** to the Pi, and 80 stays open — that is
-   where the ACME challenge lands.
+2. **Port 443 is forwarded** to the Pi, TCP (and UDP, for HTTP/3). That is all
+   Caddy needs: it proves the name to Let's Encrypt over 443 itself
+   (TLS-ALPN). Forwarding 80 as well adds the `http://` → `https://` redirect
+   and a second way to prove the name, but it is optional, and a router that
+   wants 80 for itself can keep it.
 3. **A name points at you.** A `*.duckdns.org` subdomain is free; set
    `HOFRADAR_DOMAIN` and `DUCKDNS_TOKEN` and the bootstrap installs a timer that
    re-points the record every six hours, which matters because a home IP changes
@@ -276,6 +284,42 @@ only thing listening publicly.
 **Do not port-forward 8000 straight to the app instead.** That is plain HTTP:
 the password crosses the internet in clear text and so does every session
 cookie.
+
+#### On a FritzBox
+
+Internet → Freigaben → Portfreigaben, the Pi's entry. Three traps, all of them
+silent:
+
+- **An external port belongs to exactly one device.** A 443 rule left on an old
+  device - even one that is switched off - keeps the port, and the Pi's new
+  rule is quietly given some other external port instead. The only sign is a
+  yellow triangle on the rule: *„Für diese Freigabe wurden andere Ports extern
+  vergeben als von Ihnen gewünscht."* From outside it looks like *connection
+  refused*. Look for 443 on every device in the overview, delete the stray one,
+  then delete and re-add the Pi's rule: an existing rule is not moved back to
+  443 on its own.
+- **The box's own remote access can hold 443.** Internet → Freigaben →
+  FRITZ!Box-Dienste: if *Internetzugriff über HTTPS* uses 443, move it to a
+  high port. MyFRITZ keeps working and its app finds the new port by itself.
+- **Pin the Pi's address.** Tick *Diesem Netzwerkgerät immer die gleiche
+  IPv4-Adresse zuweisen* on its entry, so the forward and the Pi cannot drift
+  apart. A Pi on both Wi-Fi and ethernet shows up twice; the rule belongs on
+  the interface that actually has the address.
+
+A FritzBox loops its public address back inside, so once this works the
+`https://` name works from home too.
+
+#### Telling where it stops
+
+Test from **outside** - a phone on mobile data, not on your Wi-Fi. What the
+request gets back says which hop is missing:
+
+| From outside, `https://<name>/healthz` gives | Meaning |
+|---|---|
+| *connection refused* | The router is not forwarding 443 to the Pi - see *On a FritzBox*. The Pi cannot cause this: Caddy listens on every interface, and ufw drops rather than refuses. |
+| a timeout | The DNS record points at an old address, or something upstream drops the port. `dig +short <name>` against `curl -4 ifconfig.me`. |
+| a TLS error (*internal error*) | Caddy is reached and has no certificate yet. It retries on a growing backoff after failures; `sudo hofradar-compose restart caddy` tries now, and `sudo hofradar-compose logs --tail 50 caddy` says why the last try failed. |
+| `{"status":"ok"}` | Done. `/` should now send you to the login page. |
 
 ## What you get
 
@@ -541,5 +585,7 @@ A restored database that predates the code is migrated on the next start
 | App up, but not reachable from your phone | Bound to loopback (`HOFRADAR_BIND_ADDR`), or `HOFRADAR_PROXY=caddy` which forces loopback, or your phone is on the guest network. |
 | „Die Datenbank passt nicht zum Programm" in the UI | The schema is behind the code. `hofradar migrate` — see *Day-to-day*. It normally happens on start by itself. |
 | Forgot the password | `sudo hofradar-set-password`. |
-| Caddy never gets a certificate | Port 80 not forwarded, the DNS record points somewhere else, or you are behind CGNAT and it never could. See *Public, with a real certificate*. |
+| Caddy never gets a certificate | 443 does not reach the Pi (*On a FritzBox*), the DNS record points somewhere else, or you are behind CGNAT and it never could. *Telling where it stops* narrows it down. |
+| A yellow triangle on the Pi's FritzBox Freigabe | The external port you asked for belongs to another device or to the box itself, so this rule got a different one. See *On a FritzBox*. |
+| `hofradar.local` does not resolve, `ubuntu.local` does | The OS kept its default hostname (step 2). Use the name that resolves, or the IP. |
 | `hofradar-health` shows throttling ≠ `0x0` | Power supply or cable. Not software. |
