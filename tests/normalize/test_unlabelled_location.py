@@ -134,3 +134,37 @@ def test_a_listing_that_has_a_town_does_not_warn_about_one() -> None:
     listing = _normalize(description="Ein Hof.", location_raw="83022 Rosenheim")
 
     assert not any("location" in w or "town" in w for w in listing.warnings)
+
+
+# --------------------------------------------------------------------------
+# a town never spans a line
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # The capitalised line under an address is the next fact, not the
+        # second half of the town - "Vogtareuth\nKaufpreis" used to be one.
+        ("Sacherl\n83569 Vogtareuth\nKaufpreis: 595.000 EUR", "83569 Vogtareuth"),
+        ("83569 Vogtareuth\nScheune und Stall", "83569 Vogtareuth"),
+        # BLfD's Kurzinfo box renders the Landkreis as its own paragraph.
+        (
+            "Kurzinfo\n\n63825 Schöllkrippen\n\nLandkreis Aschaffenburg\n\nKaufpreis: 59.000 €",
+            "63825 Schöllkrippen, Landkreis Aschaffenburg",
+        ),
+        ("Hof in 83569 Vogtareuth (Landkreis Rosenheim)", "83569 Vogtareuth, Landkreis Rosenheim"),
+    ],
+)
+def test_a_town_stops_at_the_end_of_its_line(text: str, expected: str) -> None:
+    recovered = find_location_in_text(text)
+    assert recovered == expected
+    assert "\n" not in parse_location(recovered).town
+
+
+def test_a_kurzinfo_address_with_the_landkreis_below_it_geocodes_to_the_town() -> None:
+    listing = _normalize(
+        description="Kurzinfo\n\n63825 Schöllkrippen\n\nLandkreis Aschaffenburg\n\nKaufpreis: 59.000 €"
+    )
+    assert listing.postcode == "63825"
+    assert listing.town == "Schöllkrippen"

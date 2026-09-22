@@ -4,8 +4,9 @@
 <section class="page add-page">
   <h1>Inserat oder Exposé einfügen</h1>
   <p class="hint">
-    Eine URL, ein ganzer Exposé-Text oder beides. Der Text wird normalisiert,
-    gegen bekannte Objekte abgeglichen und in die Historie aufgenommen.
+    Eine URL, ein Exposé-Text, eine PDF-Datei – oder eine Kombination. Alles
+    wird normalisiert, gegen bekannte Objekte abgeglichen und in die Historie
+    aufgenommen; die PDF-Datei bleibt als Dokument am Objekt.
   </p>
 
   {% include "partials/notices.html" with context %}
@@ -31,7 +32,7 @@
   {% endif %}
   {% endif %}
 
-  <form method="post" action="/add" class="stack">
+  <form method="post" action="/add" class="stack" enctype="multipart/form-data">
     <label class="field">
       <span>Inserats-URL</span>
       <input type="url" name="url" value="{{ url_value }}" placeholder="https://…">
@@ -39,6 +40,10 @@
     <label class="field">
       <span>Exposé-Text</span>
       <textarea name="text" rows="14" placeholder="Ganzen Text hier einfügen …">{{ text_value }}</textarea>
+    </label>
+    <label class="field">
+      <span>Exposé (PDF)</span>
+      <input type="file" name="pdf" accept=".pdf,application/pdf">
     </label>
     <button class="btn" type="submit">Verarbeiten</button>
   </form>

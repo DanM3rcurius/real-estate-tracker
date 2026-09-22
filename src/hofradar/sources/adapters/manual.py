@@ -8,6 +8,15 @@ the rest of the pipeline unchanged.
 
 Role is PRIMARY: a human looked at the actual listing and pasted it in, which
 is at least as trustworthy as a crawler fetching the same page automatically.
+
+A PDF is a listing too, and often the only one there is: half the exposés a
+human finds are a broker's PDF behind a download link, and an Amtsblatt is
+nothing else. Refusing to read one would push the reader into copying the
+text out by hand - and the file itself, the evidence, would never be kept.
+So ``ingest_pdf`` takes an uploaded file and ``ingest_url`` notices when the
+URL it just fetched answered with a PDF instead of a page; both hand the
+bytes to the shared lift in ``_pdfutil`` and produce the same RawListing
+shape as any other source.
 """
 
 from __future__ import annotations
@@ -20,6 +29,11 @@ from datetime import UTC, datetime
 from hofradar.config import KeywordConfig, SearchProfile
 from hofradar.contracts import RawListing
 from hofradar.sources.adapters._htmlutil import extract_labeled_fields, raw_listing_from_html
+from hofradar.sources.adapters._pdfutil import (
+    DOCUMENT_KIND_UPLOAD,
+    is_pdf_response,
+    raw_listing_from_pdf,
+)
 from hofradar.sources.base import SourceAdapter, text_indicates_gone
 
 logger = logging.getLogger(__name__)
@@ -84,6 +98,17 @@ class ManualAdapter(SourceAdapter):
             return raw_listing_from_html(self.key, url, text)
         return _from_plain_text(self.key, url, text, http_status=None)
 
+    def ingest_pdf(self, url: str, data: bytes, *, filename: str | None) -> RawListing:
+        """Turn an uploaded exposé PDF into a RawListing.
+
+        ``PdfError`` is deliberately not caught here: the caller is the web
+        form, which is the only place that knows how to say "diese Datei
+        konnte nicht gelesen werden" to the person who chose the file.
+        """
+        return raw_listing_from_pdf(
+            self.key, url, data, kind=DOCUMENT_KIND_UPLOAD, document_title=filename
+        )
+
     async def ingest_url(self, url: str) -> RawListing | None:
         """Fetch ``url`` (politely, through the shared client) and ingest it."""
         try:
@@ -91,6 +116,16 @@ class ManualAdapter(SourceAdapter):
         except Exception as exc:  # noqa: BLE001 - a failed paste-fetch must not crash the UI
             logger.warning("%s: could not fetch %s: %s", self.key, url, exc)
             return None
+        if is_pdf_response(response.headers.get("content-type"), url, response.content):
+            # A PDF is never "gone" by its body text: ``text_indicates_gone``
+            # would be reading a binary blob decoded as latin-1, and a broker
+            # who withdraws an exposé takes the file down (404), never edits
+            # "nicht mehr verfügbar" into it. Status is the only evidence.
+            listing = raw_listing_from_pdf(
+                self.key, url, response.content, http_status=response.status_code
+            )
+            listing.listing_visible = response.status_code not in (404, 410)
+            return listing
         listing = raw_listing_from_html(self.key, url, response.text, http_status=response.status_code)
         listing.listing_visible = not (
             response.status_code in (404, 410) or text_indicates_gone(response.text)

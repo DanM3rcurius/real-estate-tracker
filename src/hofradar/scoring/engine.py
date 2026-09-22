@@ -23,13 +23,28 @@ from sqlalchemy.orm import selectinload
 
 from hofradar.contracts import CostResult, ScoreResult
 from hofradar.costmodel import estimate_costs
-from hofradar.db.enums import HIDDEN_USER_STATES, CapitalRisk, ListingStatus, VerificationStatus
+from hofradar.db.enums import (
+    HIDDEN_USER_STATES,
+    CapitalRisk,
+    ListingStatus,
+    PriceType,
+    VerificationStatus,
+)
 from hofradar.db.models import CostEstimate, Property, PropertySource, Score
 from hofradar.scoring._util import to_utc
 from hofradar.scoring.deal import deal_score
 from hofradar.scoring.fit import fit_score
 from hofradar.scoring.signals import confidence_score, freshness_score, hidden_score
 from hofradar.search import matches_search
+from hofradar.triage import (
+    DWELLING_FLAT,
+    OFFER_RENT,
+    TRIAGE_EVIDENCE_KEY,
+    verdict_from_evidence,
+)
+from hofradar.triage import (
+    decide as triage_decide,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from sqlalchemy.orm import Session
@@ -49,6 +64,17 @@ REJECT_EXCEPTIONAL_WITHOUT_DEVELOPMENT = "EXCEPTIONAL_BUDGET_WITHOUT_DEVELOPMENT
 REJECT_OBSERVATION_ONLY = "OBSERVATION_ONLY"
 REJECT_LISTING_GONE = "LISTING_REMOVED_OR_SOLD"
 REJECT_EXCLUDED_TYPE = "EXCLUDED_PROPERTY_TYPE"
+#: ``price_type == "rent"``: the listing offers the place for rent. Not
+#: subject to the substance override below - a rented farm is still not for
+#: sale (docs/DECISIONS.md entry 22).
+REJECT_RENTAL = "RENTAL_NOT_FOR_SALE"
+#: A stored System One verdict (``evidence["triage"]``) crossed the profile's
+#: ``gates.triage_reject_min_probability``. Keyed by the answer label
+#: ``hofradar.triage.decide`` returns (docs/DECISIONS.md entry 23).
+REJECT_TRIAGE: dict[str, str] = {
+    OFFER_RENT: "TRIAGE_SAYS_RENTAL",
+    DWELLING_FLAT: "TRIAGE_SAYS_FLAT",
+}
 
 FLAG_DRIVING_UNVERIFIED = "DRIVING_UNVERIFIED"
 FLAG_SHORTLIST_BLOCKED = "SHORTLIST_BLOCKED"
@@ -182,6 +208,22 @@ def _apply_gates(
             result.flags.append(FLAG_EXCLUSION_OVERRIDDEN)
         else:
             result.reject_reasons.append(REJECT_EXCLUDED_TYPE)
+
+    # A rental is never for sale, whatever else the listing says.
+    if str(getattr(prop, "price_type", None) or "").lower() == PriceType.RENT:
+        result.reject_reasons.append(REJECT_RENTAL)
+
+    # The System One second opinion, read through the same rule the crawl
+    # loop applies, so a property remembered before the gate existed still
+    # meets it on the next rescore.
+    verdict = verdict_from_evidence((getattr(prop, "evidence", None) or {}).get(TRIAGE_EVIDENCE_KEY))
+    if verdict is not None:
+        decision = triage_decide(
+            verdict, gates, has_substance=bool(getattr(prop, "outbuildings", None))
+        )
+        if decision.reject_reason is not None:
+            result.reject_reasons.append(REJECT_TRIAGE[decision.reject_reason])
+        result.flags.extend(decision.flags)
 
     result.rejected = bool(result.reject_reasons)
     if result.confidence_score < gates.min_confidence_for_shortlist:
@@ -335,12 +377,10 @@ def rescore_all(
 ) -> int:
     """Recompute ``CostEstimate`` and ``Score`` for every property. Idempotent.
 
-    ``now`` is passed straight through to :func:`score_property`, and defaults
-    to the wall clock as it does there. Pass it whenever the answer must not
-    depend on what day it is - a test that pins its fixtures to a fixed clock
-    and then lets this one drift gets a suite that passes today and fails in a
-    fortnight, when a property crosses a freshness band and the confidence gate
-    quietly drops it out of the ranking.
+    ``now`` is the clock every freshness and confidence band is measured
+    against; it defaults to the wall clock and exists so a test can score a
+    fixture built around a fixed date without the result drifting as the
+    calendar moves past it.
 
     Returns the number of properties actually (re)scored. With
     ``only_dirty=True`` a property whose ``Score`` row for this profile is newer

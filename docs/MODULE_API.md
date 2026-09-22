@@ -4,7 +4,15 @@ Every package below MUST expose exactly these names from its `__init__.py`.
 Other packages import ONLY through these. Nothing else is public.
 
 Shared types live in `hofradar.contracts` (RawListing, NormalizedListing,
-GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence).
+GeoResult, CostResult, ScoreResult, DuplicateVerdict, ChangeResult, Evidence,
+DocumentRef).
+`RawListing.warnings` is what the *adapter* could not do, in the reader's
+language (an exposé PDF it could not fetch, a scan with no text layer);
+`normalize_listing` carries it into `NormalizedListing.warnings` ahead of its
+own. `RawListing.documents` / `NormalizedListing.documents` are the
+`DocumentRef`s (`kind`, `url`, `title`, `page_count`, `local_path`) the facts
+were read from; `lifecycle.ingest` remembers each as a `Document` row. See
+`docs/DECISIONS.md` entry 24.
 `RawListing.page_kind` and `NormalizedListing.page_kind` are `PageKind`
 (`PAGE_KIND_LISTING` / `PAGE_KIND_INDEX` / `PAGE_KIND_UTILITY`, all defined in
 `hofradar.contracts`), defaulting to `"listing"` so a source that hands over
@@ -70,6 +78,7 @@ def head_revision() -> str | None
 ```python
 def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedListing: ...
 def parse_price(text: str | None) -> tuple[float | None, str]:   # (value, PriceType)
+def is_rent_price(text: str | None) -> bool                       # same monthly markers
 def parse_area(text: str | None) -> float | None                  # -> square metres
 def parse_german_number(text: str | None) -> float | None
 def parse_german_date(text: str | None) -> datetime | None
@@ -95,8 +104,16 @@ the page actually was — the fact every other field below it depends on. It doe
 not refuse: refusing is `hofradar.lifecycle.ingest`'s call (entry 19).
 
 `FeatureExtraction` is a dataclass with: `building_features, outbuildings,
-special_features, exclusion_flags, hidden_signals, is_foreclosure, is_monument,
-is_private_seller, is_off_market_signal` (lists of canonical lowercase tags / bools).
+special_features, exclusion_flags, hidden_signals, is_rental, is_foreclosure,
+is_monument, is_private_seller, is_off_market_signal` (lists of canonical
+lowercase tags / bools).
+
+A rental is one fact however it was said: `parse_price` returns
+`PriceType.RENT` for a monthly marker in the price string, `extract_features`
+sets `is_rental` for an offer to rent in the prose, and `normalize_listing`
+folds both into `price_type == "rent"` plus the
+`normalize.features.RENTAL_EXCLUSION_FLAG` (`"mietobjekt"`) tag in
+`exclusion_flags` and a German `warnings` line. See `docs/DECISIONS.md` entry 22.
 
 ## `hofradar.dedupe`
 
@@ -122,6 +139,9 @@ def ingest(session, listing: NormalizedListing, *, run_id: int | None = None,
     # Raises NotAListing - writing nothing at all, not even the Observation -
     # when listing.page_kind is not PAGE_KIND_LISTING. Checked before
     # find_duplicate: docs/DECISIONS.md entry 19.
+    # Writes one Document row per listing.documents entry, keyed by
+    # (property, document_url): re-ingesting the same exposé updates the row
+    # rather than stacking copies. Entry 24.
 def mark_missing(session, seen_property_ids: set[int], *, source: Source,
                  run_id: int | None = None, enumeration_complete: bool) -> list[ChangeResult]
     # enumeration_complete has no default on purpose: absence is only evidence
@@ -220,6 +240,8 @@ def freshness_score(prop, now) -> tuple[float, dict]
 def confidence_score(prop) -> tuple[float, dict]
 def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True,
                 now: datetime | None = None) -> int
+    # now: the clock freshness/confidence bands are measured against
+    # (default wall clock); tests pass their fixed fixture clock.
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
                       include_rejected: bool = False, include_hidden: bool = False,
                       filters: dict | None = None) -> list[tuple[Property, Score]]
@@ -244,6 +266,56 @@ SUPPORTED_FILTERS: frozenset[str]
 
 `rescore_all` writes `Score` rows keyed by `profile.profile_hash`, and is the
 function the web UI calls after a slider moves.
+
+Two gates are not subject to the farm-substance override that saves a
+keyword-excluded farm: `REJECT_RENTAL` (`RENTAL_NOT_FOR_SALE`, fires on
+`price_type == "rent"`) and the rental half of the triage verdict
+(`REJECT_TRIAGE[OFFER_RENT]`, `TRIAGE_SAYS_RENTAL`). The flat half
+(`REJECT_TRIAGE[DWELLING_FLAT]`, `TRIAGE_SAYS_FLAT`) keeps the override.
+Both triage gates read `Property.evidence["triage"]` through
+`hofradar.triage.decide`, the same function the crawl loop uses, so the two
+cannot drift. See `docs/DECISIONS.md` entries 22 and 23.
+
+## `hofradar.triage`
+
+```python
+class JevTriage:
+    @classmethod
+    def from_env(cls) -> JevTriage            # raises TriageUnavailable without TYPESAFE_API_KEY
+    async def classify(self, listing: NormalizedListing) -> TriageVerdict | None
+    def stats(self) -> dict                  # {"enabled": True, "model", "asked", "failed"}
+    async def aclose(self) -> None
+
+async def annotate(listing: NormalizedListing, gates: GateConfig, triage: JevTriage) -> TriageDecision | None
+    # The one path every entry point takes: classify, write the verdict to
+    # listing.evidence["triage"], append the decision's warnings, return the
+    # decision. None for a non-listing page or a failed call. The crawl loop
+    # and the paste box both call it; what a rejection means is the caller's
+    # (the crawl drops an unknown row, the paste box never drops anything).
+
+class TriageUnavailable(RuntimeError)
+class TriageVerdict            # model, offer_kind, offer_probabilities, dwelling_kind,
+                               # dwelling_probabilities, farm_substance, observed_at
+    def to_evidence(self) -> dict            # the Evidence shape plus the answers
+def verdict_from_evidence(entry: dict | None) -> TriageVerdict | None
+class TriageDecision           # reject_reason: "miete" | "wohnung" | None, flags, warnings
+def decide(verdict: TriageVerdict, gates: GateConfig, *, has_substance: bool) -> TriageDecision
+TRIAGE_EVIDENCE_KEY = "triage"
+OFFER_RENT = "miete"; DWELLING_FLAT = "wohnung"
+TYPESAFE_API_KEY_ENV, TYPESAFE_BASE_URL_ENV, JEV_MODEL_ENV   # the environment it reads
+```
+
+`classify` never raises into the crawl loop: a failed call is logged, counted
+in `stats()` and answered with `None`. `scripts/backtest_triage.py` asks the
+model about every property already in the database, grouped by the human
+verdict it carries (Merkliste, watched, rejected, archived, regex-typed rent,
+unjudged), and prints how many each threshold would reject or flag; with
+`--call --store` it also backfills `evidence["triage"]` on rows that have none
+- the pasted and CSV-imported rows the crawl never re-asks about - and rescores. `decide` lives in `hofradar.triage.rules`
+with no network import so the scoring engine can apply it to stored evidence.
+The threshold is `GateConfig.triage_reject_min_probability` (default 0.85, part
+of `profile_hash`; 1.0 disables the reject and keeps the flag). See
+`docs/DECISIONS.md` entry 23.
 
 ## `hofradar.sources`
 
@@ -279,6 +351,35 @@ MAPPABLE_ENTRY_FIELDS: frozenset[str]
 def raw_listing_from_html(source_key, url, html, *, http_status=None,
                           extra=None) -> RawListing
 def extract_labeled_fields(text: str) -> dict[str, str]
+    # "Label: value" lines, several per line when set apart by a tab or a
+    # run of two spaces; a label on its own line with a short numeric value
+    # on the next (numeric fields only, never location_raw); a bare room
+    # count ("28 Zimmer") on a short line. First value per field wins.
+    # Strings only - it parses nothing. DECISIONS entry 24.
+
+# hofradar.sources.adapters._pdfutil - the shared PDF lift, same station as
+# _htmlutil for the other container. Used by denkmalboerse, pdf_bulletin,
+# manual and web.routes.add:
+PDF_MAX_BYTES: int                      # 40 MB; larger is refused unread
+DOCUMENT_KIND_EXPOSE, DOCUMENT_KIND_UPLOAD: str
+WARNING_NO_TEXT_LAYER, WARNING_PDF_UNAVAILABLE: str   # German, reader-facing
+class PdfError(ValueError); class PdfUnavailable(PdfError)   # pypdf missing
+class PdfTooLarge(PdfError); class PdfUnreadable(PdfError)
+@dataclass class PdfText: pages: list[str]; warnings: list[str]
+    .page_count .has_text .text          # non-empty pages joined by a blank line
+def extract_pdf_text(data: bytes) -> PdfText           # raises PdfError
+def raw_listing_from_pdf(source_key, url, data, *, http_status=None, extra=None,
+                         kind=DOCUMENT_KIND_EXPOSE, document_title=None) -> RawListing
+    # The PDF *is* the listing (an upload, a pasted link to one): title from
+    # the first headline-like line, labelled fields, full text, a DocumentRef.
+def merge_pdf_into_listing(listing: RawListing, text: PdfText, *, document_url,
+                           document_title=None, kind=DOCUMENT_KIND_EXPOSE) -> None
+    # The page wins: only empty raw fields are filled; the PDF text is
+    # appended to description; warnings and a DocumentRef are added.
+def find_pdf_links(html, base_url) -> list[tuple[str, str]]
+def looks_like_pdf(data: bytes) -> bool
+def is_pdf_response(content_type, url, body=None) -> bool
+def pdf_title(text: PdfText) -> str | None
 def listing_title(tree: HTMLParser, url: str) -> str | None
     # JSON-LD name -> <h1> -> og:title -> <title>, with a trailing site name
     # stripped only when it matches og:site_name or the URL's own host.
@@ -345,6 +446,13 @@ async def run_pipeline(profile: SearchProfile, *, trigger: str = "manual",
                        source_keys: list[str] | None = None, dry_run: bool = False) -> SearchRun
 ```
 
+The NORMALIZE entry of `SearchRun.log` always carries `rejected`, `reasons`
+(`exclusion_flags`, `out_of_radius`, `not_a_listing:<kind>`, `rental`,
+`triage:miete`, `triage:wohnung`) and `triage` (`{"enabled": false}` without a
+key, else `{"enabled": true, "model", "asked", "failed"}`). A rental or a
+triage-rejected listing the database already knows is not counted there: it is
+ingested so the row learns the fact, and the scoring gate retires it.
+
 ## `hofradar.search`
 
 ```python
@@ -376,20 +484,55 @@ def redirect_to_saved(request: Request) -> RedirectResponse | None
     # Returns a 303 to the same path with the saved query string appended,
     # or None if the request already carries known parameters or reset=1 is set.
 
+# hofradar.web.query - what a template may put in an href
+def is_web_url(url: str | None) -> bool
+    # True only for http:// and https://. Registered on the Jinja environment
+    # as the test `{% if url is web_url %}`; an upload:<digest> / manual:<iso>
+    # identity is printed, never linked (docs/DECISIONS.md entry 25).
+
+@dataclass(slots=True)
+class OpenLink:
+    href: str; label: str; external: bool
+
+def open_link(prop, *, document=None) -> OpenLink | None
+    # The listing's own page when a source carries one, else the exposé we
+    # hold, else None - which the page renders as no_link_reason(prop), not as
+    # a missing button. ResultRow.open_link carries it for the cards.
+def document_href(document) -> str | None    # /document/{id}, or a web URL
+def pick_document(documents) -> Document | None   # local copy first
+def no_link_reason(prop) -> str                   # German, for the None case
+
+# hofradar.web.uploads - where a reader's upload lives
+def uploads_dir() -> Path                    # $HOFRADAR_DATA_DIR/uploads
+def stored_upload_path(local_path) -> Path | None
+    # The readable file behind Document.local_path, or None. Refuses anything
+    # resolving outside uploads_dir().
+
 # Routes
+GET /document/{document_id}
+    # The stored exposé, served inline as application/pdf from uploads_dir().
+    # 404 for an unknown id or a document that only has a remote URL; 410 when
+    # local_path is set but the file is gone - each with a German sentence
+    # saying which, never a bare status.
+
 GET /merkliste
     # The Merkliste page. Uses saved_profile_params() (the two sliders) only to
     # score and label the cards - never to filter them (decision 21): a mark
     # outside the radius or budget still appears. Never applies the view
     # filters from the query string either. Renders all shortlisted properties
-    # (Property.shortlisted_at is not None), including score-rejected ones but
-    # excluding archived ones. total_in_db and the archived count in the status
-    # line are scoped to the marked set, not the whole database.
+    # (Property.shortlisted_at is not None), including score-rejected ones and
+    # ones with no Score row for the live profile_hash at all, but excluding
+    # archived and merged-away ones. The marked set is loaded from the table,
+    # not taken from scoring.ranked_properties, which joins Score and would
+    # drop an unscored mark (decision 25). total_in_db and the archived count
+    # in the status line are scoped to the marked, unmerged set.
 
 POST /property/{public_id}/merken
     # Toggles Property.shortlisted_at: None ↔ now. The only route that writes
     # that column on a reader's action; the legacy-triage branch and
-    # dedupe.merge also set it (see docs/DECISIONS.md entry 21). Renders
+    # dedupe.merge also set it (see docs/DECISIONS.md entry 21). Follows
+    # merged_into_id first, the way lifecycle.ingest does, so the mark lands on
+    # the row that is actually rendered. Renders
     # partials/merken_button.html for HTMX (hx-swap="outerHTML"), or redirects
     # with 303 for a plain form post.
 

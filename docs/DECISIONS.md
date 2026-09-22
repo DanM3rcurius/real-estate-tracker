@@ -646,3 +646,277 @@ So the ranked path and the degraded path cannot drift.
 requested `/` with parameters in the same `TestClient` — cookies are kept across
 requests in the test harness, so a following bare `/` may redirect and the response
 will carry the saved filters in its redirect target.
+
+---
+
+## 22. A rental is a price type, not an exclusion keyword, and substance cannot override it
+
+**Decision.** `PriceType.RENT` (`"rent"`) is a value of `price_type`.
+`parse_price` returns it for any monthly marker in the price string
+("Kaltmiete", "Warmmiete", "/Monat", "mtl.", "zu vermieten"), and
+`extract_features` sets `is_rental` for phrasings in the prose that describe
+the *offer* ("zu vermieten", "zur Miete", "Kaltmiete", "Kaution", ...).
+`normalize_listing` folds both into one fact: `price_type == "rent"`, the
+`mietobjekt` tag in `exclusion_flags`, and a German `warnings` line. The
+scoring engine rejects on `price_type` alone (`REJECT_RENTAL`,
+`RENTAL_NOT_FOR_SALE`) and the crawl loop drops an *unknown* rental before
+geocoding, counted as `rental` in the NORMALIZE entry. A rental the database
+already holds is not dropped but ingested, so the row learns the fact and the
+gate retires it. `_htmlutil.extract_labeled_fields` keeps a rent label in the
+lifted value (`"Kaltmiete: 1.250 €"`), because the label is the fact.
+
+**Why.** "Bauernhaus, 1.800 € Kaltmiete" parsed as an asking price of 1,800 €
+and reached the top ten as the cheapest farm in Bavaria - the deal score
+divides price by area, and nothing anywhere asked whether the figure was
+monthly. The negative keyword list had "Wohnung zur Miete" and nothing else
+about rent, and even a match there is overridable by farm substance
+(`FLAG_EXCLUSION_OVERRIDDEN`, entry on the exclusion gate), which is exactly
+wrong for a rental: a Vierseithof "zu vermieten" has all the substance in the
+world and is still not for sale. So rent is modelled on the axis it belongs
+to - what the number *means* - rather than as one more word in a list whose
+matches a Stadel can cancel.
+
+**Why the value is kept.** `price` stays 1,800 with `price_type = rent`
+rather than being nulled. The source said it; dropping a fact is the silence
+this codebase keeps producing (entries 17-19). The UI renders the type beside
+the figure, and a rejected row is off the radar anyway.
+
+**Why "vermietet" does not fire.** "Teilweise vermietet" is a hidden-market
+phrase in `config/keywords.yaml` (a farm with a tenant in the Austragshaus is
+a farm being sold), and "Mieteinnahmen" is a selling point. Only the offer
+counts. The price-field pattern may match a bare "Monat" because it only
+ever sees the price field; the prose pattern may not.
+
+**Flats.** The same crawl yielded "3-Zimmer-Wohnung" by the dozen from broker
+sitemaps. Those are a *type*, so they went where types go: the `negative`
+vocabulary gained the flat words the list never had (Etagenwohnung,
+Dachgeschosswohnung, Maisonette, Penthouse, Apartment, "Zimmer-Wohnung" /
+"Zi-Whg", matched punctuation-insensitively so "2-Zimmer-Wohnung" and
+"2 Zimmer Wohnung" are one term). A farm advertising "zwei Wohnungen" keeps
+its substance override; that is the existing gate working as designed.
+
+---
+
+## 23. A System One model answers the typed questions a regex cannot, as evidence read by one rule
+
+**Decision.** `hofradar.triage` asks TypeSafe's Jev (a System One model:
+typed questions in, a probability distribution over the allowed labels out,
+one fast call) three things about every listing the deterministic filters
+could not reject: *is this for sale or for rent?* (`angebotsart`: kauf /
+miete / unklar), *what is it?* (`objektart`: hofstelle / haus / wohnung /
+grundstueck / gewerbe / sonstiges) and *does the text show real farm
+substance?* (`hofsubstanz`, a 0-1 noul). The whole answer - model version,
+every probability - is stored as `evidence["triage"]`. One deterministic
+function, `triage.decide(verdict, gates, has_substance=...)`, turns it into
+a rejection (`miete` or `wohnung` at or above
+`gates.triage_reject_min_probability`, default 0.85), a flag
+(`TRIAGE_DOUBTS_FARMSTEAD` when the likeliest answer is a rental or a flat
+but under the threshold), or nothing. The crawl loop applies it before
+geocoding (counted as `triage:miete` / `triage:wohnung`, same known-row rule
+as entry 22) and `scoring.engine` applies it again on every rescore
+(`TRIAGE_SAYS_RENTAL` / `TRIAGE_SAYS_FLAT`), so a property remembered before
+the gate existed meets it the next time it is scored. Without
+`TYPESAFE_API_KEY` the stage is absent and the NORMALIZE entry says
+`triage: {enabled: false}`; with it, `asked` and `failed` are logged per run.
+
+**Why a System One model and not the LLM review.** The review (entry 9)
+runs last on ≤100 survivors because a frontier model call per crawled page
+is the cost the ordering exists to avoid. This question is the opposite
+shape: every page, three fixed labels, no prose wanted back. Jev is priced
+and built for that (its answers are constrained to the labels we chose, so
+it cannot invent a fourth kind of dwelling or write a number), which is why
+it can sit *before* geocoding, where a Nominatim call per rental is the
+expensive thing.
+
+**Why it is not the scoring engine.** The question came up whether scoring
+itself should move to the model. No: scores are arithmetic over facts and
+two sliders, recomputed per `profile_hash` when a slider moves (entry 1),
+and a model verdict per slider position is neither recomputable nor
+explainable. The model decides *classification* questions; the numbers stay
+deterministic. Invariant 6 is unchanged.
+
+**Why the rule is thresholded and lives in one place.** A verdict is
+evidence, and evidence is read through a rule the user can see and tune
+(`triage_reject_min_probability` is a gate, so it is part of
+`profile_hash`; set it to 1.0 and the reject is off, the flag stays). The
+rule for a flat verdict has the same escape hatch as the keyword gate:
+deterministic farm substance (outbuildings the normaliser found) turns a
+reject into a flag, because "Wohnung im Austragshaus" of a farm sold whole is
+still the farm. The rental verdict has no escape hatch, per entry 22. Putting
+`decide` in `triage.rules` with no network import lets the scoring engine
+call it without pulling in the client.
+
+**Why our own POST and not `typesafe-sdk`.** The SDK is built on `httpx2`,
+which `respx` cannot mock, and this suite's rule is that every outbound call
+is mocked with `respx` and asserted on the request that would have been made.
+The documented call is one endpoint, one bearer header and one JSON body;
+owning it keeps the question texts - the part that actually decides what is
+rejected - in `triage/jev.py` under version control. `TYPESAFE_BASE_URL`
+and `HOFRADAR_JEV_MODEL` (default `jev-latest`) are honoured.
+
+**What it may not do.** It never verifies availability (invariant 4: its
+silence proves nothing and it is not a source), never writes a number, and a
+failed call is counted and the listing proceeds unasked - a triage outage
+must not become an empty radar.
+
+**One entry point, and the paste box is one of them.** `triage.annotate` is
+the only way a listing gets its verdict: classify, write the evidence, append
+the warnings, return the decision. The crawl loop calls it and drops an
+unknown row on a rejection; the paste box calls it and drops nothing - a
+human chose to paste it - so the verdict shows on the confirmation page and
+the scoring gate retires the row. A configured-but-failing triage is said on
+that page (`TRIAGE_FAILED_NOTICE`); an unconfigured one is silent there,
+exactly as in the crawl, because the run log already carries that fact.
+
+**The threshold is measured, not believed.** `scripts/backtest_triage.py`
+asks the model about every property already judged by a human and prints,
+per verdict group and per threshold, how many would be rejected or flagged.
+The groups are deliberately not summed into one accuracy number: "archived"
+covers too-far and too-dear as well as flat-and-rented, so the table has to
+be read, not scored. The Merkliste column is the one that must show zero.
+With `--store` the same run backfills `evidence["triage"]` on rows that have
+none - the pasted and CSV rows the crawl never re-asks about - which is the
+one write the script makes, on the precedent of the LLM review writing its
+summary; it creates nothing (invariant 1).
+
+---
+
+## 24. A PDF exposé is the listing's own words, read behind the link and accepted at the door
+
+**Decision.** A PDF is lifted the same way an HTML page is: text out,
+labelled lines picked up, typed parsing left to `hofradar.normalize`. The
+lift lives once, in `hofradar.sources.adapters._pdfutil`, and is used in
+three places. `DenkmalboerseAdapter.fetch_detail` follows the "zum Exposé"
+link on every detail page, downloads the PDF through the polite client and
+merges it into the listing - the page's own Kurzinfo keeps precedence, the
+PDF fills the holes and its full text is appended to the description.
+`/add` accepts an uploaded PDF next to the URL and the text box, and a pasted
+URL that answers with a PDF is read as one. Every document a listing's facts
+were read from rides along as a `DocumentRef` (`RawListing.documents` ->
+`NormalizedListing.documents`) and `lifecycle.ingest` remembers it as a
+`Document` row, one per (property, url), so the dossier's "Dokumente" list
+links to the exposé and an uploaded file is kept under
+`$HOFRADAR_DATA_DIR/uploads/` by content hash. `pypdf` is a core dependency
+now; the `[pdf]` extra remains as an empty alias so existing install lines
+keep working.
+
+**Why.** On a live sample of 30 in-scope Denkmalbörse objects (2026-09-20),
+29 linked an exposé PDF. The HTML alone left the room count empty on all 30,
+the usable area on 24 and the living area on 9 - the "k. A." cells the reader
+sees on the dossier - while the same facts sat one click away in a document
+the adapter never opened. The prose is the bigger loss: `Gewölbekeller`,
+`stark sanierungsbedürftig`, `Scheune`, `Alleinlage` are what
+`extract_features` and the cost model key off, and they live in the exposé,
+not in the Kurzinfo box. And the reader's own case is the same shape: a
+broker sends an exposé as a PDF, and until now the only way in was to copy
+its text into the box by hand.
+
+**Why the label reader changed with it.** Exposés set facts in layouts an
+HTML detail page does not: two on one line
+(`Wohnfläche: ca. 1.050 m²          Grundstücksfläche: ca. 7.112 m²`, BLfD's
+own template), a label above its value (`Wohnfläche` / `~118 m²`, every
+broker's "Eckdaten" table), and a bare count (`28 Zimmer`).
+`extract_labeled_fields` now reads all three, under guards that keep it a
+string matcher and not a guesser: a run of two spaces or a tab separates
+facts on a line, a single space never does; a label-above-value pair is only
+taken for the numeric fields and only when the value line is short and
+carries a digit or a price marker - never for `Lage`/`Ort`, whose next line
+is prose on every exposé and would block the address recovery of entry 18;
+a bare room count is only read off a line short enough to be a fact-box
+entry, so "die 3-Zimmer-Wohnung im DG" never becomes the house. The same
+work found that a recovered town could span a line ("Vogtareuth\nKaufpreis"
+was one town); it cannot any more.
+
+**What is refused loudly.** A scanned PDF with no text layer yields nothing,
+and that is a `warnings` line on the listing (shown on `/add` and stored on
+the observation), not an empty description that looks like a thin advert. A
+PDF over `PDF_MAX_BYTES` (40 MB) is not read at all. A failed exposé fetch on
+the Denkmalbörse - HTTP error, not a PDF, unreadable - is a warning on the
+listing and never a reason to `mark_enumeration_incomplete`: the listing
+exists, only the enrichment failed, and invariant 4b is about absence, not
+about thin facts. The adapter option `expose_pdf: false` switches the
+2-14 MB-per-object download off for an operator on a metered line, and says
+so in `config/sources.yaml`.
+
+**What it may not do.** The lift parses nothing - "ca. 1.050 m²" is still
+`hofradar.normalize`'s to type, and a PDF's page kind is `listing` because a
+reader or a detail page handed it over as one advert. It is not OCR: a scan
+is reported, not guessed at.
+
+
+## 25. An identity is not an address, and a mark is not a score
+
+**The rule.** A template may only put a URL in an `href` when a browser can
+follow it: `http://` or `https://` and nothing else, which is what
+`web/query.is_web_url` answers and the Jinja test `{% if url is web_url %}`
+enforces at the point of use. Everything else the system uses to *name* a
+listing - `upload:<digest>` for a PDF the reader handed over, `manual:<iso>`
+for a text paste with no page of its own - is printed as what it is, never
+offered as somewhere to go. The stored exposé is reachable instead, through
+`GET /document/{id}`, which serves files from `web/uploads.uploads_dir()` and
+refuses a `local_path` that resolves anywhere else.
+
+And: the Merkliste's candidate set comes from the `properties` table, not from
+the ranking. A marked property with no `Score` row for the live `profile_hash`
+is still the reader's, and is rendered unscored.
+
+**What went wrong.** Both halves were the same failure in two places, and both
+were reported from use in one sentence each: "the uploaded PDFs show nothing
+when clicking *Inserat öffnen*", and "*Merkliste* is not working any more".
+
+The first: `/add` writes the PDF to disk *before* anything parses it, because
+the file is the evidence (entry 24), and names the listing by the file's own
+digest so a re-upload lands on the same property (entry 16). That digest then
+went straight into the dossier's `href` - and into the fact table's *Quelle*
+link, the *Quellen* list and the *Dokument* link. A browser has no `upload:`
+scheme, so all four did nothing at all when clicked, without an error, a
+console message or a cursor that changed. Meanwhile the file itself sat on
+disk with **no route in the application serving it**: the one artefact that
+*was* the listing was the one thing unreachable.
+
+The second: `scoring.ranked_properties` joins `Score` on the live
+`profile_hash`, so a property nothing has scored under that hash is not in the
+ranking at all. A hand-added property is exactly that - `/add` stores, it does
+not score, and the first score is written by the next page load's rescore. Any
+rescore that cannot write leaves it unscored for longer: a crawl holding
+SQLite's write lock is the everyday case, and the fix that stopped the radar
+500ing on that (rolling back and rendering the last stored scores) turned a
+visible failure into a silent one for rows that had no stored scores yet. The
+marked property then vanished from the Merkliste under
+*"Alle gemerkten Objekte sind archiviert."* - a sentence stating a cause the
+page had never checked. A row merged into another was lost the same way:
+`/merken` happily wrote `shortlisted_at` on a row `build_results` skips.
+
+**Why the fix is shaped this way.** Neither half is a rendering detail.
+
+`best_url` keeps returning the identity, because that is what the JSON payload,
+the CSV export and the digest quote, and truncating it there would lose a fact.
+The decision about what is *clickable* belongs at the one place that builds a
+link - `open_link`, which prefers the listing's own page, falls back to the
+exposé we hold, and returns `None` when there is neither. `None` is then a
+sentence on the page (`NO_LINK_MANUAL`, `NO_LINK_NONE`), never a missing
+button: "there is no online listing, only the exposé" is information the reader
+needs, and entry 18's rule about dropped facts applies to links as well.
+`document_href` prefers our own stored copy over the remote URL, because the
+copy still opens after the broker takes the exposé down - which is the whole
+reason the file is written at all.
+
+For the Merkliste: `include_rejected` was already forced on and the slider gate
+already skipped (entry 21), on the reasoning that a mark is the human's and
+outranks the machine. A *missing score row* is not even a machine verdict - it
+is bookkeeping - so letting it hide a mark was strictly worse than the gate
+this entry's predecessor had already ruled out. `_marked_pairs` loads the
+marked, unmerged set directly and merges it into whatever the ranking returned;
+`_sort_key` already handles a `None` score and the card already says
+"noch nicht bewertet". `/merken` follows `merged_into_id` the way `ingest`
+does, so a click always lands on a row that can be shown, and `total_in_db`
+stops counting merged rows so the page's own numbers agree with it.
+
+**What it may not do.** Serving a stored file is not serving a path: anything
+outside the uploads directory is refused, and a `local_path` whose file is gone
+is a 410 naming the path, not a bare 404. The Merkliste still honours
+archiving, and still counts what it hides. And the empty page no longer names
+archiving as the cause unless the archived count actually accounts for every
+mark - the failure here was a true-sounding sentence, so a sentence that can
+only be true is part of the fix.
+

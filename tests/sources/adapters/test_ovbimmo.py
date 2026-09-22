@@ -127,10 +127,13 @@ async def test_fetch_detail_against_the_real_capture(adapter, read_fixture) -> N
     # "Label: value" line, and this page's eps-item blocks render the value
     # and its label on separate lines with the value FIRST
     # ("690.000,00 €\n\nKaufpreis", not "Kaufpreis: 690.000,00 €"). So the
-    # generic extractor genuinely gets nothing here - this is not something
-    # this task fixes; see docs/SOURCES.md.
+    # generic extractor genuinely gets nothing from those blocks; see
+    # docs/SOURCES.md. The one exception is the room count, which the page
+    # also states as a bare "* Gesamt 7 Zimmer" bullet - the shape
+    # extract_labeled_fields reads since the exposé-PDF work (a BLfD fact box
+    # writes "28 Zimmer" the same way).
     assert listing.price_raw is None
-    assert listing.rooms_raw is None
+    assert listing.rooms_raw == "7"
     assert listing.living_raw is None
     assert listing.land_raw is None
     # ...with two exceptions, read straight out of the dataLayer because

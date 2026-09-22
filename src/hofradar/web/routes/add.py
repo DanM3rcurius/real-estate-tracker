@@ -5,23 +5,38 @@ paper, not by a crawler. So there is one text area: drop a URL or an entire
 exposé in, and it goes through the same normalise -> dedupe -> lifecycle path a
 crawled listing would. Every one of those modules is imported lazily and each
 failure is reported as a sentence, because this form must never eat a paste.
+
+The third way in is a file: most brokers answer a request with a PDF and
+nothing else, so the exposé itself can be uploaded here (or linked, when the
+URL points straight at the PDF). The file is written to disk before it is
+parsed, because it - not what we read out of it - is the evidence, and it is
+named by its own digest so the same exposé uploaded twice updates one
+property instead of creating a second.
 """
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from hofradar.contracts import PAGE_KIND_INDEX, PAGE_KIND_UTILITY
+from hofradar.contracts import PAGE_KIND_INDEX, PAGE_KIND_UTILITY, RawListing
 from hofradar.db.enums import SourceRole
 from hofradar.db.models import Source
 from hofradar.web import lazy
 from hofradar.web.deps import get_db, profile_from_query, render
+from hofradar.web.uploads import (
+    MANUAL_URL_PREFIX,
+    UPLOAD_DIGEST_LEN,
+    UPLOAD_URL_PREFIX,
+    uploads_dir,
+)
 
 router = APIRouter(tags=["add"])
 
@@ -45,6 +60,65 @@ INGEST_REFUSAL_NOTICES: dict[str, str] = {
 }
 
 INGEST_REFUSAL_FALLBACK = "Die eingefügte Seite ist kein Inserat. Es wurde nichts gespeichert."
+
+#: The PDF lift lives in `sources`, which the web layer never imports at
+#: module level - a half-written sibling must not stop this page from
+#: rendering. Resolved through `lazy` at call time like every other one.
+PDFUTIL_MODULE = "hofradar.sources.adapters._pdfutil"
+
+#: Uploaded exposés are kept next to the database, under the same data
+#: directory. Where that is, and what the two pseudo-URL prefixes mean, is
+#: owned by ``hofradar.web.uploads``: ``routes/documents.py`` serves the same
+#: files back and the two must not disagree about where they are.
+_BYTES_PER_MB = 1024 * 1024
+
+#: Raw fields that, on their own, still make a listing worth remembering.
+_CONTENT_FIELDS = (
+    "price_raw",
+    "land_raw",
+    "living_raw",
+    "usable_raw",
+    "rooms_raw",
+    "year_raw",
+    "location_raw",
+    "postcode",
+    "town",
+)
+
+UPLOAD_TOO_LARGE_NOTICE = (
+    "Die Datei „{name}“ ist größer als {limit} MB und wurde nicht gelesen. "
+    "Ein Exposé ist kleiner – bitte die PDF-Datei selbst hochladen, nicht die "
+    "Bildermappe."
+)
+UPLOAD_NOT_A_PDF_NOTICE = (
+    "Die Datei „{name}“ ist keine PDF-Datei und wurde nicht gelesen."
+)
+UPLOAD_UNREADABLE_NOTICE = (
+    "Die PDF-Datei „{name}“ konnte nicht gelesen werden ({error}). Es wurde "
+    "nichts daraus übernommen."
+)
+UPLOAD_NOT_STORED_NOTICE = (
+    "Die PDF-Datei konnte nicht abgelegt werden ({error}) – sie wird trotzdem "
+    "gelesen, bleibt aber nicht als Dokument erhalten."
+)
+UPLOAD_EMPTY_NOTICE = (
+    "Aus der Datei „{name}“ ließ sich nichts lesen. Es wurde nichts gespeichert "
+    "– bitte den Exposé-Text zusätzlich einfügen."
+)
+NOTHING_SUBMITTED_NOTICE = (
+    "Bitte eine Inserats-URL, einen Exposé-Text oder eine PDF-Datei angeben."
+)
+
+
+@dataclass(slots=True)
+class _Upload:
+    """A PDF the reader chose, validated and already on disk."""
+
+    data: bytes
+    filename: str
+    url: str
+    local_path: str | None
+
 
 #: `get_adapter` reads the adapter name out of `Source.config`, which is where
 #: `sync_sources_to_db` writes it. A row created here has to carry it too, or
@@ -86,6 +160,38 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+#: What the confirmation page says when the triage was configured but the call
+#: failed. Not saying it would make an outage look like a clean bill of health.
+TRIAGE_FAILED_NOTICE = (
+    "Die Triage (Jev) war nicht erreichbar - das Objekt wurde ohne Zweitmeinung gespeichert."
+)
+
+
+async def _triage_paste(listing: Any, profile: Any, degraded: list[lazy.Degraded]) -> None:
+    """The System One second opinion, through the same ``annotate`` the crawl
+    loop uses (decision 23). The paste box never drops a listing - a human
+    chose to paste it - so the verdict rides along as evidence and a warning
+    on the confirmation page, and the scoring gate does the rejecting. Without
+    ``TYPESAFE_API_KEY`` nothing happens, exactly as in the crawl."""
+    try:
+        triage_cls = lazy.load("hofradar.triage:JevTriage")
+        unavailable = lazy.load("hofradar.triage:TriageUnavailable")
+        annotate = lazy.load("hofradar.triage:annotate")
+    except lazy.ModuleUnavailable as exc:
+        degraded.append(lazy.Degraded(exc.user_message, detail=repr(exc.original)))
+        return
+    try:
+        triage = triage_cls.from_env()
+    except unavailable:
+        return
+    try:
+        await annotate(listing, profile.gates, triage)
+        if triage.failed:
+            degraded.append(lazy.Degraded(TRIAGE_FAILED_NOTICE))
+    finally:
+        await triage.aclose()
+
+
 def _get_adapter(source: Source) -> Any:
     """Build the manual adapter for this source row.
 
@@ -102,6 +208,116 @@ def _get_adapter(source: Source) -> Any:
         configs = lazy.call("hofradar.config:load_config").sources
         manual = next(cfg for cfg in configs if cfg.key == MANUAL_SOURCE_KEY)
         return get_adapter(manual)
+
+
+def _store_upload(data: bytes, digest: str) -> tuple[str | None, lazy.Degraded | None]:
+    """Write the file to disk before a parser has looked at it.
+
+    A full disk or a read-only volume costs the document reference, not the
+    listing: the facts were in the bytes we already hold, so the paste is
+    still processed and the reader is told what was lost.
+    """
+    path = uploads_dir() / f"{digest}.pdf"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    except OSError as exc:
+        return None, lazy.Degraded(UPLOAD_NOT_STORED_NOTICE.format(error=type(exc).__name__))
+    return str(path), None
+
+
+async def _accept_upload(pdf: UploadFile | None) -> tuple[_Upload | None, list[lazy.Degraded]]:
+    """Validate the chosen file and put it on disk, before anything parses it.
+
+    An empty file input - the normal case, the reader pasted text instead -
+    is not a failure and produces no notice. Everything else that cannot be
+    used produces one: a file silently ignored is the bug this codebase
+    keeps having.
+    """
+    if pdf is None:
+        return None, []
+    filename = (pdf.filename or "").strip()
+    data = await pdf.read()
+    if not filename or not data:
+        return None, []
+
+    try:
+        pdfutil = lazy.load(PDFUTIL_MODULE)
+    except lazy.ModuleUnavailable as exc:
+        return None, [lazy.Degraded(exc.user_message, detail=repr(exc.original))]
+
+    if len(data) > pdfutil.PDF_MAX_BYTES:
+        limit = pdfutil.PDF_MAX_BYTES // _BYTES_PER_MB
+        return None, [lazy.Degraded(UPLOAD_TOO_LARGE_NOTICE.format(name=filename, limit=limit))]
+    if not pdfutil.looks_like_pdf(data):
+        return None, [lazy.Degraded(UPLOAD_NOT_A_PDF_NOTICE.format(name=filename))]
+
+    digest = hashlib.sha256(data).hexdigest()[:UPLOAD_DIGEST_LEN]
+    local_path, note = _store_upload(data, digest)
+    upload = _Upload(
+        data=data,
+        filename=filename,
+        url=f"{UPLOAD_URL_PREFIX}{digest}",
+        local_path=local_path,
+    )
+    return upload, [note] if note is not None else []
+
+
+def _apply_upload(
+    raw: RawListing, upload: _Upload, *, source: Source, page_wins: bool
+) -> tuple[RawListing, list[lazy.Degraded]]:
+    """Fold the uploaded PDF into what the reader otherwise handed over.
+
+    ``page_wins`` is true when there is already a listing from the reader's
+    own words or from a fetched page; then the PDF only fills the holes in
+    it, because a human's summary beats a cover page. With neither, the PDF
+    is the listing.
+    """
+    try:
+        pdfutil = lazy.load(PDFUTIL_MODULE)
+    except lazy.ModuleUnavailable as exc:
+        return raw, [lazy.Degraded(exc.user_message, detail=repr(exc.original))]
+
+    try:
+        if page_wins:
+            pdfutil.merge_pdf_into_listing(
+                raw,
+                pdfutil.extract_pdf_text(upload.data),
+                document_url=upload.url,
+                document_title=upload.filename,
+                kind=pdfutil.DOCUMENT_KIND_UPLOAD,
+            )
+        else:
+            parsed = _get_adapter(source).ingest_pdf(
+                upload.url, upload.data, filename=upload.filename
+            )
+            # The listing's identity stays whatever the reader gave: a URL
+            # they pasted wins, and only a PDF-only submission is identified
+            # by the file's own digest.
+            parsed.url = raw.url
+            raw = parsed
+    except pdfutil.PdfUnavailable:
+        return raw, [lazy.Degraded(pdfutil.WARNING_PDF_UNAVAILABLE)]
+    except pdfutil.PdfError as exc:
+        return raw, [
+            lazy.Degraded(
+                UPLOAD_UNREADABLE_NOTICE.format(name=upload.filename, error=type(exc).__name__)
+            )
+        ]
+
+    for ref in raw.documents:
+        if ref.url == upload.url and upload.local_path:
+            ref.local_path = upload.local_path
+    return raw, []
+
+
+def _has_content(raw: RawListing) -> bool:
+    """Is there anything here to remember - a title, prose or one fact?"""
+    return bool(
+        raw.title
+        or raw.description
+        or any(getattr(raw, name, None) for name in _CONTENT_FIELDS)
+    )
 
 
 @router.get("/add")
@@ -126,14 +342,16 @@ async def add_submit(
     session: Session = Depends(get_db),
     url: str = Form(default=""),
     text: str = Form(default=""),
+    pdf: UploadFile | None = File(default=None),
 ):
     profile = profile_from_query(request.query_params, session=session)
     url, text = url.strip(), text.strip()
-    degraded: list[lazy.Degraded] = []
     result: dict[str, Any] | None = None
 
-    if not url and not text:
-        degraded.append(lazy.Degraded("Bitte eine Inserats-URL oder einen Exposé-Text angeben."))
+    upload, degraded = await _accept_upload(pdf)
+
+    if not url and not text and upload is None:
+        degraded.append(lazy.Degraded(NOTHING_SUBMITTED_NOTICE))
         return render(
             request,
             "pages/add.html",
@@ -150,11 +368,16 @@ async def add_submit(
     source = manual_source(session)
 
     try:
-        from hofradar.contracts import RawListing
-
+        # A pasted URL identifies the listing; failing that, an uploaded file
+        # does, by its digest, so the same exposé sent twice updates one row.
+        # Only a bare text paste has nothing stable to be identified by.
+        fallback_url = (
+            upload.url if upload is not None
+            else f"{MANUAL_URL_PREFIX}{datetime.now(UTC).isoformat(timespec='seconds')}"
+        )
         raw = RawListing(
             source_key=MANUAL_SOURCE_KEY,
-            url=url or f"manual:{datetime.now(UTC).isoformat(timespec='seconds')}",
+            url=url or fallback_url,
             description=text or None,
             title=(text.splitlines()[0][:200] if text else None),
             fetched_at=datetime.now(UTC),
@@ -183,12 +406,14 @@ async def add_submit(
                     parsed.description = parsed.description or text
                     raw = parsed
 
+        fetched_page = False
         if url:
             try:
                 adapter = _get_adapter(source)
                 fetched = await _maybe_await(adapter.fetch_detail(url))
                 if fetched is not None:
                     raw = fetched
+                    fetched_page = True
                     if text and not raw.description:
                         raw.description = text
             except lazy.ModuleUnavailable as exc:
@@ -201,6 +426,32 @@ async def add_submit(
                     )
                 )
 
+        if upload is not None:
+            raw, upload_notes = _apply_upload(
+                raw, upload, source=source, page_wins=bool(text) or fetched_page
+            )
+            degraded.extend(upload_notes)
+            if not _has_content(raw):
+                # A scanned exposé, and nothing else handed over. Storing an
+                # empty property with a warning attached is precisely the
+                # silence that looks like success: refuse it, name the file,
+                # and repeat what the lift already said about it.
+                session.rollback()
+                degraded.append(lazy.Degraded(UPLOAD_EMPTY_NOTICE.format(name=upload.filename)))
+                degraded.extend(lazy.Degraded(warning) for warning in raw.warnings)
+                return render(
+                    request,
+                    "pages/add.html",
+                    {
+                        "profile": profile,
+                        "degraded": degraded,
+                        "result": None,
+                        "url_value": url,
+                        "text_value": text,
+                    },
+                    status_code=400,
+                )
+
         keywords, kw_note = lazy.call_or("hofradar.config:load_keywords", None)
         if kw_note is not None:
             from hofradar.config import KeywordConfig
@@ -208,6 +459,7 @@ async def add_submit(
             keywords = KeywordConfig()
 
         listing = lazy.call("hofradar.normalize:normalize_listing", raw, keywords)
+        await _triage_paste(listing, profile, degraded)
 
         # Geocode and route before ingesting. Without this the property has no
         # road distance, the scorer caps its confidence below the shortlist

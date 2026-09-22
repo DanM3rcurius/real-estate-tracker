@@ -96,7 +96,10 @@ that a naive search makes every single week:
    text similarity and perceptual image hashes — never by URL alone, and never
    on a title match alone.
 7. **The LLM may not change a number.** It reads prose and flags risks. Prices,
-   areas and distances come from the deterministic stages.
+   areas and distances come from the deterministic stages. The same holds for
+   the optional System One triage (`TYPESAFE_API_KEY`): it answers typed
+   questions - for sale or for rent, farm or flat - and a thresholded rule
+   reads its probabilities. It never writes a figure.
 
 ## Commands
 
@@ -128,6 +131,10 @@ under **Einstellungen** and saved as a named profile.
 
 Enabled by default: manual paste-in, CSV import, the official ZVG foreclosure
 register, and generic RSS/sitemap adapters for regional brokers.
+
+The paste box under **Hinzufügen** also takes an exposé PDF — upload the file
+or paste a URL that points straight at it — and keeps the file itself with the
+property, alongside anything you typed.
 
 The big portals (Kleinanzeigen, ImmobilienScout24, Immowelt) ship **disabled**.
 Their terms restrict automated access and they are actively bot-defended. See

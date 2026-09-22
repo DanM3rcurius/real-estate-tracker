@@ -39,14 +39,13 @@ jobs:
       - name: Test
         run: pytest -q
 
-      # `--sources manual` is what keeps this a smoke test. --dry-run skips
-      # only the writes (pipeline/runner.py) - discovery and the crawl still
-      # happen, so a bare `hofradar run --dry-run` fetches live pages from the
-      # real portals on every push, at the deliberate rate the adapters keep.
-      # That is minutes of wall clock, a dependency on somebody else's uptime,
-      # and crawling from a shared runner address. The manual source
-      # enumerates nothing, so every stage still executes and the run must
-      # still finish "ok" - which is what this step is actually asserting.
+      # HOFRADAR_OFFLINE only covers geocoding and routing; it does not stop the
+      # source crawl. A bare `run --dry-run` therefore walks every enabled
+      # source's live site from a CI runner on each push - slow, and outside
+      # the private-use terms the Denkmalbörse is read under (docs/SOURCES.md).
+      # The manual source has no inventory, so limiting the run to it boots
+      # the whole pipeline (schema, registry, run bookkeeping, scoring, report)
+      # without a single outbound request.
       - name: Smoke - boot the app
         env:
           HOFRADAR_OFFLINE: "1"

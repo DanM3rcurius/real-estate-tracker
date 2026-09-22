@@ -51,6 +51,7 @@ src/hofradar/
   scoring/       fit / deal / hidden / freshness / confidence + gates
   sources/       SourceAdapter base + adapters/
   llm/           the last stage, advisory only
+  triage/        System One (Jev) second opinion: typed questions, thresholded by gates
   pipeline/      the orchestrator
   report/        weekly digest (max 10 entries, everything else counted)
   web/           FastAPI + Jinja + HTMX + Leaflet
@@ -111,37 +112,49 @@ database from the models with `create_all()`, where a missing migration is
 invisible. `tests/db/test_migrations.py` builds one from the migrations alone
 and compares - that is the test that would have caught #7, so do not weaken it.
 
-**CI is green as of run 74, which is the first time it ever has been.** Runs
-1-44 did die in 2-4 seconds without reaching a runner - that ended at run 45
-(2026-09-04 12:31), and every run since executes its steps. What it then found
-was two real defects stacked behind each other, because a failed step skips
-the rest:
+**CI runs, and is green.** Runs 1-44 really did die in 2-4 seconds without
+reaching a runner; that ended at run 45 (2026-09-04) and every run since
+executes its steps. Do not read a red check as infrastructure without opening
+the run.
 
-1. *Config defaults are in sync* failed because `config/search.yaml` was
-   edited by hand (`land.preferred_min_sqm` 2000 -> 1000, commit 3768df7)
-   without running `scripts/sync_config_defaults.py`, so the copy bundled into
-   the package still carried 2000. The guard working, not a flaky check: the
-   installed wheel is what a container reads, and it would have scored against
-   the old number.
-2. *Test* then failed collection outright - see the invocation trap below.
+Two real defects were hiding behind each other, because a failed step skips the
+rest - so the tests and both smoke steps had never executed in CI at all until
+they were fixed (`a0fd490`, `cd5bd77`, `e95403c`):
 
-So the tests and both smoke steps had never run in CI at all until run 74.
-Read the run before assuming a red check is infrastructure again.
+1. *Config defaults are in sync* failed on drift `scripts/sync_config_defaults.py`
+   could not stage: it copied with `copy2`, which carries the source mtime
+   across, and `2000` -> `1000` keeps the byte length, so git's index saw the
+   same size and mtime and `git add` staged nothing. It copies without metadata
+   now. The guard itself was right - the packaged copy is what an installed
+   wheel reads, which is every container deployment.
+2. *Test* then failed collection outright: four modules import their sibling
+   conftest absolutely (`from tests.web.conftest import ...`), which needs the
+   repo root on `sys.path`. `python -m pytest` adds the working directory and
+   the plain `pytest` CI runs does not, so the documented local command was the
+   one invocation that could not fail. The root is in `pythonpath` now. Keep the
+   documented command and CI's command identical.
 
-The suite was also green locally and uncollectable in CI, for a reason with
-the same shape: four modules import their sibling conftest absolutely (`from
-tests.web.conftest import ...`), which needs the repo root on `sys.path`.
-`python -m pytest` adds the working directory and the plain `pytest` CI runs
-does not, so the documented local command could not see the failure. The root
-is in `pythonpath` now, and the documented command is CI's command. Keep them
-identical.
+Two traps worth keeping in mind:
 
-One of them was a trap worth knowing about: `hofradar run --dry-run` is not a
-dry run of the crawl. `dry_run` only skips the writes - ingest and
-disappearance detection - so discovery and fetching still hit the live
-portals. The smoke step now passes `--sources manual`, which enumerates
-nothing and still walks every stage. Do not widen it back without deciding
-that CI should crawl the real web on every push.
+- **`hofradar run --dry-run` is not a dry run of the crawl.** `dry_run` only
+  skips the writes, so discovery and fetching still hit the live portals. The
+  smoke step passes `--sources manual`, which enumerates nothing and still walks
+  every stage. Do not widen it back without deciding that CI should crawl the
+  real web on every push.
+- **A fixed test clock and a wall-clock function make a time bomb.** The scoring
+  fixtures are dated against `tests/scoring/conftest.py`'s frozen
+  `2026-09-03`, and `rescore_all` scored against the wall clock, so a property
+  aged past a freshness band and the confidence gate dropped it out of the
+  ranking - a test that passed for eleven days and then could not. `rescore_all`
+  takes `now` for this reason; pass it whenever the answer must not depend on
+  what day it is.
+
+**Check `origin/trunk` before diagnosing anything.** Several Claude sessions
+work this repo in parallel and branches sit unmerged for weeks. Both CI defects
+above were diagnosed and fixed twice, independently, because the second session
+reasoned from a stale `origin/trunk` ref rather than fetching first. `git fetch
+origin trunk` costs nothing; re-solving a solved problem and then resolving the
+merge conflicts costs a session.
 
 **`pipeline/runner.py` has no `commit()` at all.** The whole run is one
 `session_scope()` transaction, so the `SearchRun(status="running")` row and
@@ -150,7 +163,14 @@ finishes - which is why `/runs` shows no progress and why killing a run mid-way
 loses all of it. `POST /api/run` also has no guard against starting a second
 concurrent run, and `_execute` swallows every exception with a bare `return`.
 Fixing the visibility means deciding what a crashed run should leave behind;
-that is a design call, not a patch.
+that is a design call, not a patch. The visible symptom while a run holds
+SQLite's write lock: every web write (a rescore for a slider position with no
+scores yet, a paste, a Merkliste click) waits out `SQLITE_BUSY_TIMEOUT_MS`
+and fails with "database is locked". The radar used to 500 on that because
+the failed flush left the session in pending-rollback; `web/query._rescore`
+now rolls back and renders the last stored scores with a notice naming the
+crawl. The triage stage makes runs longer (one HTTP call per listing), so the
+window is wider than it was.
 
 **Local development needs no Docker.** `hofradar init-db && hofradar serve`
 against the venv is the whole loop; the `/opt/hofradar`, `hofradar-update` and
@@ -177,6 +197,56 @@ a bare `/` — no localStorage, no server table, no Javascript. A test must not
 assert defaults on `GET /` after it has requested `GET /?...` in the same
 `TestClient`, because cookies are preserved and the second request may redirect.
 See decision 21.
+
+**Rentals and flats.** A monthly figure is `price_type="rent"`, set by
+`parse_price` (price field) or `extract_features.is_rental` (prose), and it is
+the one exclusion farm substance cannot override - `REJECT_RENTAL` in scoring,
+`rental` in the run log. Flat words live in `keywords.negative` like any other
+type. With `TYPESAFE_API_KEY` set, `hofradar.triage` asks Jev the three typed
+questions before geocoding and stores the distribution in `evidence["triage"]`;
+`triage.decide` is the only reader, used by both the crawl loop and the scoring
+engine, and `triage.annotate` the only writer, used by the crawl loop and the
+paste box (which never drops a paste - the gate retires it). A known row is
+never dropped at the crawl loop - it is ingested so it learns, and the gate
+retires it. `scripts/backtest_triage.py` (dry run by default) prints what each
+threshold would reject per human verdict and, with `--call --store`, backfills
+`evidence["triage"]` on rows the crawl never re-asks about. Decisions 22 and 23.
+
+**PDFs are listings too.** `sources/adapters/_pdfutil.py` is the one PDF
+lift (pypdf, core dependency); the Denkmalbörse adapter fetches the exposé
+behind every detail page's "zum Exposé" link and merges it (Kurzinfo wins,
+PDF fills holes, full text appended), `/add` takes an upload and a pasted PDF
+URL, and `lifecycle.ingest` writes a `Document` row per `DocumentRef` so the
+dossier links to it. A scan without a text layer is a `warnings` line, never
+an empty description. `extract_labeled_fields` reads two facts on one line,
+a label above its value (numeric fields only) and a bare "28 Zimmer"; keep
+it a string matcher. Tests build PDFs with `tests/fixtures/pdf.py::make_pdf`,
+never from real files. Decision 24.
+
+**A link is only a link when a browser can follow it.** `upload:<digest>`
+(a reader's PDF) and `manual:<timestamp>` (a text paste) are how a hand-added
+listing is *named*; they are not addresses, and putting one in an `href`
+produces a button that does nothing when clicked - which is how the dossier's
+"Inserat öffnen", its per-fact "Quelle", the Quellen list and the Dokument link
+all behaved until decision 25. `web/query.is_web_url` is the one answer, also
+registered as the Jinja test `{% if url is web_url %}`; `open_link` decides
+what the header button points at and `no_link_reason` says why when it points
+at nothing. `best_url` still returns the identity - the JSON, the CSV and the
+digest quote it. The uploaded file is served by `GET /document/{id}` out of
+`web/uploads.uploads_dir()`, and that module - not `routes/add.py` - now owns
+where uploads live.
+
+**A mark is not a score, and the Merkliste must never wait for one.**
+`scoring.ranked_properties` joins `Score` on the live `profile_hash`, so a
+property nothing has scored under it is not in the ranking. `/add` stores but
+never scores, and a rescore that cannot write (a crawl holding the lock) leaves
+rows unscored for longer - so hand-added properties vanished from the Merkliste
+under "Alle gemerkten Objekte sind archiviert", a cause the page had never
+checked. `web/query._marked_pairs` now loads the marked, unmerged set from the
+table and merges it into the ranking; an unscored card says "noch nicht
+bewertet". `/merken` follows `merged_into_id` the way `ingest` does, because a
+merged row is never rendered. When you touch `build_results`, the rule is: the
+Merkliste's rows come from `properties`, never only from the scorer.
 
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing

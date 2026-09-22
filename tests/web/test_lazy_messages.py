@@ -70,3 +70,23 @@ def test_a_genuinely_missing_module_is_not_reported_as_a_database_problem() -> N
 
     assert not caught.value.is_database_error
     assert "noch nicht verfügbar" in caught.value.user_message
+
+
+def test_a_locked_database_names_the_crawl_not_a_migration() -> None:
+    """The everyday lock is the crawl's single long transaction; sending the
+    reader to `hofradar migrate` for it would be exactly wrong."""
+    import sqlite3
+
+    from sqlalchemy.exc import OperationalError
+
+    locked = OperationalError(
+        "(sqlite3.OperationalError) database is locked",
+        None,
+        sqlite3.OperationalError("database is locked"),
+    )
+    error = ModuleUnavailable("hofradar.scoring:rescore_all", locked)
+
+    assert error.is_database_error is True
+    assert error.is_locked_database is True
+    assert "Crawl" in error.user_message
+    assert "hofradar migrate" not in error.user_message

@@ -201,9 +201,9 @@ class TestConfidenceGates:
             land_sqm=1_200,
             year_built=1975,
         )
-        # Pinned to the same clock the fixtures are dated against. Without it
-        # this scores against the wall clock, and the borderline property falls
-        # out of the ranking entirely once it drifts past a freshness band.
+        # The fixtures are dated relative to the fixed ``now``; scored against
+        # the wall clock instead, the borderline property's 20-day-old
+        # verification ages past the keep threshold once the calendar moves on.
         rescore_all(session, profile, now=now)
 
         by_id = {prop.id: score for prop, score in ranked_properties(session, profile)}

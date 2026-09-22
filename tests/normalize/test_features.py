@@ -41,6 +41,28 @@ def test_exclusion_flags_from_negative_group():
     assert "neubau" in features.exclusion_flags
 
 
+def test_flat_vocabulary_matches_hyphenated_and_spaced_room_counts():
+    for text in ("Helle 3-Zimmer-Wohnung im 2. OG", "Schoene 2 Zimmer Wohnung", "2,5-Zi.-Whg."):
+        features = extract_features(text, REAL_KEYWORDS)
+        assert features.exclusion_flags, text
+    assert "etagenwohnung" in extract_features("Etagenwohnung, Baujahr 1998", REAL_KEYWORDS).exclusion_flags
+
+
+def test_rental_is_detected_from_the_offer_not_from_a_tenant():
+    offered = extract_features("Bauernhaus zu vermieten, Kaltmiete 1.800 €, Kaution 3 Monatsmieten.", REAL_KEYWORDS)
+    assert offered.is_rental is True
+    assert "mietobjekt" in offered.exclusion_flags
+
+    # "teilweise vermietet" is a hidden-market signal, and rental income is
+    # a selling point - neither is an offer to rent.
+    for_sale = extract_features(
+        "Hofstelle, Austragshaus teilweise vermietet, Mieteinnahmen 800 € monatlich.", REAL_KEYWORDS
+    )
+    assert for_sale.is_rental is False
+    assert "mietobjekt" not in for_sale.exclusion_flags
+    assert "teilweise_vermietet" in for_sale.hidden_signals
+
+
 def test_hidden_signals_canonical_slugs():
     text = "Von privat, kein Makler, provisionsfrei. Verkauf aus Altersgründen. Chiffre 123."
     features = extract_features(text, REAL_KEYWORDS)

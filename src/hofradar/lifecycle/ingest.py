@@ -51,6 +51,7 @@ from hofradar.contracts import (
 )
 from hofradar.db.enums import ChangeKind, ListingStatus, SourceRole, VerificationStatus
 from hofradar.db.models import (
+    Document,
     Image,
     Observation,
     PriceHistory,
@@ -172,6 +173,7 @@ def ingest(
     price_change = _apply_price(session, prop, listing, source=source, before=before, now=now)
     ps, source_row_created = _sync_property_source(session, prop, listing, source=source, now=now)
     _sync_images(session, prop, listing)
+    _record_documents(session, prop, listing, source=source)
     _record_verification(session, prop, listing, source=source, ps=ps, now=now)
 
     new_status = _resolve_status(session, prop, listing, source=source, before=before, now=now)
@@ -262,6 +264,42 @@ def _record_observation(
     session.add(obs)
     session.flush()
     return obs
+
+
+def _record_documents(
+    session: Session, prop: Property, listing: NormalizedListing, *, source: Source
+) -> None:
+    """Remember the exposé PDF (or upload) the facts were read from.
+
+    One ``Document`` row per (property, url): a crawl that reads the same
+    exposé every week must not stack up copies, but a new revision of it
+    (the same URL, more pages) updates what is on file. Never deleted here -
+    that is ``lifecycle.delete_property``'s job.
+    """
+    for ref in listing.documents or []:
+        if not ref.url:
+            continue
+        existing = session.scalar(
+            select(Document).where(
+                Document.property_id == prop.id, Document.document_url == ref.url
+            )
+        )
+        if existing is None:
+            existing = Document(
+                property_id=prop.id,
+                source_id=source.id,
+                kind=ref.kind,
+                document_url=ref.url[:1000],
+            )
+            session.add(existing)
+        existing.kind = ref.kind
+        title = ref.title or existing.title
+        existing.title = title[:500] if title else None
+        if ref.page_count is not None:
+            existing.page_number = ref.page_count
+        if ref.local_path:
+            existing.local_path = ref.local_path[:500]
+    session.flush()
 
 
 def _last_text_hash(session: Session, property_id: int, source_id: int) -> str | None:

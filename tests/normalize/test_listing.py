@@ -12,6 +12,7 @@ from hofradar.contracts import (
     PAGE_KIND_INDEX,
     PAGE_KIND_LISTING,
     PAGE_KIND_UTILITY,
+    DocumentRef,
     RawListing,
 )
 from hofradar.db.enums import PriceType
@@ -88,6 +89,38 @@ def test_sparse_listing_produces_warnings_not_crashes():
 
     assert result.land_sqm is None
     assert result.town is None
+
+
+def test_rental_listing_is_typed_rent_flagged_and_warned():
+    """Whichever field said it, a rental leaves normalisation as one fact."""
+    from_text = normalize_listing(
+        RawListing(
+            source_key="test_source",
+            url="https://example.test/listings/miete-1",
+            title="Bauernhaus zu vermieten",
+            description="Mit Stadel und Stall. Kaltmiete 1.800 €.",
+            price_raw="1.800 €",
+        ),
+        KEYWORDS,
+    )
+    assert from_text.price_type == PriceType.RENT.value
+    assert "mietobjekt" in from_text.exclusion_flags
+    assert from_text.outbuildings, "substance is still recorded - it just cannot override rent"
+    assert any("Mietobjekt" in w for w in from_text.warnings)
+
+    from_price = normalize_listing(
+        RawListing(
+            source_key="test_source",
+            url="https://example.test/listings/miete-2",
+            title="Haus im Gruenen",
+            description="Ruhige Lage.",
+            price_raw="Kaltmiete: 1.250 €",
+        ),
+        KEYWORDS,
+    )
+    assert from_price.price_type == PriceType.RENT.value
+    assert from_price.price == pytest.approx(1250.0)
+    assert "mietobjekt" in from_price.exclusion_flags
 
 
 def test_foreclosure_and_monument_listing():
@@ -169,3 +202,25 @@ def test_an_ordinary_listing_is_not_warned_about():
 
     assert result.page_kind == PAGE_KIND_LISTING
     assert not any("Seitentyp" in w for w in result.warnings)
+
+
+def test_raw_warnings_and_documents_are_carried_through():
+    """A PDF-derived warning and its DocumentRef must survive normalisation
+    unchanged, and the raw warning must come first - it is what the adapter
+    already knows it could not do, said before anything this stage finds."""
+    ref = DocumentRef(kind="expose", url="https://example.test/expose.pdf", page_count=3)
+    raw = RawListing(
+        source_key="test_source",
+        url="https://example.test/listings/pdf-1",
+        title="Hofstelle mit Exposé",
+        description="Siehe angehängtes Exposé.",
+        warnings=["PDF: das Dokument enthält keinen lesbaren Text (vermutlich gescannt)"],
+        documents=[ref],
+    )
+
+    result = normalize_listing(raw, KEYWORDS)
+
+    assert result.documents == [ref]
+    assert result.warnings[0] == (
+        "PDF: das Dokument enthält keinen lesbaren Text (vermutlich gescannt)"
+    )

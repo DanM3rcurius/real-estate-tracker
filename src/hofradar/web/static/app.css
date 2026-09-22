@@ -186,6 +186,13 @@ small { color: var(--ink-soft); }
   min-width: 0;
 }
 .field textarea { min-width: 240px; resize: vertical; }
+/* A file input draws its own button; only the box around it is ours. */
+.field input[type="file"] { padding: 6px 9px; cursor: pointer; }
+.field input[type="file"]::file-selector-button {
+  font: inherit; font-size: .86rem; font-weight: 600; cursor: pointer;
+  color: var(--ink); background: var(--bg-raised);
+  border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; margin-right: 10px;
+}
 .switch { display: inline-flex; align-items: center; gap: 6px; font-size: .88rem; }
 .switch input { accent-color: var(--accent); width: 18px; height: 18px; }
 
@@ -331,6 +338,9 @@ small { color: var(--ink-soft); }
 .notice--warn { background: var(--warn-soft); color: var(--warn); }
 .notice--ok { background: var(--ok-soft); color: var(--ok); }
 .notice__detail { display: block; font-size: .78rem; opacity: .8; margin-top: 4px; }
+
+/* An upload:/manual: identity is printed, never linked - see web/query.is_web_url. */
+.source__id { color: var(--ink-soft); font-size: .85em; word-break: break-all; }
 
 /* ---------- map ---------- */
 

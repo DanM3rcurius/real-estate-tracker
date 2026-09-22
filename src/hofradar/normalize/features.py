@@ -55,6 +55,24 @@ _OFF_MARKET_RE = re.compile(
     r"\bchiffre\b|off.?market|stille vermarktung|nicht oeffentlich (?:inseriert|vermarktet)"
 )
 
+#: The listing offers the place for rent, not for sale. Deliberately narrow:
+#: "vermietet" (a tenant in a house that is for sale) and "Mieteinnahmen"
+#: (rental income, a selling point) must not fire, and neither may
+#: "teilweise vermietet", which is a hidden-market signal in
+#: config/keywords.yaml. Only phrasings that describe the *offer* count.
+_RENTAL_RE = re.compile(
+    r"\bzu vermieten\b|\bzur (?:miete|vermietung)\b|\b(?:kalt|warm|nettokalt|monats)miete\b"
+    r"|\bmietpreis\b|\bmietwohnung\b|\bmietobjekt\b|\bmietangebot\b|\bmietvertrag\b"
+    r"|\bkaution\b|\bwohnberechtigungsschein\b"
+)
+
+#: The tag a rental listing carries in ``exclusion_flags`` so the paste box,
+#: the dossier and the run log can say why in one word. Not a keyword in
+#: config/keywords.yaml because a keyword match can be overridden by farm
+#: substance (``scoring.engine.FLAG_EXCLUSION_OVERRIDDEN``) and a rental must
+#: not be - see docs/DECISIONS.md entry 22.
+RENTAL_EXCLUSION_FLAG = "mietobjekt"
+
 #: Single-word keywords at or below this length require extra evidence
 #: (capitalisation, i.e. proper-noun-like usage) before they count as a
 #: match - see the module docstring.
@@ -70,6 +88,9 @@ class FeatureExtraction:
     special_features: list[str] = field(default_factory=list)
     exclusion_flags: list[str] = field(default_factory=list)
     hidden_signals: list[str] = field(default_factory=list)
+    #: The text offers the place for rent (``_RENTAL_RE``). The normaliser
+    #: turns this into ``price_type == PriceType.RENT``.
+    is_rental: bool = False
     is_foreclosure: bool = False
     is_monument: bool = False
     is_private_seller: bool = False
@@ -119,7 +140,8 @@ def extract_features(text: str, keywords: KeywordConfig) -> FeatureExtraction:
     - ``keywords.hidden_phrases`` -> ``hidden_signals``, slugified, with a
       handful of canonical-name overrides plus a foreclosure detector that
       fires independently of the configured vocabulary
-    - ``keywords.negative`` -> ``exclusion_flags``
+    - ``keywords.negative`` -> ``exclusion_flags``, plus ``RENTAL_EXCLUSION_FLAG``
+      when the text offers the place for rent (``is_rental``)
 
     The whole-farm type names in ``keywords.core`` are not a feature group;
     they feed :func:`classify_property_type` instead.
@@ -134,9 +156,11 @@ def extract_features(text: str, keywords: KeywordConfig) -> FeatureExtraction:
     special_features = sorted(
         {slugify(t) for t in _matched_terms(norm_text, text, keywords.regional)}
     )
-    exclusion_flags = sorted(
-        {slugify(t) for t in _matched_terms(norm_text, text, keywords.negative)}
-    )
+    is_rental = bool(_RENTAL_RE.search(norm_text))
+    exclusion_terms = {slugify(t) for t in _matched_terms(norm_text, text, keywords.negative)}
+    if is_rental:
+        exclusion_terms.add(RENTAL_EXCLUSION_FLAG)
+    exclusion_flags = sorted(exclusion_terms)
 
     hidden_matches = _matched_terms(norm_text, text, keywords.hidden_phrases)
     hidden_signals = {_slug_for_hidden_phrase(t) for t in hidden_matches}
@@ -150,6 +174,7 @@ def extract_features(text: str, keywords: KeywordConfig) -> FeatureExtraction:
         special_features=special_features,
         exclusion_flags=exclusion_flags,
         hidden_signals=sorted(hidden_signals),
+        is_rental=is_rental,
         is_foreclosure=bool(_FORECLOSURE_RE.search(norm_text)),
         is_monument=bool(_MONUMENT_RE.search(norm_text)),
         is_private_seller=bool(_PRIVATE_SELLER_RE.search(norm_text)),

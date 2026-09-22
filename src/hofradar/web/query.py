@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from hofradar.config import SearchProfile
 from hofradar.db.enums import HIDDEN_USER_STATES, ListingStatus, VerificationStatus
-from hofradar.db.models import CostEstimate, Property, Score
+from hofradar.db.models import CostEstimate, Document, Property, Score
 from hofradar.search import matches_search
 from hofradar.web import history, lazy
 from hofradar.web.deps import ResultFilters
@@ -41,8 +41,11 @@ class ResultRow:
     score: Score | None
     cost: CostEstimate | None
     chips: list[Chip]
+    #: The listing's identity - see :func:`best_url`. Not an href.
     best_url: str | None
     price_delta_pct: float | None
+    #: What the card's "Quelle" button may point at, or ``None``.
+    open_link: OpenLink | None = None
 
 
 @dataclass(slots=True)
@@ -120,6 +123,13 @@ def change_chips(prop: Property, *, now: datetime | None = None, window_days: in
 
 
 def best_url(prop: Property) -> str | None:
+    """The listing's own address, whatever shape it has.
+
+    This is the *identity* the rest of the system quotes - the JSON payload,
+    the CSV export, the digest. It may well be an ``upload:`` or ``manual:``
+    pseudo-URL, which is a name and not somewhere a browser can go; see
+    :func:`open_link` for the thing a template is allowed to put in an href.
+    """
     sources = list(prop.property_sources or [])
     if not sources:
         return None
@@ -130,6 +140,103 @@ def best_url(prop: Property) -> str | None:
         if row.is_primary_source:
             return row.url
     return sources[0].url
+
+
+# --------------------------------------------------------------------------- #
+# Links - what a browser can actually open
+# --------------------------------------------------------------------------- #
+
+#: The only two schemes a link in a template may carry. A hand-added listing
+#: is identified by ``upload:<digest>`` or ``manual:<timestamp>``; rendering
+#: either as an href produces a button that does nothing when clicked, which
+#: is this codebase's recurring failure wearing a hyperlink.
+WEB_URL_SCHEMES = ("http://", "https://")
+
+#: Where :func:`document_href` points at a stored file. One owner for the
+#: path, so the route and the templates cannot drift apart.
+DOCUMENT_PATH = "/document/{document_id}"
+
+LABEL_LISTING = "Inserat öffnen"
+LABEL_DOCUMENT = "Exposé öffnen (PDF)"
+
+#: Why there is no link, said out loud rather than by omission. Reaching
+#: either of these means :func:`open_link` found no page *and* no readable
+#: document, so neither sentence may promise one.
+NO_LINK_MANUAL = (
+    "Von Hand eingefügt – dazu gibt es keine Inserats-Seite und keine "
+    "hinterlegte Datei. Die Kennung der Eingabe steht unter „Quellen“."
+)
+NO_LINK_NONE = "Zu diesem Objekt ist keine aufrufbare Quelle hinterlegt."
+
+
+def is_web_url(url: str | None) -> bool:
+    """Can a browser open this? ``upload:``/``manual:`` identities cannot."""
+    return bool(url) and str(url).strip().lower().startswith(WEB_URL_SCHEMES)
+
+
+@dataclass(slots=True)
+class OpenLink:
+    """An href a template may render, and the word that goes on it."""
+
+    href: str
+    label: str
+    #: Leaves the site, so it gets ``target``/``rel``. A stored file does not.
+    external: bool
+
+
+def document_href(document: Any) -> str | None:
+    """Where this ``Document`` can be read - our own copy first.
+
+    The stored file wins over the remote URL: it is the evidence we actually
+    hold, and it still opens when the broker takes the exposé down.
+    """
+    if document is None:
+        return None
+    if document.local_path:
+        return DOCUMENT_PATH.format(document_id=document.id)
+    if is_web_url(document.document_url):
+        return document.document_url
+    return None
+
+
+def pick_document(documents: Any) -> Any | None:
+    """The one document worth offering as "open the listing"."""
+    rows = list(documents or [])
+    for row in rows:
+        if row.local_path:
+            return row
+    for row in rows:
+        if is_web_url(row.document_url):
+            return row
+    return None
+
+
+def open_link(prop: Property, *, document: Any = None) -> OpenLink | None:
+    """What "Inserat öffnen" is allowed to point at, or ``None``.
+
+    Order: the listing's own page when a source carries a real one, then the
+    exposé we hold. A property whose only source is an ``upload:`` digest has
+    no page - the PDF *is* the listing (decision 24), so that is what opens.
+    Returning ``None`` is a fact the page has to print, not hide: see
+    :data:`NO_LINK_MANUAL` and :data:`NO_LINK_NONE`.
+    """
+    best = best_url(prop)
+    if is_web_url(best):
+        return OpenLink(str(best), LABEL_LISTING, external=True)
+    for row in prop.property_sources or []:
+        if is_web_url(row.url):
+            return OpenLink(row.url, LABEL_LISTING, external=True)
+    href = document_href(document)
+    if href is not None:
+        return OpenLink(href, LABEL_DOCUMENT, external=not href.startswith("/"))
+    return None
+
+
+def no_link_reason(prop: Property) -> str:
+    """Why this property offers no link. Never an empty space where one was."""
+    if prop.property_sources:
+        return NO_LINK_MANUAL
+    return NO_LINK_NONE
 
 
 # --------------------------------------------------------------------------- #
@@ -219,6 +326,7 @@ def _eager(stmt):
         selectinload(Property.status_history),
         selectinload(Property.property_sources),
         selectinload(Property.cost_estimate),
+        selectinload(Property.documents),
     )
 
 
@@ -249,9 +357,75 @@ def _fallback_pairs(
     return pairs
 
 
+def _marked_pairs(
+    session: Session, profile: SearchProfile, seen: set[int]
+) -> list[tuple[Property, Score | None]]:
+    """Every marked property the ranking did not return, with its own score.
+
+    ``hofradar.scoring:ranked_properties`` joins ``Score`` on the live
+    ``profile_hash``, so a property nothing has scored under it is not in the
+    ranking at all - a fresh paste (``/add`` stores, it does not score), or
+    anything whatever while a crawl holds SQLite's write lock and the rescore
+    above could not write. On the radar that is the scorer's business. On the
+    Merkliste it is not: the mark is the reader's, it outranks every machine
+    gate (decision 21), and a mark that disappears because a *score row* is
+    missing is this codebase's recurring failure with a bookmark on it.
+
+    The score may be ``None``; the card says "noch nicht bewertet" and the
+    property is still on the reader's list, which is the whole point.
+    """
+    stmt = _eager(
+        select(Property).where(
+            Property.merged_into_id.is_(None),
+            Property.shortlisted_at.is_not(None),
+        )
+    )
+    extra: list[tuple[Property, Score | None]] = []
+    for prop in session.scalars(stmt).unique():
+        if prop.id in seen:
+            continue
+        score = next(
+            (s for s in (prop.scores or []) if s.profile_hash == profile.profile_hash), None
+        )
+        extra.append((prop, score))
+    return extra
+
+
+def _documents_by_property(session: Session, property_ids: list[int]) -> dict[int, Document]:
+    """One query for the whole page - the card's link must not cost a query.
+
+    Only the document worth offering is kept per property; see
+    :func:`pick_document` for which one that is.
+    """
+    if not property_ids:
+        return {}
+    rows = session.scalars(select(Document).where(Document.property_id.in_(property_ids))).all()
+    grouped: dict[int, list[Document]] = {}
+    for row in rows:
+        if row.property_id is not None:
+            grouped.setdefault(row.property_id, []).append(row)
+    picked: dict[int, Document] = {}
+    for property_id, documents in grouped.items():
+        best = pick_document(documents)
+        if best is not None:
+            picked[property_id] = best
+    return picked
+
+
 def _rescore(session: Session, profile: SearchProfile) -> tuple[int | None, lazy.Degraded | None]:
+    """Score what needs scoring; degrade, never die, when the write fails.
+
+    A rescore that fails mid-flush (a crawl holding SQLite's write lock is
+    the everyday case) leaves the session in "pending rollback": the notice
+    is built correctly and then the very next SELECT raises
+    ``PendingRollbackError`` and the page 500s before the notice is shown -
+    an error that comes and goes with the crawl. Rolling back here keeps the
+    session usable, so the reader gets the last stored scores plus the
+    notice saying why they are not fresh.
+    """
     count, degraded = lazy.call_or("hofradar.scoring:rescore_all", None, session, profile)
     if degraded is not None:
+        session.rollback()
         return None, degraded
     # A brand-new profile hash has no cached rows at all; if the incremental
     # pass found nothing, force a full recompute so the sliders really bite.
@@ -265,7 +439,10 @@ def _rescore(session: Session, profile: SearchProfile) -> tuple[int | None, lazy
             forced, forced_degraded = lazy.call_or(
                 "hofradar.scoring:rescore_all", None, session, profile, only_dirty=False
             )
-            if forced_degraded is None and forced:
+            if forced_degraded is not None:
+                session.rollback()
+                return None, forced_degraded
+            if forced:
                 return int(forced), None
     return int(count or 0), None
 
@@ -286,7 +463,11 @@ def build_results(
     # into "how many properties exist in total".
     total_in_db_stmt = select(func.count(Property.id))
     if filters.shortlisted_only:
-        total_in_db_stmt = total_in_db_stmt.where(Property.shortlisted_at.is_not(None))
+        # A row merged into another can never be rendered, so counting it here
+        # would make the page claim marks it then fails to show.
+        total_in_db_stmt = total_in_db_stmt.where(
+            Property.shortlisted_at.is_not(None), Property.merged_into_id.is_(None)
+        )
     total_in_db = session.scalar(total_in_db_stmt) or 0
 
     rescored, rescore_degraded = _rescore(session, profile)
@@ -326,6 +507,11 @@ def build_results(
             )
         normalised.append((prop, score))
 
+    if filters.shortlisted_only:
+        normalised.extend(
+            _marked_pairs(session, profile, {prop.id for prop, _ in normalised})
+        )
+
     # Counted with its own query rather than in the loop below: both the ranking
     # and the degraded fallback drop archived rows before they ever get here, and
     # a hidden property with no number beside it is the failure mode this
@@ -363,6 +549,7 @@ def build_results(
     total_matched = len(kept)
     kept = kept[: filters.limit]
 
+    documents = _documents_by_property(session, [prop.id for prop, _ in kept])
     rows = [
         ResultRow(
             rank=index,
@@ -372,6 +559,7 @@ def build_results(
             chips=change_chips(prop, now=now),
             best_url=best_url(prop),
             price_delta_pct=history.total_price_delta_pct(prop),
+            open_link=open_link(prop, document=documents.get(prop.id)),
         )
         for index, (prop, score) in enumerate(kept, start=1)
     ]
@@ -424,7 +612,10 @@ def row_to_dict(row: ResultRow) -> dict[str, Any]:
         "verification_status": prop.verification_status,
         "user_state": prop.user_state,
         "shortlisted_at": prop.shortlisted_at.isoformat() if prop.shortlisted_at else None,
+        # The listing's identity, which may be an upload:/manual: name ...
         "url": row.best_url,
+        # ... and the address a client may actually open, or null.
+        "open_url": row.open_link.href if row.open_link else None,
         "chips": [c.label for c in row.chips],
         "scores": None
         if score is None

@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from hofradar.config import KeywordConfig, SearchProfile, load_config
-from hofradar.db.enums import RunStage, SourceRole
+from hofradar.db.enums import PriceType, RunStage, SourceRole
 from hofradar.db.models import Property, PropertySource, SearchRun, Source
 from hofradar.db.session import session_scope
 
@@ -47,6 +47,13 @@ NON_VERIFYING_ROLES = {SourceRole.DISCOVERY}
 REJECT_EXCLUSION_FLAGS = "exclusion_flags"
 REJECT_OUT_OF_RADIUS = "out_of_radius"
 REJECT_NOT_A_LISTING = "not_a_listing"
+#: ``price_type == "rent"``. Logged as ``rental``; a rental the database already
+#: knows is NOT dropped here but ingested, so the row learns the fact and the
+#: scoring gate (``REJECT_RENTAL``) takes it off the radar (decision 22).
+REJECT_RENTAL = "rental"
+#: The System One triage said rental or flat above the profile's threshold.
+#: Logged as ``triage:miete`` / ``triage:wohnung``; same known-row rule.
+REJECT_TRIAGE = "triage"
 
 
 class PipelineError(RuntimeError):
@@ -85,6 +92,7 @@ async def run_pipeline(
     from hofradar.report import build_report, render_html, render_markdown
     from hofradar.scoring import rescore_all
     from hofradar.sources import get_adapter, sync_sources_to_db
+    from hofradar.triage import JevTriage, TriageUnavailable, annotate
 
     cfg = load_config()
     profile = profile or cfg.profile
@@ -119,6 +127,13 @@ async def run_pipeline(
             price_changes = 0
             #: reason -> how many rows the loop below threw away for it.
             rejected: Counter[str] = Counter()
+            #: The fast typed second opinion, or None without a key. Its
+            #: absence is logged (``triage.enabled``) rather than implied.
+            triage: JevTriage | None = None
+            try:
+                triage = JevTriage.from_env()
+            except TriageUnavailable as exc:
+                log.info("triage skipped: %s", exc)
 
             for source in sources:
                 adapter = get_adapter(source)
@@ -135,10 +150,36 @@ async def run_pipeline(
                         if known_id is not None:
                             seen_by_source[source.id].add(known_id)
 
-                        # Cheap deterministic reject before any geocoding call.
-                        if listing.exclusion_flags and not listing.building_features:
+                        # Cheap deterministic rejects before any geocoding call.
+                        # A rental is dropped whatever substance it has - unless
+                        # the database already holds the row, which then goes on
+                        # to ingest so it learns price_type=rent and the scoring
+                        # gate retires it instead of a bare continue hiding it.
+                        if listing.price_type == PriceType.RENT and known_id is None:
+                            rejected[REJECT_RENTAL] += 1
+                            continue
+                        if (
+                            listing.price_type != PriceType.RENT
+                            and listing.exclusion_flags
+                            and not listing.building_features
+                        ):
                             rejected[REJECT_EXCLUSION_FLAGS] += 1
                             continue
+
+                        # The typed second opinion on what the regex could not
+                        # settle. A failed call is counted in triage.stats()
+                        # and the listing proceeds unasked; nothing here may
+                        # abort the crawl. The paste box asks through the same
+                        # annotate(), so both paths leave the same evidence.
+                        if triage is not None:
+                            decision = await annotate(listing, profile.gates, triage)
+                            if (
+                                decision is not None
+                                and decision.reject_reason is not None
+                                and known_id is None
+                            ):
+                                rejected[f"{REJECT_TRIAGE}:{decision.reject_reason}"] += 1
+                                continue
 
                         geo = await locate(session, listing, profile)
                         if geo.distance_air_km is not None and not within_air_radius(
@@ -208,13 +249,20 @@ async def run_pipeline(
                 updated=updated_count,
             )
             # Always logged, zero included: "nothing was rejected" and "nobody
-            # counted" have to be distinguishable in the run log.
+            # counted" have to be distinguishable in the run log. The same
+            # goes for the triage: "asked nothing" and "not configured" are
+            # different facts.
+            triage_stats: dict[str, Any] = {"enabled": False}
+            if triage is not None:
+                triage_stats = triage.stats()
+                await triage.aclose()
             _log_stage(
                 session,
                 run,
                 RunStage.NORMALIZE,
                 rejected=sum(rejected.values()),
                 reasons=dict(rejected),
+                triage=triage_stats,
             )
 
             # -- 3. disappearance detection -------------------------------- #

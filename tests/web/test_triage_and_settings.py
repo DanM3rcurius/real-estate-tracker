@@ -157,7 +157,8 @@ def test_add_page_reports_a_missing_module_instead_of_crashing(client):
 def test_add_requires_input(client):
     response = client.post("/add", data={"url": "", "text": ""})
     assert response.status_code == 400
-    assert "Inserats-URL oder einen Exposé-Text" in response.text
+    # The form now also takes a PDF, so the sentence names all three ways in.
+    assert "Inserats-URL, einen Exposé-Text oder eine PDF-Datei" in response.text
 
 
 def test_run_button_answers_without_blocking(client, monkeypatch):

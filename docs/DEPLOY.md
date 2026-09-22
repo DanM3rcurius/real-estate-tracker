@@ -54,6 +54,7 @@ Nothing to install. Both read the `Dockerfile` in this repo.
    - `HOFRADAR_DATA_DIR=/data`
    - `HOFRADAR_PASSWORD_HASH=…` (see below)
    - `ANTHROPIC_API_KEY=…` (optional)
+   - `TYPESAFE_API_KEY=…` (optional, the rental/flat triage)
 5. Deploy. The `/healthz` endpoint is already wired for their health checks.
 
 Note that a persistent disk generally requires a paid instance tier on Render;
