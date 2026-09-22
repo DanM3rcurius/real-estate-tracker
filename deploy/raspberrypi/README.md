@@ -331,11 +331,18 @@ journalctl -u hofradar -f                  # native runtime
 journalctl -u hofradar-scheduler -f        # native: the weekly crawl
 ```
 
-Pull a backup down to your laptop:
+Pull a backup down to your laptop. `dan@hofradar.local` here and throughout is
+the user and hostname from step 1 — substitute your own. If `.local` does not
+resolve, the Pi's IP (`hostname -I` on the Pi) always works: mDNS needs
+`avahi-daemon`, which Ubuntu Server does not ship and the bootstrap installs.
 
 ```bash
 scp dan@hofradar.local:/var/backups/hofradar/hofradar-*.sqlite3.gz .
 ```
+
+Note the direction: this **fetches** the Pi's nightly backups. Sending a
+database the other way, from a laptop to a new Pi, is *Bringing an existing
+database with you* above.
 
 ## Bringing an existing database with you
 
