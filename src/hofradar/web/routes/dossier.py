@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from hofradar.costmodel import renovation_evidence
@@ -18,7 +19,7 @@ from hofradar.db.models import Property
 from hofradar.web import history
 from hofradar.web.charts import sparkline
 from hofradar.web.deps import get_db, profile_from_query, render
-from hofradar.web.filters import de_eur, de_km, de_number, de_sqm, de_tier
+from hofradar.web.filters import de_eur, de_km, de_number, de_sqm, de_tier, one_line
 from hofradar.web.query import (
     best_url,
     change_chips,
@@ -49,6 +50,18 @@ USER_STATES: dict[str, str] = {
     "archived": "📦 Archiviert – nicht mehr anzeigen",
     "none": "– kein Status",
 }
+
+#: The reader's own name for a property fits the column it is stored in - a
+#: longer one is refused and said so, never cut short without a word.
+USER_TITLE_MAX = Property.__table__.c.user_title.type.length
+
+#: A crawl holds SQLite's write lock for its whole run, so a rename made
+#: meanwhile fails. htmx swaps nothing on an error status, so without this the
+#: click would simply do nothing.
+TITLE_LOCKED = (
+    "Die Datenbank ist gerade gesperrt – vermutlich läuft ein Crawl. "
+    "Bitte nach dem Crawl noch einmal speichern."
+)
 
 #: A form rendered before the Merkliste existed still posts this. Honoured as
 #: "put it on the Merkliste" rather than silently dropped - see decision 20 /
@@ -290,6 +303,7 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "document_href": document_href,
         "document_missing": document_missing,
         "user_states": USER_STATES,
+        "title_max": USER_TITLE_MAX,
         "sources": sorted(
             prop.property_sources or [], key=lambda s: (not s.is_best, not s.is_primary_source)
         ),
@@ -348,6 +362,83 @@ def triage(
         "partials/triage.html",
         {"prop": prop, "user_states": USER_STATES, "saved": True, "legacy_marked": legacy_marked},
     )
+
+
+def _title_refused(
+    request: Request, prop: Property, draft: str, message: str, status_code: int
+) -> Response:
+    """Not saved, and said so: the fold stays open with the reader's draft.
+
+    HTMX gets the partial at 200 because htmx swaps nothing on an error
+    status; a plain form post gets the error page with the real status.
+    """
+    if request.headers.get("HX-Request"):
+        context = {"prop": prop, "title_max": USER_TITLE_MAX, "draft": draft, "error": message}
+        return render(request, "partials/title.html", context)
+    return render(
+        request,
+        "pages/error.html",
+        {"code": status_code, "message": f"Nicht gespeichert: {message}"},
+        status_code=status_code,
+    )
+
+
+@router.post("/property/{public_id}/title")
+def rename(
+    public_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    title: str = Form(default=""),
+    reset: str = Form(default=""),
+):
+    """The reader's own name for the place (``Property.user_title``).
+
+    ``canonical_title`` is the listing's words and ``ingest`` keeps it current,
+    so an edit there would be undone by the next crawl. This writes the column
+    ingest never touches. An empty title, the reset button, or the listing's
+    own title typed back all clear it, so the heading follows the listing
+    again. See docs/DECISIONS.md entry 29.
+    """
+    requested = load_property(session, public_id)
+    if requested is None:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 404, "message": f"Kein Objekt mit der ID {public_id}."},
+            status_code=404,
+        )
+    # A merged-away row is never rendered in a list; the name belongs on the
+    # survivor, exactly as a mark does (``/merken``).
+    prop = _surviving(session, requested)
+    wanted = "" if reset else one_line(title)
+    if len(wanted) > USER_TITLE_MAX:
+        message = f"Der Titel hat {len(wanted)} Zeichen, erlaubt sind {USER_TITLE_MAX}."
+        return _title_refused(request, prop, wanted, message, 400)
+    # Compared cleaned to cleaned: the field is pre-filled with the listing's
+    # title collapsed, and saving it untouched must not freeze a copy of it.
+    prop.user_title = None if wanted in ("", one_line(prop.canonical_title)) else wanted
+    session.add(prop)
+    try:
+        session.commit()
+    except OperationalError as exc:
+        session.rollback()
+        if "database is locked" not in str(exc).lower():
+            raise
+        return _title_refused(request, prop, wanted, TITLE_LOCKED, 503)
+    session.refresh(prop)
+    if request.headers.get("HX-Request"):
+        if prop.id != requested.id:
+            # Swapping the survivor's heading into the merged-away row's page
+            # would look saved and then revert on reload. Go where it lives.
+            return Response(
+                status_code=204, headers={"HX-Redirect": f"/property/{prop.public_id}"}
+            )
+        return render(
+            request,
+            "partials/title.html",
+            {"prop": prop, "title_max": USER_TITLE_MAX, "saved": True},
+        )
+    return RedirectResponse(f"/property/{prop.public_id}", status_code=303)
 
 
 def _surviving(session: Session, prop: Property) -> Property:
@@ -475,6 +566,7 @@ def api_property(public_id: str, request: Request, session: Session = Depends(ge
     payload = row_to_dict(row)
     payload["evidence"] = prop.evidence or {}
     payload["user_note"] = prop.user_note
+    payload["user_title"] = prop.user_title
     payload["timeline"] = [
         {
             "at": event["at"].isoformat() if event["at"] else None,

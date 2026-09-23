@@ -63,6 +63,7 @@ _FILLABLE_FIELDS = (
     "llm_summary",
     "user_state",
     "user_note",
+    "user_title",
 )
 
 #: JSON list columns that are unioned rather than replaced.

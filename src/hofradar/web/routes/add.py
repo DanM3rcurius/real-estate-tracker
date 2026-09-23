@@ -512,7 +512,7 @@ async def add_submit(
         session.commit()
         result = {
             "public_id": getattr(prop, "public_id", None),
-            "title": getattr(prop, "canonical_title", None),
+            "title": getattr(prop, "display_title", None),
             "town": getattr(prop, "town", None),
             "change_kind": getattr(change, "kind", None),
             "detail": getattr(change, "detail", None),

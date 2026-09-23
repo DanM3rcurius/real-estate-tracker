@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% import "partials/macros.html" as ui %}
-{% block title %}{{ prop.canonical_title }} – {{ app_title }}{% endblock %}
+{% block title %}{{ prop.display_title }} – {{ app_title }}{% endblock %}
 {% block content %}
 <article class="page dossier">
 
   <header class="dossier__head">
     <p class="crumb"><a href="/">← Radar</a></p>
-    <h1>{{ prop.canonical_title }}</h1>
+    {% include "partials/title.html" %}
     <p class="dossier__place">
       {{ prop.town or 'Ort unbekannt' }}{% if prop.postcode %} ({{ prop.postcode }}){% endif %}
       {% if prop.district %} · {{ prop.district }}{% endif %}
@@ -241,7 +241,7 @@
     <div class="gallery">
       {% for image in images %}
       <figure>
-        <img src="{{ image.url }}" alt="Bild zu {{ prop.canonical_title }}" loading="lazy">
+        <img src="{{ image.url }}" alt="Bild zu {{ prop.display_title }}" loading="lazy">
         {% if image.visual_features %}<figcaption>{{ image.visual_features }}</figcaption>{% endif %}
       </figure>
       {% endfor %}

@@ -44,7 +44,7 @@ def changes_since(
             "property_id": prop.id,
             "public_id": prop.public_id,
             "kind": history.change_kind,
-            "title": prop.canonical_title,
+            "title": prop.display_title,
             "town": prop.town,
             "postcode": prop.postcode,
             "price": prop.price,

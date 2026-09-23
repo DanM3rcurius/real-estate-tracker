@@ -1,0 +1,39 @@
+{# The dossier's heading, and the reader's way to rename it. Self-contained:
+   the form swaps this block, and the <title> below (only on a swap) is what
+   htmx copies into the browser tab. The listing's own words stay visible
+   under a renamed heading - they are the evidence, the name is not. #}
+<div class="dossier__title" id="title">
+  {% if saved %}<title>{{ prop.display_title }} – {{ app_title }}</title>{% endif %}
+  <h1>{{ prop.display_title }}</h1>
+  {% if prop.user_title %}
+  <p class="hint">Im Inserat: „{{ prop.canonical_title }}“</p>
+  {% endif %}
+  <details class="fold title-edit"{% if error %} open{% endif %}>
+    <summary>✏️ Titel ändern</summary>
+    <form method="post" action="/property/{{ prop.public_id }}/title"
+          hx-post="/property/{{ prop.public_id }}/title"
+          hx-target="#title"
+          hx-swap="outerHTML">
+      <label class="field">
+        <span>Eigener Titel</span>
+        <input type="text" name="title" value="{{ draft if draft is defined else prop.display_title | one_line }}"
+               maxlength="{{ title_max }}" autocomplete="off">
+      </label>
+      <button class="btn btn--small" type="submit">Speichern</button>
+      {% if prop.user_title %}
+      <button class="btn btn--small btn--ghost" type="submit" name="reset" value="1">
+        Titel aus dem Inserat verwenden
+      </button>
+      {% endif %}
+      <p class="hint">Leer lassen oder zurücksetzen, um den Titel aus dem Inserat zu zeigen.
+        Ein neuer Abruf überschreibt den eigenen Titel nicht.</p>
+    </form>
+  </details>
+  {% if error %}
+    <p class="notice notice--warn" role="alert">Nicht gespeichert: {{ error }}</p>
+  {% elif saved %}
+    <p class="notice notice--ok" role="status">
+      Gespeichert{% if not prop.user_title %}: Titel aus dem Inserat{% endif %}
+    </p>
+  {% endif %}
+</div>
