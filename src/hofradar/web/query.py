@@ -23,6 +23,7 @@ from hofradar.db.models import CostEstimate, Document, Property, Score
 from hofradar.search import matches_search
 from hofradar.web import history, lazy
 from hofradar.web.deps import ResultFilters
+from hofradar.web.uploads import resolve_upload_path
 
 
 @dataclass(slots=True)
@@ -168,6 +169,17 @@ NO_LINK_MANUAL = (
 )
 NO_LINK_NONE = "Zu diesem Objekt ist keine aufrufbare Quelle hinterlegt."
 
+#: Shown next to a document whose ``local_path`` names a file this machine
+#: does not have - typically a database that moved to another machine without
+#: its ``uploads/`` directory (issue #26). Distinct from "keine hinterlegte
+#: Datei": here a copy once existed and the fact is not lost, only the file.
+DOCUMENT_MISSING_HINT = (
+    "Datei fehlt auf diesem Server – vermutlich eine Datenbank ohne ihr "
+    "uploads/-Verzeichnis. Von der Ursprungsmaschine kopieren (siehe "
+    "deploy/raspberrypi/README.md, „Bringing an existing database with "
+    "you“); gespeichert war sie unter {path}."
+)
+
 
 def is_web_url(url: str | None) -> bool:
     """Can a browser open this? ``upload:``/``manual:`` identities cannot."""
@@ -184,15 +196,33 @@ class OpenLink:
     external: bool
 
 
+def document_missing(document: Any) -> bool:
+    """Was a local copy expected here, but nothing on this machine has it?
+
+    ``local_path`` claiming a file and no file resolving under
+    :func:`~hofradar.web.uploads.resolve_upload_path` (which also tries the
+    document's own digest, not just the stored path) is issue #26's shape: a
+    database that travelled without its ``uploads/`` directory. A document
+    that never had a local copy - folded in from a remote exposé nobody
+    uploaded - is a different, unrelated case and this returns ``False`` for it.
+    """
+    if document is None or not document.local_path:
+        return False
+    return resolve_upload_path(document.local_path, document.document_url) is None
+
+
 def document_href(document: Any) -> str | None:
     """Where this ``Document`` can be read - our own copy first.
 
     The stored file wins over the remote URL: it is the evidence we actually
-    hold, and it still opens when the broker takes the exposé down.
+    hold, and it still opens when the broker takes the exposé down. A
+    ``local_path`` this machine cannot actually read (see
+    :func:`document_missing`) is not offered as a link - a button that 410s
+    on click is exactly the silence this function exists to avoid.
     """
     if document is None:
         return None
-    if document.local_path:
+    if document.local_path and not document_missing(document):
         return DOCUMENT_PATH.format(document_id=document.id)
     if is_web_url(document.document_url):
         return document.document_url
@@ -203,7 +233,7 @@ def pick_document(documents: Any) -> Any | None:
     """The one document worth offering as "open the listing"."""
     rows = list(documents or [])
     for row in rows:
-        if row.local_path:
+        if row.local_path and not document_missing(row):
             return row
     for row in rows:
         if is_web_url(row.document_url):

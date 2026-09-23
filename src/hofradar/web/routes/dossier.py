@@ -23,6 +23,7 @@ from hofradar.web.query import (
     best_url,
     change_chips,
     document_href,
+    document_missing,
     load_property,
     no_link_reason,
     open_link,
@@ -287,6 +288,7 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "open_link": open_link(prop, document=pick_document(prop.documents)),
         "no_link_reason": no_link_reason(prop),
         "document_href": document_href,
+        "document_missing": document_missing,
         "user_states": USER_STATES,
         "sources": sorted(
             prop.property_sources or [], key=lambda s: (not s.is_best, not s.is_primary_source)
@@ -500,6 +502,7 @@ def api_property(public_id: str, request: Request, session: Session = Depends(ge
             "page_number": d.page_number,
             "url": d.document_url,
             "href": document_href(d),
+            "missing": document_missing(d),
             "matched_text": d.matched_text,
         }
         for d in prop.documents or []

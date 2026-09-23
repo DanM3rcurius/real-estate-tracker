@@ -405,11 +405,13 @@ quietly short — which is this codebase's favourite failure, silence that looks
 like success. `scripts/backup_db.py` uses SQLite's own backup API: consistent
 with WAL active, and safe to run while the app is up.
 
-**Only the database travels.** The data directory holds three things:
+**The database and `uploads/` travel together.** The data directory holds
+four things:
 
 | File | Travels? |
 |---|---|
 | `hofradar.sqlite3` | **Yes** — all of it, saved UI settings included: `search_profiles` is a table, not a file |
+| `uploads/` | **Yes** — the PDF exposés readers attached through `/add`. `Document.local_path` in the database names a file under here by an absolute path; leave the directory behind and every "Dokument öffnen" and "Inserat öffnen" button for a hand-added listing 410s on the Pi even though the property and its facts are still there (GitHub issue #26). See *PDF uploads* below. |
 | `secret_key` | No. The Pi has its own, and `HOFRADAR_SECRET_KEY` in its `.env` wins over the file anyway. You log in once more, that is all. |
 | `hofradar.sqlite3.migrate-lock` | No. A lock; it holds no data. |
 
@@ -490,6 +492,63 @@ If you left `HOFRADAR_DATA_MOUNT` empty, the database is in a Docker volume
 rather than on a path — use the `docker run --rm -v hofradar_hofradar-data`
 recipe in *Restoring a backup* below to get the file in.
 
+### PDF uploads
+
+The database file alone brings every fact scraped or read out of an uploaded
+exposé, but not the PDF itself — that is a separate file under `uploads/` in
+the data directory, and `Document.local_path` in the database names one by an
+absolute path from whichever machine wrote it. Skip this step and the file
+does not vanish from the database's point of view — `hofradar documents
+--check` (below) and the dossier itself will say so, per document, rather
+than a plain 404 — but the reader cannot open it on the Pi until the file
+actually arrives here.
+
+On the laptop, the native default is `./data/uploads/` under the project
+checkout; a Docker dev setup uses whatever `HOFRADAR_DATA_DIR` names, `/data`
+in the repo's own `docker-compose.yml`, so on that runtime copy out of the
+named volume the same way *Restoring a backup* reads one in.
+
+```bash
+# from the laptop, native dev default:
+rsync -av ~/…/real-estate-tracker/data/uploads/ dan@hofradar.local:/tmp/uploads/
+# scp, if you would rather not install rsync:
+scp -r ~/…/real-estate-tracker/data/uploads dan@hofradar.local:/tmp/uploads
+```
+
+Then move the files into the data directory the Pi actually reads from and
+fix ownership — `10001:10001` is the image's user (`docker`, see the
+Dockerfile), the `hofradar` system account owns it on `native`:
+
+```bash
+# docker runtime, HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar
+sudo mkdir -p /mnt/ssd/hofradar/uploads
+sudo rsync -av /tmp/uploads/ /mnt/ssd/hofradar/uploads/
+sudo chown -R 10001:10001 /mnt/ssd/hofradar/uploads
+
+# native runtime, NATIVE_DATA_DIR default /var/lib/hofradar
+sudo mkdir -p /var/lib/hofradar/uploads
+sudo rsync -av /tmp/uploads/ /var/lib/hofradar/uploads/
+sudo chown -R hofradar:hofradar /var/lib/hofradar/uploads
+```
+
+If `HOFRADAR_DATA_MOUNT` is empty, the data directory is a Docker volume, not
+a path — copy in with `docker run --rm -v hofradar_hofradar-data:/data -v
+/tmp/uploads:/host alpine sh -c 'cp -r /host/. /data/uploads/ && chown -R
+10001:10001 /data/uploads'`, the same shape *Restoring a backup* uses for the
+database.
+
+Verify the count matches and, more to the point, that every row the database
+references actually resolves:
+
+```bash
+ls /mnt/ssd/hofradar/uploads | wc -l    # or the native/volume path above
+sudo hofradar-cli documents --check     # exit 0, no rows printed
+```
+
+`documents --check` reads `Document.local_path` for every row, so it also
+catches a file that arrived under the wrong name — the one case a bare file
+count cannot.
+
 ### Verify, then decide which machine is real
 
 The paths below assume `HOFRADAR_DATA_MOUNT=/mnt/ssd/hofradar`. If you left it
@@ -502,6 +561,7 @@ not a path, so use the `docker run --rm -v hofradar_hofradar-data` form from
 sudo hofradar-cli migrate --check    # "schema is current", exit 0
 sudo sqlite3 /mnt/ssd/hofradar/hofradar.sqlite3 \
   "select count(*) from properties; select count(*) from observations;"
+sudo hofradar-cli documents --check  # exit 0, no missing PDFs
 sudo hofradar-health
 sudo hofradar-backup                 # prove the backup loop works on real data
 ```

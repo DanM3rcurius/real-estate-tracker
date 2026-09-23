@@ -9,7 +9,11 @@ stored file readable again.
 
 It serves only files inside the uploads directory. ``Document.local_path`` is
 written by our own code today, but it is a plain string column, and a path that
-resolves outside that directory is refused rather than opened.
+resolves outside that directory is refused rather than opened. It also survives
+a ``local_path`` that names a directory this machine has never had - the one a
+database migration leaves behind (issue #26) - by falling back to this
+machine's own copy of an ``upload:`` document's digest; see
+:func:`hofradar.web.uploads.resolve_upload_path`.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from sqlalchemy.orm import Session
 from hofradar.db.models import Document
 from hofradar.web.deps import get_db, render
 from hofradar.web.query import is_web_url
-from hofradar.web.uploads import stored_upload_path
+from hofradar.web.uploads import resolve_upload_path
 
 router = APIRouter(tags=["documents"])
 
@@ -29,9 +33,15 @@ router = APIRouter(tags=["documents"])
 PDF_MEDIA_TYPE = "application/pdf"
 
 NOT_FOUND = "Kein Dokument mit der Nummer {document_id}."
+#: Issue #26: a database moved to another machine (dev -> Pi) without its
+#: ``uploads/`` directory looks exactly like a deleted file from here. Say so,
+#: rather than let "nicht mehr vorhanden" read as if the reader deleted it.
 FILE_GONE = (
-    "Die hinterlegte Datei „{title}“ ist nicht mehr vorhanden. Gespeichert war "
-    "sie unter {path} – das Objekt und seine Fakten bleiben erhalten."
+    "Die Datei „{title}“ fehlt auf diesem Server. Gespeichert war sie unter "
+    "{path} – das ist meist eine Datenbank ohne ihr uploads/-Verzeichnis "
+    "(siehe deploy/raspberrypi/README.md, „Bringing an existing database with "
+    "you“): die Datei von dort auf dieses Gerät kopieren und den Dateinamen "
+    "dabei unverändert lassen. Das Objekt und seine Fakten bleiben erhalten."
 )
 REMOTE_ONLY = (
     "Zu „{title}“ liegt keine eigene Kopie vor, nur der Link zur Quelle: {url}"
@@ -51,7 +61,7 @@ def document(document_id: int, request: Request, session: Session = Depends(get_
         return _error(request, 404, NOT_FOUND.format(document_id=document_id))
 
     title = row.title or row.kind
-    path = stored_upload_path(row.local_path)
+    path = resolve_upload_path(row.local_path, row.document_url)
     if path is not None:
         return FileResponse(
             path,

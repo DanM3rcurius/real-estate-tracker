@@ -220,6 +220,10 @@
         {% if href %}
         <a href="{{ href }}"
            {% if href is web_url %}rel="noopener noreferrer nofollow" target="_blank"{% endif %}>Dokument öffnen</a>
+        {% elif document_missing(doc) %}
+        <span class="hint hint--warning">Datei fehlt auf diesem Server – gespeichert war sie unter
+          <code>{{ doc.local_path }}</code>. Von der Ursprungsmaschine kopieren, siehe
+          deploy/raspberrypi/README.md, „Bringing an existing database with you“.</span>
         {% else %}
         <span class="hint">Datei nicht hinterlegt – Kennung {{ doc.document_url }}</span>
         {% endif %}

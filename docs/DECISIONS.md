@@ -920,3 +920,55 @@ archiving as the cause unless the archived count actually accounts for every
 mark - the failure here was a true-sounding sentence, so a sentence that can
 only be true is part of the fix.
 
+## 26. A document's identity, not its stored path, is what survives a move to another machine
+
+**The rule.** `Document.local_path` is written as an absolute path on
+whichever machine ran `/add`, and nothing rewrites it when the database
+travels - so `hofradar.web.uploads.resolve_upload_path` never trusts it alone.
+It tries the stored path first, and falls back to this machine's own
+`uploads_dir()/<digest>.pdf` for an `upload:<digest>` document, because the
+digest is the file's identity and identities do not change when the database
+does. `GET /document/{id}`, `document_href`, `document_missing` and `hofradar
+documents --check` all go through this one function rather than each growing
+their own idea of where the file might be.
+
+**What went wrong.** GitHub issue #26: PDFs stopped opening after a dev
+laptop's database moved to the Pi. The mechanism was exactly what entry 25
+already guards against, one level up - `stored_upload_path` correctly refuses
+a `local_path` that does not resolve under this machine's `uploads_dir()`, but
+it had no way to distinguish "this is an attack" from "this is a legitimate
+file that just has not been copied here yet, or was copied under a path this
+machine never had." Both looked identical: a plain string column pointing
+outside the directory. `deploy/raspberrypi/README.md`'s own migration guide
+made this worse, not just silent - *"Bringing an existing database with
+you"* listed exactly three files and said only the database travels, so
+following the documented steps to the letter left `uploads/` behind on the
+laptop. The result read as success: the property, its facts, and the
+`Document` row were all there; only the PDF was reachable nowhere, and the
+only visible sign was a 410 a reader found by clicking.
+
+**Why the fix is shaped this way.** The digest already is the file's name
+(entry 16, decision 25) and already lives in `document_url`, which a database
+move never touches - only `local_path`, a plain column naming a path on a
+machine that may no longer be this one, can go stale. Reconstructing the
+filename from the digest is therefore not a weaker check than
+`stored_upload_path`'s directory guard, it is the same guard applied to a
+name this function derives itself rather than reads from the row: the
+candidate path is always `uploads_dir() / f"{digest}.pdf"`, built from a
+digest matched against its own fixed shape before it ever touches the
+filesystem, so a document's `local_path` can be anything at all - attacker,
+stale, or merely missing - without it ever producing a path outside the
+directory. `document_missing` and the dossier's own "Datei fehlt auf diesem
+Server" notice exist because `document_href` returning `/document/{id}` for a
+file that will 410 on click is entry 18's rule about dropped facts, applied to
+links: a clickable-looking button that fails silently on click is the same
+shape of lie as a missing warning.
+
+**What it may not do.** The fallback only ever answers for an
+`upload:<digest>` document; a remote exposé or a text paste never had a file
+of its own to recover, and `document_missing` says `False` for either rather
+than inventing one. `deploy/raspberrypi/README.md` now lists `uploads/`
+alongside the database as something that travels, with the `scp`/`rsync`
+commands and the ownership step, and `hofradar documents --check` is the
+verification step before anyone calls the migration done.
+

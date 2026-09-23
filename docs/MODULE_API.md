@@ -499,7 +499,14 @@ def open_link(prop, *, document=None) -> OpenLink | None
     # hold, else None - which the page renders as no_link_reason(prop), not as
     # a missing button. ResultRow.open_link carries it for the cards.
 def document_href(document) -> str | None    # /document/{id}, or a web URL
-def pick_document(documents) -> Document | None   # local copy first
+    # None when local_path is set but document_missing(document) is True -
+    # a dead 410 link is never offered as a button (GitHub issue #26).
+def document_missing(document) -> bool
+    # True when local_path names a file but resolve_upload_path() cannot find
+    # it on this machine - the shape a database that moved without its
+    # uploads/ directory leaves behind. False for a document that never had a
+    # local copy in the first place.
+def pick_document(documents) -> Document | None   # local copy first, skipping a missing one
 def no_link_reason(prop) -> str                   # German, for the None case
 
 # hofradar.web.uploads - where a reader's upload lives
@@ -507,13 +514,28 @@ def uploads_dir() -> Path                    # $HOFRADAR_DATA_DIR/uploads
 def stored_upload_path(local_path) -> Path | None
     # The readable file behind Document.local_path, or None. Refuses anything
     # resolving outside uploads_dir().
+def resolve_upload_path(local_path, document_url) -> Path | None
+    # stored_upload_path(local_path), falling back to this machine's own
+    # uploads_dir()/<digest>.pdf for an upload:<digest> document - so a
+    # Document.local_path minted on another machine (dev -> Pi, issue #26)
+    # still resolves once uploads/ itself has made the trip. What both
+    # GET /document/{id} and document_href()/document_missing() call instead
+    # of trusting local_path alone.
 
 # Routes
 GET /document/{document_id}
-    # The stored exposé, served inline as application/pdf from uploads_dir().
-    # 404 for an unknown id or a document that only has a remote URL; 410 when
-    # local_path is set but the file is gone - each with a German sentence
-    # saying which, never a bare status.
+    # The stored exposé, served inline as application/pdf, resolved via
+    # resolve_upload_path(). 404 for an unknown id or a document that only has
+    # a remote URL; 410 when local_path is set but the file is gone - each
+    # with a German sentence saying which, never a bare status. The 410 names
+    # deploy/raspberrypi/README.md's uploads/ transfer step.
+
+# CLI
+hofradar documents [--check]
+    # Lists Document rows whose local_path is set but resolve_upload_path()
+    # finds nothing on this machine (GitHub issue #26 - a database moved here
+    # without its uploads/ directory). --check exits 1 if any are missing,
+    # same shape as `migrate --check`.
 
 GET /merkliste
     # The Merkliste page. Uses saved_profile_params() (the two sliders) only to
