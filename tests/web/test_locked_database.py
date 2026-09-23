@@ -153,3 +153,24 @@ def test_the_same_request_scores_normally_once_the_lock_is_released(
 
     assert response.status_code == 200
     assert "gesperrt" not in response.text
+
+
+def test_a_rename_during_a_crawl_says_it_was_not_saved(
+    locked_client: tuple[TestClient, sqlite3.Connection],
+) -> None:
+    """htmx swaps nothing on a 500, so an unhandled lock was a click that
+    silently did nothing. The reader gets the fold back, draft and all."""
+    client, _crawl = locked_client
+    response = client.post(
+        "/property/hof-locked/title", data={"title": "Moarhof"}, headers={"HX-Request": "true"}
+    )
+
+    assert response.status_code == 200
+    assert "Nicht gespeichert" in response.text
+    assert "gesperrt" in response.text
+    assert 'value="Moarhof"' in response.text
+    assert "<h1>Hofstelle mit Stadel</h1>" in response.text
+
+    plain = client.post("/property/hof-locked/title", data={"title": "Moarhof"})
+    assert plain.status_code == 503
+    assert "gesperrt" in plain.text

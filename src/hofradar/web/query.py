@@ -623,7 +623,10 @@ def row_to_dict(row: ResultRow) -> dict[str, Any]:
     return {
         "rank": row.rank,
         "public_id": prop.public_id,
-        "title": prop.canonical_title,
+        "title": prop.display_title,
+        # Whose words "title" is: the listing's own title rides along, so a
+        # renamed row's export still carries what the advert called it.
+        "listing_title": prop.canonical_title,
         "town": prop.town,
         "postcode": prop.postcode,
         "lat": prop.lat,

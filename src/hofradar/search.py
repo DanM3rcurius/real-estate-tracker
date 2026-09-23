@@ -25,7 +25,13 @@ if TYPE_CHECKING:  # pragma: no cover
 
 #: Fields a reader could plausibly type into the search box, in the order
 #: :func:`matches_search` joins them into one haystack.
-SEARCH_FIELDS: tuple[str, ...] = ("town", "postcode", "district", "canonical_title")
+SEARCH_FIELDS: tuple[str, ...] = (
+    "town",
+    "postcode",
+    "district",
+    "canonical_title",
+    "user_title",
+)
 
 
 def matches_search(prop: Property, needle: str) -> bool:

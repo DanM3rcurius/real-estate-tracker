@@ -198,6 +198,12 @@ assert defaults on `GET /` after it has requested `GET /?...` in the same
 `TestClient`, because cookies are preserved and the second request may redirect.
 See decision 21.
 
+**A title has two owners.** `canonical_title` is the listing's and `ingest`
+rewrites it; `user_title` is the reader's, written only by
+`POST /property/{id}/title` (and carried by `dedupe.merge`), never by `ingest`.
+Render `display_title` (`user_title or canonical_title`) wherever a reader sees
+a title; score, dedupe and feed the LLM `canonical_title`. Decision 29.
+
 **Rentals and flats.** A monthly figure is `price_type="rent"`, set by
 `parse_price` (price field) or `extract_features.is_rental` (prose), and it is
 the one exclusion farm substance cannot override - `REJECT_RENTAL` in scoring,

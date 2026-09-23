@@ -42,6 +42,11 @@ there rather than in `hofradar.scoring` because the web layer applies it in its
 own filter pass, which must keep working when scoring cannot be imported.
 Deliberately not the triage verdict `"rejected"`, which is a judgement about the
 farm and stays visible — see `docs/DECISIONS.md` entry 20.
+`Property.display_title` (`user_title or canonical_title`) is the title a reader
+sees - templates, `row_to_dict`, the digest, the change feed. `user_title` is
+the reader's rename, triage-class like `user_note` and never written by
+`ingest`; `canonical_title` stays the listing's words and is what scoring,
+dedupe and the LLM read — see `docs/DECISIONS.md` entry 29.
 
 ```python
 # hofradar.db.backup - the snapshot before anything destructive
@@ -479,11 +484,12 @@ ingested so the row learns the fact, and the scoring gate retires it.
 
 ```python
 def matches_search(prop: Property, needle: str) -> bool
-    # Casefolded substring match over town, postcode, district, canonical_title,
-    # using casefold() for complete Unicode normalization. An empty needle
-    # matches everything; None is not accepted. Applied in Python (not SQL LIKE)
-    # because SQLite's
-    # lower() is ASCII-only and would miss umlaut villages. Shared by
+    # Casefolded substring match over SEARCH_FIELDS - town, postcode, district,
+    # canonical_title, user_title (the listing's words and the reader's rename
+    # both find it) - using casefold() for complete Unicode normalization. An
+    # empty needle matches everything; None is not accepted. Applied in Python
+    # (not SQL LIKE) because SQLite's lower() is ASCII-only and would miss
+    # umlaut villages. Shared by
     # hofradar.scoring.engine._apply_filters (ranked path) and
     # hofradar.web.query.passes_filters (degraded path) so the two cannot drift.
 ```
@@ -579,6 +585,28 @@ POST /property/{public_id}/merken
     # the row that is actually rendered. Renders
     # partials/merken_button.html for HTMX (hx-swap="outerHTML"), or redirects
     # with 303 for a plain form post.
+
+POST /property/{public_id}/title
+    # Form fields title, reset. Sets Property.user_title, the reader's name
+    # for the place; the only route that writes it (dedupe.merge carries it,
+    # docs/DECISIONS.md entry 29). Whitespace runs, newlines included, collapse
+    # to one space (web.filters.one_line, which also pre-fills the field). An
+    # empty title, reset=1, or the listing's canonical_title typed back
+    # (compared after the same cleaning) clear it to None. Follows
+    # merged_into_id to the survivor, like /merken. Refused, never truncated:
+    # longer than USER_TITLE_MAX (the column's 500) or a crawl holding the
+    # write lock. HTMX then gets partials/title.html at 200 with the error and
+    # the draft kept; a plain post gets a 400 / 503 page. Success renders
+    # partials/title.html for HTMX (hx-target="#title", hx-swap="outerHTML";
+    # it carries a <title> so the browser tab follows) - or a 204 with
+    # HX-Redirect to the survivor when the id was merged away - and a 303 to
+    # the survivor's dossier for a plain post. 404 for an unknown id.
+
+GET /api/property/{public_id}.json
+    # The dossier as JSON: row_to_dict plus evidence, user_note, timeline,
+    # sources, documents. "title" is display_title; "user_title" (None unless
+    # renamed) and "listing_title" (canonical_title, also on every row_to_dict
+    # row, so the list JSON and the map carry it too) say whose words it is.
 
 GET /?reset=1
     # Deletes the filter cookie and renders the default profile and filters

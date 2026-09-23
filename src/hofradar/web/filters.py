@@ -257,6 +257,16 @@ def week_label(value: Any) -> str:
     return f"KW {iso.week:02d} / {iso.year}"
 
 
+def one_line(value: Any) -> str:
+    """One line of text: every run of whitespace, newlines included, is a space.
+
+    A text input cannot hold a newline - the browser deletes it, gluing the
+    words either side together - so a title pre-filled into one has to be
+    collapsed first, the same way the route collapses what comes back.
+    """
+    return " ".join(str(value or "").split())
+
+
 #: Registered on the Jinja environment by :func:`hofradar.web.app.create_app`.
 JINJA_FILTERS = {
     "de_number": de_number,
@@ -276,4 +286,5 @@ JINJA_FILTERS = {
     "de_status": de_status,
     "de_tier": de_tier,
     "week_label": week_label,
+    "one_line": one_line,
 }

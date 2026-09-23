@@ -3,7 +3,7 @@
   <header class="card__head">
     <span class="card__rank">{{ row.rank }}</span>
     <h3 class="card__title">
-      <a href="/property/{{ row.prop.public_id }}">{{ row.prop.canonical_title }}</a>
+      <a href="/property/{{ row.prop.public_id }}">{{ row.prop.display_title }}</a>
     </h3>
     {{ ui.status_chip(row.prop) }}
   </header>

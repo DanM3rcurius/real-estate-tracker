@@ -1136,3 +1136,86 @@ the title. On this cover the title is "EINFAMILIENHAUS IN MÜHLDORF AM INN", a
 small kicker set above the headline: the first headline-like line, as the
 rule says, and an honest name for the house. The four uploads repaired under
 entry 28 keep the title and price they had.
+## 29. The reader's name for a place is theirs; the listing's title stays evidence
+
+**Decision.** A reader can rename a property from the dossier, because an
+imported item's title is often no name at all - the first line of a paste, a
+PDF's cover line. The name is stored in its own column, `Property.user_title`
+(nullable `String(500)`), never in `canonical_title`.
+`POST /property/{public_id}/title` is the only route that writes it;
+`dedupe.merge` also carries it (below). `Property.display_title`
+(`user_title or canonical_title`) is what every surface a reader looks at
+renders: the dossier's `<title>`, heading and image alt text, the radar cards,
+the map's list, `row_to_dict["title"]` (so `/api/properties.json`, the map
+payload and the CSV's *Titel* column), the weekly digest, the change feed and
+the `/add` result. `canonical_title` stays the listing's words, and is what
+scoring's `text_blob`, dedupe's facts, the LLM review input, the dossier's
+*Fakten und Belege* table and the delete report read. A renamed heading shows
+the listing's title under it (*„Im Inserat: …"*), every `row_to_dict` row
+carries `listing_title` beside `title`, and
+`GET /api/property/{public_id}.json` adds `user_title` (null unless renamed),
+so the dossier and its JSON both say whose words a title is. The CSV keeps
+its one *Titel* column: it is the reader's sheet, not an audit trail.
+
+**Why not edit `canonical_title`.** `lifecycle.ingest` rewrites it:
+`_apply_facts` passes it through `_rules.take_value`, which lets a verifying
+source replace it on its next crawl and a discovery source fill it when it is
+blank. An edit there would hold until a crawl undid it, with no error and no
+notice - silence that looks like success, the shape of bug this codebase keeps
+producing (entries 18, 19, 25). It would also have turned the reader's words
+into evidence: scoring reads the title as prose, dedupe weighs title
+similarity, the LLM is handed it as the listing's own. A nickname must not
+move a score or a duplicate verdict, because the listing never said it. Kept
+apart, a rename needs no rescore at all.
+
+**Why this does not break invariant 1.** `ingest` is the only writer of what a
+listing says, and it never reads or writes `user_title`. The reader's own
+columns were never its business: `/triage` writes `user_state` and
+`user_note`, `/merken` writes `shortlisted_at` (entry 21). `user_title` is the
+same class of data, so it survives every re-crawl and needs no `Observation`.
+
+**Clearing, not copying.** An empty title, the *„Titel aus dem Inserat
+verwenden"* button (`reset=1`) or the listing's own title typed back all set
+`user_title` to NULL. Storing a copy of the listing's title would freeze the
+heading at today's wording while it still looked like the listing's; NULL
+means the heading follows the listing again when a crawl changes it. Every
+run of whitespace, newlines included, is collapsed to one space first
+(`web/filters.one_line`, also the Jinja filter), because a title is one line.
+The same function fills the field and cleans the listing's title before the
+comparison. Both halves matter: a multi-line `<h1>` or a paste keeps
+newlines, tabs and double spaces; a text input deletes a newline outright,
+gluing the words either side together; and comparing against the raw column
+made "Speichern" on an untouched form store a frozen, mangled copy.
+
+**Refused, never cut short.** A name longer than the column (`USER_TITLE_MAX`,
+read off the column so the two cannot drift) is refused with a German sentence
+giving both lengths. HTMX gets the partial back with the fold open and the
+draft still in the field; a plain form post gets a 400 page. Truncating would
+store a name the reader did not type under a *Gespeichert*. The input's
+`maxlength` is a convenience; the route is the check. A crawl holding
+SQLite's write lock is refused the same way (a 503 for a plain post): htmx
+swaps nothing on an error status, so an unhandled lock was a click that did
+nothing at all.
+
+**Merge and search.** `user_title` is one of `dedupe.merge`'s fillable fields:
+the survivor keeps its own name and takes the dropped row's only when it has
+none, so a merge never splices two names and the one shown was chosen by the
+reader. When both rows were renamed, the dropped row keeps its own, unshown.
+`hofradar.search.SEARCH_FIELDS` holds both columns, so the search box finds a
+property by the reader's name and by the listing's words. The route follows
+`merged_into_id` to the survivor before it writes, as `/merken` does (entry
+25): a name written to a merged-away row would sit on a row no list renders.
+An HTMX rename from a merged-away dossier answers `HX-Redirect` to the
+survivor's, because swapping the survivor's heading into the old page looked
+saved and reverted on reload.
+
+**Every title is text, including on the map.** Leaflet puts a string popup in
+through `innerHTML`, and `app.js` built the popup by concatenating the title
+and town - third-party advert text, and now the reader's. It escapes them
+(`esc`) now. That hole predates this entry; a renamed title only widened it.
+
+**Consequence.** A new place that shows a reader a title renders
+`display_title`; a new place that treats the title as a fact about the
+listing reads `canonical_title`. Picking the wrong one is silent either way -
+the reader's name leaking into a score, or the listing's words overriding a
+name the reader chose - so the choice is made per call site, not by default.

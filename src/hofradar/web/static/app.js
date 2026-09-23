@@ -20,6 +20,13 @@
     }
   };
 
+  // Leaflet puts a string popup in through innerHTML, and titles and towns
+  // come from third-party adverts and from the reader - text, never markup.
+  var esc = function (value) {
+    return String(value === null || value === undefined ? "" : value)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  };
   var eur = function (value) { return deFormat(value, 0) + " €"; };
   var km = function (value) { return deFormat(value, 1) + " km"; };
   var roundTo = function (value, places) {
@@ -152,7 +159,7 @@
     }
     L.circleMarker([lat, lon], {
       radius: 7, color: "#4a6d3a", fillColor: "#4a6d3a", fillOpacity: 1,
-    }).addTo(map).bindPopup("Suchzentrum: " + (node.dataset.centerName || ""));
+    }).addTo(map).bindPopup("Suchzentrum: " + esc(node.dataset.centerName));
 
     var colourFor = function (point) {
       var score = point.scores ? point.scores.final : null;
@@ -179,13 +186,13 @@
         ? km(point.distance_driving_km)
         : "nicht geprüft";
       marker.bindPopup(
-        "<b>" + (point.title || "") + "</b><br>" +
-        (point.town || "Ort unbekannt") + "<br>" +
+        "<b>" + esc(point.title) + "</b><br>" +
+        esc(point.town || "Ort unbekannt") + "<br>" +
         (point.price === null ? "k. A." : eur(point.price)) + "<br>" +
         "Luftlinie " + (point.distance_air_km === null ? "k. A." : km(point.distance_air_km)) + "<br>" +
         "Fahrstrecke " + driving + "<br>" +
-        (point.precise ? "" : "<i>Standort nur " + point.geo_precision + "</i><br>") +
-        '<a href="/property/' + point.public_id + '">Dossier öffnen</a>'
+        (point.precise ? "" : "<i>Standort nur " + esc(point.geo_precision) + "</i><br>") +
+        '<a href="/property/' + encodeURIComponent(point.public_id) + '">Dossier öffnen</a>'
       );
       marker.addTo(map);
       bounds.push([point.lat, point.lon]);
