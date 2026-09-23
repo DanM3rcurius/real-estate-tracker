@@ -84,6 +84,15 @@ _CONTACT_LABEL_RE = re.compile(
 #: An e-mail address or a web address is never a headline.
 _ADDRESS_LINE_RE = re.compile(r"@|https?://|\bwww\.", re.IGNORECASE)
 
+#: A cover can open with its fact box and no colon in it: ohne-makler.net's
+#: text layer starts "Baujahr 1993", "Grundstücksfläche 670 m²", ... and sets
+#: the headline after the box (issue #31). Most of its rows name a label the
+#: fact reader does not know and carry no figure ("Energieträger Gas",
+#: "Zustand gepflegt"), so the box is recognised as a block, not row by row: a
+#: line the fact reader reads a fact off opens it, and a row of a label and a
+#: short value - at most this many words - continues it.
+_MAX_FACT_ROW_WORDS = 3
+
 #: Unicode's own ligature code points (U+FB00-U+FB06). They are honest text,
 #: but a label reader that knows "wohnfläche" never matches "Wohnﬂäche", so
 #: they are spelled out before anything reads them.
@@ -343,6 +352,7 @@ def pdf_title(text: PdfText) -> str | None:
     """The first line on the first page that reads like a headline."""
     for page in text.pages:
         under_contact_label = False
+        in_fact_table = False
         for line in page.splitlines():
             candidate = line.strip()
             if not candidate:
@@ -356,6 +366,11 @@ def pdf_title(text: PdfText) -> str | None:
             if len(_LETTERS_RE.findall(candidate)) < _MIN_TITLE_LETTERS:
                 continue
             if _LABEL_LINE_RE.match(candidate):
+                continue
+            if extract_labeled_fields(candidate):
+                in_fact_table = True
+                continue
+            if in_fact_table and len(candidate.split()) <= _MAX_FACT_ROW_WORDS:
                 continue
             if len(candidate) > _MAX_PDF_TITLE_LEN:
                 candidate = candidate[:_MAX_PDF_TITLE_LEN].rstrip() + "..."

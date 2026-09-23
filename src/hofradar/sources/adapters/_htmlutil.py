@@ -47,6 +47,7 @@ _LABEL_FIELD_MAP: dict[str, str] = {
     "preisvorstellung": "price_raw",
     "angebotspreis": "price_raw",
     "verhandlungsbasis": "price_raw",
+    "verkauf": "price_raw",
     "price": "price_raw",
     # Rent labels map to the same field, but the label is kept in the value
     # (see _LABELS_KEPT_IN_VALUE): "1.250 €" alone would parse as an asking
@@ -117,6 +118,15 @@ _LABELS_KEPT_IN_VALUE: frozenset[str] = frozenset(
         "verhandlungsbasis",
     }
 )
+
+#: Labels that are as often a *value* as a label. ohne-makler.net's exposé
+#: writes its price as "Verkauf: 720.000 €", but "Verkauf" is just as often
+#: the answer to "Vermarktungsart:", and as a label it heads whatever the
+#: marketing type has to say ("Verkauf: provisionsfrei"). A colon is trusted
+#: to pair everything else; these claim only a value of their field's shape
+#: (``_value_fits``), because the first price found wins and a slogan taken
+#: as one would hide the fact box's real one (issue #31).
+_LABELS_NEEDING_VALUE_SHAPE: frozenset[str] = frozenset({"verkauf"})
 
 #: Qualifiers a broker bolts onto a label that do not change what it means:
 #: "Wohnfläche ca.", "Grundstücksfläche (m²)", "Zimmer gesamt", "Baujahr
@@ -330,6 +340,8 @@ def _take(found: dict[str, str], label: str, value: str) -> None:
     if field is None or field in found:
         return
     if field == "location_raw" and not reads_like_a_place(value):
+        return
+    if lookup_key in _LABELS_NEEDING_VALUE_SHAPE and not _value_fits(field, value):
         return
     if lookup_key in _LABELS_KEPT_IN_VALUE:
         value = f"{label.strip()}: {value}"

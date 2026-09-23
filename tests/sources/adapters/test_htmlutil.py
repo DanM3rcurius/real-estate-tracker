@@ -332,3 +332,33 @@ def test_a_prose_location_leaves_room_for_a_later_labelled_one() -> None:
     text = "Lage: ruhig und doch zentral gelegen\nOrt: 82054 Sauerlach"
 
     assert extract_labeled_fields(text) == {"location_raw": "82054 Sauerlach"}
+
+
+# --------------------------------------------------------------------------- #
+# "Verkauf" - a price label that is more often a value (issue #31)
+# --------------------------------------------------------------------------- #
+
+
+def test_verkauf_labels_the_asking_price() -> None:
+    # The ohne-makler.net exposé labels its price with the marketing type,
+    # the way it labels a rental's with "Miete".
+    text = "Einfamilienhaus\nVerkauf: 720.000 €\n84453 Mühldorf am Inn"
+
+    assert extract_labeled_fields(text)["price_raw"] == "720.000 €"
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["Verkauf: provisionsfrei", "Verkauf: ab 01.04.2027", "Verkauf: direkt vom Eigentümer"],
+)
+def test_verkauf_does_not_claim_a_value_that_is_not_a_price(line: str) -> None:
+    # "Verkauf" heads anything the marketing type can say. Behind a colon the
+    # pairing is otherwise trusted, and the first price found wins - so a
+    # "Verkauf: provisionsfrei" above the fact box would hide its Kaufpreis.
+    text = f"{line}\nKaufpreis: 450.000 €"
+
+    assert extract_labeled_fields(text)["price_raw"] == "450.000 €"
+
+
+def test_verkauf_as_a_value_is_not_a_label() -> None:
+    assert extract_labeled_fields("Vermarktungsart: Verkauf\nAngebotsart\nVerkauf") == {}

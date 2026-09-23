@@ -357,11 +357,13 @@ def extract_labeled_fields(text: str) -> dict[str, str]
     # line (trailing colon optional) with a short value on the next non-empty
     # line (numeric fields only, never location_raw); a bare room count
     # ("28 Zimmer") on a short line. A pairing without a colon needs a value
-    # of the field's shape. Qualified labels ("Wohnfläche ca.", "Anzahl
-    # Zimmer") resolve to their base field. A location_raw value must read
-    # like a place (reads_like_a_place), so a "Lage:" paragraph is left for
-    # the normaliser's own search of the text. First value per field wins.
-    # Strings only - it parses nothing. DECISIONS entries 24, 26 and 28.
+    # of the field's shape, and so does one of a label that is as often a
+    # value ("Verkauf: 720.000 €" vs "Vermarktungsart: Verkauf"), colon or
+    # not. Qualified labels ("Wohnfläche ca.", "Anzahl Zimmer") resolve to
+    # their base field. A location_raw value must read like a place
+    # (reads_like_a_place), so a "Lage:" paragraph is left for the
+    # normaliser's own search of the text. First value per field wins.
+    # Strings only - it parses nothing. DECISIONS entries 24, 26, 28 and 29.
 def reads_like_a_place(value: str) -> bool
     # Capitalised words, numbers and small joining words ("am", "bei",
     # "a.d.") up to the first comma; a lowercase word outside those is prose.
@@ -396,8 +398,10 @@ def looks_like_pdf(data: bytes) -> bool
 def is_pdf_response(content_type, url, body=None) -> bool
 def pdf_title(text: PdfText) -> str | None
     # First headline-like line of the first page: skips "Label: value" lines,
-    # the line under a bare contact label ("Ihr Gesprächspartner:") and any
-    # e-mail or web address.
+    # the line under a bare contact label ("Ihr Gesprächspartner:"), any
+    # e-mail or web address, and a fact box the cover opens with - a line
+    # extract_labeled_fields reads a fact off and the short rows after it
+    # ("Baujahr 1993", "Zustand gepflegt"). Decision 29.
 def listing_title(tree: HTMLParser, url: str) -> str | None
     # JSON-LD name -> <h1> -> og:title -> <title>, with a trailing site name
     # stripped only when it matches og:site_name or the URL's own host.
