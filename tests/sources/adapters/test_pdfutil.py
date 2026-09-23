@@ -388,3 +388,113 @@ def test_merge_pdf_into_listing_extends_warnings_and_appends_the_document_ref():
             kind="expose", url="https://example.test/1.pdf", title="Das Exposé", page_count=1
         ),
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Ligatures (the Ŧ/ť/Ũ exposé)
+# --------------------------------------------------------------------------- #
+
+#: Lines lifted verbatim from a real broker exposé (Barlow, subset TrueType)
+#: whose ToUnicode map leaves out the f-ligature glyphs. pypdf then emits the
+#: glyph number as a character: 0x165 "ť" is fi, 0x166 "Ŧ" is fl, 0x168 "Ũ"
+#: is ffi - so "Wohnfläche" never matched a label.
+UNMAPPED_LIGATURE_LINES = (
+    "Kaufpreis 570.000,00 e\n"
+    "WohnŦäche ca. 140 m²\n"
+    "Grundstücksgröße ca. 442 m²\n"
+    "EnergieeŨzienzklasse H\n"
+    "Das Haus beťndet sich in ruhiger Lage. Hier ťnden Sie Platz.\n"
+    "Die VerpŦichtung zur Sanierung entfällt; der Käufer proťtiert davon."
+)
+
+
+def test_recover_ligatures_reads_unmapped_glyphs_as_the_ligature_they_stand_for():
+    text, warnings = _pdfutil.recover_ligatures(UNMAPPED_LIGATURE_LINES)
+
+    assert "Wohnfläche ca. 140 m²" in text
+    assert "Energieeffizienzklasse" in text
+    assert "befindet" in text
+    assert "finden" in text
+    assert "Verpflichtung" in text
+    assert "profitiert" in text
+    assert not set("Ŧťũ") & set(text)
+    # Inferred text is said, not slipped in (decision 18).
+    assert len(warnings) == 1
+    assert "„Ŧ“ als „fl“" in warnings[0]
+    assert "„ť“ als „fi“" in warnings[0]
+    assert "„Ũ“ als „ffi“" in warnings[0]
+
+
+def test_recover_ligatures_spells_out_unicode_presentation_forms_silently():
+    text, warnings = _pdfutil.recover_ligatures("Wohnﬂäche 120 m²\nEnergieeﬀizienzklasse B")
+
+    assert text == "Wohnfläche 120 m²\nEnergieeffizienzklasse B"
+    # U+FB02 is an honest code point, not a guess - nothing to warn about.
+    assert warnings == []
+
+
+def test_recover_ligatures_leaves_real_letters_outside_latin_1_alone():
+    # A broker's name is not a ligature: no stem turns "Łukasz" or "Dvořák"
+    # into an exposé word, so nothing is replaced and nothing is claimed.
+    original = "Ihr Ansprechpartner: Łukasz Dvořák\nWohnfläche: 140 m²"
+
+    assert _pdfutil.recover_ligatures(original) == (original, [])
+
+
+def test_recover_ligatures_prefers_the_ligature_that_covers_the_stem():
+    # "beťndet" as ffi would be "beffindet", which also contains "find" - but
+    # not at the replaced position, so fi wins and ffi scores nothing.
+    text, _ = _pdfutil.recover_ligatures("beťndet ťnden")
+
+    assert text == "befindet finden"
+
+
+def test_extract_pdf_text_recovers_ligatures_across_the_whole_document(monkeypatch):
+    pages = iter(["WohnŦäche ca. 140 m²", "Die VerpŦichtung entfällt."])
+    pypdf = _pdfutil._lazy_pypdf()
+    monkeypatch.setattr(pypdf.PageObject, "extract_text", lambda self, *a, **k: next(pages))
+
+    result = extract_pdf_text(make_pdf([["x"], ["y"]]))
+
+    assert result.pages == ["Wohnfläche ca. 140 m²", "Die Verpflichtung entfällt."]
+    assert any("„Ŧ“ als „fl“" in warning for warning in result.warnings)
+
+
+def test_raw_listing_from_pdf_reads_a_fact_behind_an_unmapped_ligature(monkeypatch):
+    pypdf = _pdfutil._lazy_pypdf()
+    monkeypatch.setattr(
+        pypdf.PageObject, "extract_text", lambda self, *a, **k: UNMAPPED_LIGATURE_LINES
+    )
+
+    listing = raw_listing_from_pdf("manual", "upload:abc", make_pdf([["x"]]))
+
+    assert listing.living_raw == "140 m²"
+    assert listing.land_raw == "442 m²"
+    assert any("Ligatur" in warning for warning in listing.warnings)
+
+
+def test_pdf_title_skips_the_contact_person_under_a_bare_label():
+    # The Garant Immobilien cover page: reference, contact block, then the
+    # headline. The name under "Ihr Gesprächspartner:" is that label's value,
+    # and an e-mail address is never a headline.
+    data = make_pdf(
+        [
+            [
+                "Objektnummer:",
+                "K 829.012.086.829",
+                "Ihr Gesprächspartner:",
+                "Kosta Nasiopoulos",
+                "089/78 74 79 64",
+                "k.nasiopoulos@garant-immo.de",
+                "Baugrundstück mit Altbestand",
+            ]
+        ]
+    )
+
+    assert pdf_title(extract_pdf_text(data)) == "Baugrundstück mit Altbestand"
+
+
+def test_pdf_title_still_takes_a_headline_under_a_bare_non_contact_label():
+    data = make_pdf([["Exposé:", "Hofstelle mit Stadel und Obstgarten"]])
+
+    assert pdf_title(extract_pdf_text(data)) == "Hofstelle mit Stadel und Obstgarten"

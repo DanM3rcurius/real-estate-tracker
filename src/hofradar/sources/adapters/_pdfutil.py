@@ -76,6 +76,59 @@ _LETTERS_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 #: colon deep in its text ("Wasserschloss: ein Refugium") is left alone.
 _LABEL_LINE_RE = re.compile(r"^[^:]{1,30}:(?:\s|$)")
 
+#: The line under a bare "Ihr Gesprächspartner:" is a broker's name, which
+#: has as many letters as a headline and no colon to give it away.
+_CONTACT_LABEL_RE = re.compile(
+    r"(?:ansprech|gesprächs)partner|kontakt|makler|berater|anbieter", re.IGNORECASE
+)
+#: An e-mail address or a web address is never a headline.
+_ADDRESS_LINE_RE = re.compile(r"@|https?://|\bwww\.", re.IGNORECASE)
+
+#: Unicode's own ligature code points (U+FB00-U+FB06). They are honest text,
+#: but a label reader that knows "wohnfläche" never matches "Wohnﬂäche", so
+#: they are spelled out before anything reads them.
+_PRESENTATION_LIGATURES = str.maketrans(
+    {
+        "\ufb00": "ff",
+        "\ufb01": "fi",
+        "\ufb02": "fl",
+        "\ufb03": "ffi",
+        "\ufb04": "ffl",
+        "\ufb05": "st",
+        "\ufb06": "st",
+    }
+)
+
+#: The f-ligatures a font draws as one glyph.
+_F_LIGATURES = ("ffi", "ffl", "ff", "fi", "fl")
+
+#: Exposé words spelled with an f-ligature, cut to the stem around it. When a
+#: font's ToUnicode map leaves a ligature glyph out, pypdf emits the glyph's
+#: number as a character ("WohnŦäche": glyph 0x166 is fl), and nothing in the
+#: file says which ligature it was - so each such character is read as the
+#: ligature that turns the most of its words into one of these. A stem only
+#: counts when it spans the whole replaced ligature, or "beffindet" would
+#: score for ffi on the strength of "find".
+_LIGATURE_STEMS = (
+    # fl
+    "fläch", "flach", "pflicht", "pfleg", "pflanz", "pflast", "flur", "fliese", "flügel",
+    "fluss", "flieg", "flug", "flex", "aufl", "einfl",
+    # fi
+    "find", "profit", "finanz", "firm", "fisch", "fix", "grafi", "defini",
+    # ffi
+    "effizien", "offizi",
+    # ff
+    "offen", "öffn", "öffentl", "stoff", "griff", "treff", "schaff", "hoff", "pfeff",
+    # ffl
+    "trefflich", "stoffl",
+)
+
+#: A character above Latin-1 inside a word is the only kind that can be a
+#: stray glyph number: everything German, and the typography around it
+#: (€, „“, –), is either Latin-1 or not a letter.
+_LATIN_1_MAX = 0xFF
+_WORD_RE = re.compile(r"\w+")
+
 #: Warnings are German because they reach the reader on /add and in the
 #: observation's raw record - same rule as ``hofradar.normalize``.
 WARNING_NO_TEXT_LAYER = (
@@ -201,14 +254,105 @@ def extract_pdf_text(data: bytes) -> PdfText:
         result.pages.append(text)
     if not result.has_text:
         result.warnings.append(WARNING_NO_TEXT_LAYER)
+    # Decided over the whole document, not page by page: the same glyph is the
+    # same ligature on every page, and the cover alone may hold no word that
+    # gives it away.
+    pages = [page.translate(_PRESENTATION_LIGATURES) for page in result.pages]
+    ligatures = _unmapped_ligatures("\n".join(pages))
+    result.pages = [_spell_out(page, ligatures) for page in pages]
+    if ligatures:
+        result.warnings.append(_ligature_warning(ligatures))
     return result
+
+
+def recover_ligatures(text: str) -> tuple[str, list[str]]:
+    """Spell out the f-ligatures in text lifted from a PDF.
+
+    Returns the text and, when a glyph had to be guessed, one warning saying
+    which character was read as which ligature. For text that left a PDF some
+    other way - a viewer's copy pasted into /add, an upload's stored text
+    re-read by ``scripts/repair_pastes.py``; ``extract_pdf_text`` does the same
+    for the file itself.
+    """
+    text = text.translate(_PRESENTATION_LIGATURES)
+    ligatures = _unmapped_ligatures(text)
+    if not ligatures:
+        return text, []
+    return _spell_out(text, ligatures), [_ligature_warning(ligatures)]
+
+
+def _unmapped_ligatures(text: str) -> dict[str, str]:
+    """Which stray characters in ``text`` stand for which f-ligature."""
+    words_by_glyph: dict[str, set[str]] = {}
+    for word in _WORD_RE.findall(text):
+        for char in word:
+            if ord(char) > _LATIN_1_MAX and char.isalpha():
+                words_by_glyph.setdefault(char, set()).add(word)
+
+    found: dict[str, str] = {}
+    for glyph, words in words_by_glyph.items():
+        scores = {
+            ligature: sum(_stem_spans_ligature(word, glyph, ligature) for word in words)
+            for ligature in _F_LIGATURES
+        }
+        best = max(scores.values())
+        winners = [ligature for ligature, score in scores.items() if score == best]
+        # Nothing matched, or two readings matched equally well: a guess the
+        # words do not support is not made - the character stays as it is.
+        if best and len(winners) == 1:
+            found[glyph] = winners[0]
+    return found
+
+
+def _stem_spans_ligature(word: str, glyph: str, ligature: str) -> bool:
+    spans: list[tuple[int, int]] = []
+    spelled = ""
+    for char in word:
+        if char == glyph:
+            spans.append((len(spelled), len(spelled) + len(ligature)))
+            spelled += ligature
+        else:
+            spelled += char
+    spelled = spelled.lower()
+    for stem in _LIGATURE_STEMS:
+        start = spelled.find(stem)
+        while start != -1:
+            end = start + len(stem)
+            if any(start <= low and high <= end for low, high in spans):
+                return True
+            start = spelled.find(stem, start + 1)
+    return False
+
+
+def _spell_out(text: str, ligatures: dict[str, str]) -> str:
+    for glyph, ligature in ligatures.items():
+        text = text.replace(glyph, ligature)
+    return text
+
+
+def _ligature_warning(ligatures: dict[str, str]) -> str:
+    readings = [f"„{glyph}“ als „{ligature}“" for glyph, ligature in sorted(ligatures.items())]
+    listed = readings[0] if len(readings) == 1 else f"{', '.join(readings[:-1])} und {readings[-1]}"
+    return (
+        "PDF: die Schrift des Dokuments ordnet einigen Ligaturen keinen Text zu - "
+        f"{listed} gelesen"
+    )
 
 
 def pdf_title(text: PdfText) -> str | None:
     """The first line on the first page that reads like a headline."""
     for page in text.pages:
+        under_contact_label = False
         for line in page.splitlines():
             candidate = line.strip()
+            if not candidate:
+                continue
+            follows_contact_label = under_contact_label
+            under_contact_label = candidate.endswith(":") and bool(
+                _CONTACT_LABEL_RE.search(candidate)
+            )
+            if follows_contact_label or _ADDRESS_LINE_RE.search(candidate):
+                continue
             if len(_LETTERS_RE.findall(candidate)) < _MIN_TITLE_LETTERS:
                 continue
             if _LABEL_LINE_RE.match(candidate):

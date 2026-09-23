@@ -179,3 +179,15 @@ def test_ingest_pdf_warns_about_a_scan_instead_of_returning_nothing(adapter):
 
     assert listing.description is None
     assert any("gescannt" in warning for warning in listing.warnings)
+
+
+def test_ingest_text_recovers_unmapped_ligatures_copied_out_of_a_pdf(adapter):
+    # What a PDF viewer's copy - and the repair script's re-read of a stored
+    # upload - hands over when the font left its ligatures unmapped.
+    listing = adapter.ingest_text(
+        "upload:abc", "Haus am See\nWohnŦäche ca. 140 m²\nDie VerpŦichtung entfällt."
+    )
+
+    assert listing.living_raw == "140 m²"
+    assert "Verpflichtung" in listing.description
+    assert any("Ligatur" in warning for warning in listing.warnings)

@@ -283,3 +283,23 @@ def test_price_on_request_is_a_stated_fact_not_a_parse_failure():
     assert result.price_type == PriceType.ON_REQUEST.value
     assert not any(w.startswith("price:") for w in result.warnings)
     assert _eckdaten(result) == []
+
+
+def test_a_prose_lage_paragraph_leaves_the_town_to_the_cover_page_address():
+    from hofradar.sources.adapters._htmlutil import extract_labeled_fields
+
+    text = (
+        "Baugrundstück mit Altbestand\n"
+        "Lanzenhaarer Weg 18\n"
+        "82054 Sauerlach\n"
+        "Lage: Sauerlach zählt zu den beliebtesten Wohnorten im südlichen\n"
+        "Landkreis München und verbindet naturnahes Wohnen mit Anbindung."
+    )
+    raw = RawListing(
+        source_key="manual", url="upload:abc", description=text, **extract_labeled_fields(text)
+    )
+
+    listing = normalize_listing(raw, KEYWORDS)
+
+    assert listing.town == "Sauerlach"
+    assert listing.postcode == "82054"

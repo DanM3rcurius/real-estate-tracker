@@ -358,8 +358,13 @@ def extract_labeled_fields(text: str) -> dict[str, str]
     # line (numeric fields only, never location_raw); a bare room count
     # ("28 Zimmer") on a short line. A pairing without a colon needs a value
     # of the field's shape. Qualified labels ("Wohnfläche ca.", "Anzahl
-    # Zimmer") resolve to their base field. First value per field wins.
-    # Strings only - it parses nothing. DECISIONS entries 24 and 26.
+    # Zimmer") resolve to their base field. A location_raw value must read
+    # like a place (reads_like_a_place), so a "Lage:" paragraph is left for
+    # the normaliser's own search of the text. First value per field wins.
+    # Strings only - it parses nothing. DECISIONS entries 24, 26 and 28.
+def reads_like_a_place(value: str) -> bool
+    # Capitalised words, numbers and small joining words ("am", "bei",
+    # "a.d.") up to the first comma; a lowercase word outside those is prose.
 
 # hofradar.sources.adapters._pdfutil - the shared PDF lift, same station as
 # _htmlutil for the other container. Used by denkmalboerse, pdf_bulletin,
@@ -372,6 +377,12 @@ class PdfTooLarge(PdfError); class PdfUnreadable(PdfError)
 @dataclass class PdfText: pages: list[str]; warnings: list[str]
     .page_count .has_text .text          # non-empty pages joined by a blank line
 def extract_pdf_text(data: bytes) -> PdfText           # raises PdfError
+    # Ligatures are spelled out: U+FB00-FB06 silently, a glyph the font's
+    # ToUnicode map left out (pypdf emits its number: "WohnŦäche") by which
+    # ligature turns its words into known exposé stems - with a warning.
+def recover_ligatures(text: str) -> tuple[str, list[str]]
+    # The same for text that left a PDF some other way (a viewer's copy, an
+    # upload's stored text). Used by manual's plain-text paste. Decision 28.
 def raw_listing_from_pdf(source_key, url, data, *, http_status=None, extra=None,
                          kind=DOCUMENT_KIND_EXPOSE, document_title=None) -> RawListing
     # The PDF *is* the listing (an upload, a pasted link to one): title from
@@ -384,6 +395,9 @@ def find_pdf_links(html, base_url) -> list[tuple[str, str]]
 def looks_like_pdf(data: bytes) -> bool
 def is_pdf_response(content_type, url, body=None) -> bool
 def pdf_title(text: PdfText) -> str | None
+    # First headline-like line of the first page: skips "Label: value" lines,
+    # the line under a bare contact label ("Ihr Gesprächspartner:") and any
+    # e-mail or web address.
 def listing_title(tree: HTMLParser, url: str) -> str | None
     # JSON-LD name -> <h1> -> og:title -> <title>, with a trailing site name
     # stripped only when it matches og:site_name or the URL's own host.

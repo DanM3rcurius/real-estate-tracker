@@ -33,6 +33,7 @@ from hofradar.sources.adapters._pdfutil import (
     DOCUMENT_KIND_UPLOAD,
     is_pdf_response,
     raw_listing_from_pdf,
+    recover_ligatures,
 )
 from hofradar.sources.base import SourceAdapter, text_indicates_gone
 
@@ -54,6 +55,9 @@ def _looks_like_html(text: str) -> bool:
 
 
 def _from_plain_text(source_key: str, url: str, text: str, *, http_status: int | None) -> RawListing:
+    # Plain text is often text that left a PDF: a viewer's copy, or an
+    # upload's stored text read back by scripts/repair_pastes.py.
+    text, warnings = recover_ligatures(text)
     lines = [line.strip() for line in text.splitlines()]
     title = next((line for line in lines if line), None)
     if title and len(title) > _MAX_PLAIN_TITLE_LEN:
@@ -70,6 +74,7 @@ def _from_plain_text(source_key: str, url: str, text: str, *, http_status: int |
         image_urls=image_urls,
         http_status=http_status,
         fetched_at=datetime.now(UTC),
+        warnings=warnings,
         **labeled,
     )
 
