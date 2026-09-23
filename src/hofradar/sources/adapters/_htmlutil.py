@@ -293,6 +293,34 @@ def _labelled_segments(line: str) -> Iterator[str]:
         yield pending
 
 
+#: A place name is capitalised words, numbers and a few small joining words:
+#: "Dießen am Ammersee", "Pfaffenhofen a.d. Ilm", "Sacherl bei Bad Aibling".
+#: A lowercase word outside those is a sentence ("Sauerlach zählt zu den
+#: beliebtesten Wohnorten"), and a sentence taken as the location becomes the
+#: town, geocodes nowhere, and blocks the normaliser's own search of the text
+#: for a postcode and town (decision 18) - so it is not taken.
+_PLACE_JOINING_WORDS: frozenset[str] = frozenset(
+    {"am", "an", "auf", "bei", "d", "der", "dem", "den", "im", "in", "ob", "und", "vor"}
+)
+_PLACE_ABBREVIATION_RE = re.compile(r"^[a-zäöü]{1,3}\.")
+_PLACE_TOKEN_STRIP = ",;:()[]/\"'„“”-–"
+
+
+def reads_like_a_place(value: str) -> bool:
+    """Could ``value`` name a place, rather than describe one in a sentence?"""
+    # Only what parse_location keeps as the town is judged: "Rosenheim, sehr
+    # ruhig gelegen" has always meant Rosenheim.
+    town_part = value.split(",")[0]
+    for word in town_part.split():
+        token = word.strip(_PLACE_TOKEN_STRIP)
+        if not token or token[0].isdigit() or token[0].isupper():
+            continue
+        if token in _PLACE_JOINING_WORDS or _PLACE_ABBREVIATION_RE.match(token):
+            continue
+        return False
+    return True
+
+
 def _take(found: dict[str, str], label: str, value: str) -> None:
     key = _label_key(label)
     value = value.strip()
@@ -300,6 +328,8 @@ def _take(found: dict[str, str], label: str, value: str) -> None:
         return
     field, lookup_key = _field_for_label(key)
     if field is None or field in found:
+        return
+    if field == "location_raw" and not reads_like_a_place(value):
         return
     if lookup_key in _LABELS_KEPT_IN_VALUE:
         value = f"{label.strip()}: {value}"

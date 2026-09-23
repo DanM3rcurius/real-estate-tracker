@@ -221,7 +221,10 @@ dossier links to it. A scan without a text layer is a `warnings` line, never
 an empty description. `extract_labeled_fields` reads two facts on one line,
 a label above its value (numeric fields only) and a bare "28 Zimmer"; keep
 it a string matcher. Tests build PDFs with `tests/fixtures/pdf.py::make_pdf`,
-never from real files. Decision 24.
+never from real files. Decision 24. A letter above Latin-1 inside a word
+("WohnŦäche") is a ligature glyph the font never mapped, and
+`recover_ligatures` reads it back by stem. A `location_raw` has to read like a
+place, so a "Lage:" paragraph never becomes the town. Decision 28.
 
 **A link is only a link when a browser can follow it.** `upload:<digest>`
 (a reader's PDF) and `manual:<timestamp>` (a text paste) are how a hand-added

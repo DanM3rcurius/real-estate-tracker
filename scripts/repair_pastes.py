@@ -5,7 +5,9 @@ Covers both fixes so far: issue #3 (the paste box never parsed the text) and
 issue #27 (labels without a colon, a value a blank line below its label, and
 space-grouped numbers were not read, so an uploaded exposé's facts reached the
 radar as "k. A."). An uploaded PDF counts: its extracted text is what the
-observation stored.
+observation stored. Decision 28 adds three more: a font's unmapped ligature
+glyphs ("WohnŦäche"), a "Lage:" paragraph taken as the town, and a broker's
+name taken as an upload's title.
 
 Ingest writes the Observation before the Property, so the text you pasted is
 still on record even though the fields it should have produced are empty. This
@@ -47,6 +49,8 @@ from hofradar.geo import locate
 from hofradar.lifecycle import ingest
 from hofradar.normalize import normalize_listing
 from hofradar.sources import get_adapter
+from hofradar.sources.adapters._htmlutil import reads_like_a_place
+from hofradar.sources.adapters._pdfutil import PdfText, pdf_title
 from hofradar.web.uploads import UPLOAD_URL_PREFIX
 
 MANUAL_KEY = "manual"
@@ -70,6 +74,7 @@ RECOVERABLE_FIELDS: tuple[str, ...] = (
 #: A re-parse that disagrees with the stored value is shown, and with
 #: --apply written - the manual source verifies, so ingest may overwrite.
 CORRECTABLE_FIELDS: tuple[str, ...] = ("price", "land_sqm", "living_sqm", "usable_sqm", "rooms")
+
 
 
 async def run(apply: bool) -> int:
@@ -129,11 +134,26 @@ async def run(apply: bool) -> int:
                 and getattr(listing, name, None) is not None
                 and getattr(prop, name) != getattr(listing, name)
             ]
+            # Before decision 28 a "Lage:" paragraph was the location, so the
+            # town was "Sauerlach zählt zu den beliebtesten Wohnorten im
+            # südlichen" - set, so never recovered, and nowhere a geocoder can
+            # find. Only a stored town that is a sentence is replaced: a real
+            # one may have come from another source, spelled its own way.
+            if (
+                prop.town
+                and listing.town
+                and listing.town != prop.town
+                and not reads_like_a_place(prop.town)
+            ):
+                gains.append(f"town {prop.town!r} -> {listing.town!r}")
             if observation.url.startswith(UPLOAD_URL_PREFIX):
                 # An uploaded PDF was titled from its cover page, not from the
-                # first line of its text, which is all a re-parse of the stored
-                # text can see - so the title it has is the right one.
-                listing.title = prop.canonical_title
+                # first line of its text - so it is titled the same way again,
+                # from the stored text, which starts with that cover page. Only
+                # a title the cover-page reader now picks differently changes
+                # (a broker's name under "Ihr Gesprächspartner:", decision 28).
+                cover_title = pdf_title(PdfText(pages=[raw.description or ""]))
+                listing.title = cover_title or prop.canonical_title
             # The title is the odd one out: ``canonical_title`` is never NULL
             # (a paste that produced none got "Objekt <Ort>"), and a chrome
             # title lifted off portal markup is a *wrong* value rather than a

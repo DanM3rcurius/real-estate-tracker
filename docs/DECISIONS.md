@@ -1035,3 +1035,54 @@ alongside the database as something that travels, with the `scp`/`rsync`
 commands and the ownership step, and `hofradar documents --check` is the
 verification step before anyone calls the migration done.
 
+
+## 28. Text is read as it was written: ligatures spelled out, a place kept apart from prose about it
+
+**Decision.** Three string-level repairs, each where the text is first lifted.
+`extract_pdf_text` spells out f-ligatures before anything reads a page:
+Unicode's presentation forms (U+FB00-U+FB06, "Wohnﬂäche") silently, and a
+glyph the font's `ToUnicode` map leaves out by inference, with a warning
+naming each reading. The manual adapter's plain-text path does the same
+through `recover_ligatures`, because plain text is often text that left a PDF.
+`extract_labeled_fields` takes a `location_raw` value only when it reads like a
+place (`reads_like_a_place`: capitalised words, numbers and a few joining words
+up to the first comma). And `pdf_title` skips the line under a bare contact
+label ("Ihr Gesprächspartner:") and any e-mail or web address.
+`scripts/repair_pastes.py` re-reads stored uploads through all three, replaces
+a stored town only when it is a sentence, and re-titles an upload with
+`pdf_title` over its stored text instead of freezing the old title.
+
+**Why.** Two exposés a reader uploaded stated their facts plainly and still
+reached the radar half empty. The first is set in a subset Barlow whose
+`ToUnicode` map has no entry for the fi, fl and ffi glyphs, so pypdf emits the
+glyph number as a character: "WohnŦäche" (0x166), "beťndet" (0x165),
+"EnergieeŨzienzklasse" (0x168). The embedded font has no glyph names or cmap
+either (`glyph00358`), so nothing in the file says which ligature a glyph is.
+The label reader never matched "WohnŦäche", and the living area was "k. A.".
+The second has a "Lage:" paragraph ("Sauerlach zählt zu den beliebtesten
+Wohnorten im südlichen ..."). Being on the label's own line, it passed the
+next-line exclusion of entry 26 and became the town, which geocodes nowhere.
+Because it was set, the normaliser never searched the text for the "82054
+Sauerlach" printed on the cover (entry 18's recovery runs only when nothing
+was labelled). Its title was the broker's name, the first line on the cover
+with enough letters.
+
+**How a missing glyph is read.** Every word holding a letter above Latin-1 is
+a candidate (German and its typography are Latin-1, or are not letters). Each
+f-ligature is tried in its place, and the one that turns the most of that
+character's words into a known exposé stem wins ("fläch", "pflicht", "find",
+"effizien", ...). The decision is made once per document, because a glyph is
+the same ligature on every page and the cover alone may give nothing away. A
+stem only counts when it spans the whole replaced ligature, or "beffindet"
+would score for ffi on the strength of "find". With no hit, or a tie, the
+character is left alone: "Łukasz Dvořák" stays as it is. Correct text is
+inferred text all the same, so it is said in the listing's warnings.
+
+**What it may not do.** It is still a string matcher. A glyph number that lands
+inside Latin-1 (below 0x100) looks like an ordinary letter and cannot be told
+apart. The stem list is short and German, so a document whose only ligatures
+sit in words it does not know keeps its stray characters, and the `Eckdaten:`
+warning names the fact that went missing. A place check is shape, not a
+gazetteer: "Lage: Zentral" still passes. A euro sign the PDF itself maps to
+"e" (a TeX `feymr10` font's `ToUnicode` says so) is left to `parse_price`,
+which already reads "570.000,00 e".

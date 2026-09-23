@@ -11,6 +11,8 @@ fix and its guard rail both live here rather than in one adapter.
 
 from __future__ import annotations
 
+import pytest
+
 from hofradar.sources.adapters._htmlutil import extract_labeled_fields, raw_listing_from_html
 
 
@@ -296,3 +298,37 @@ def test_html_markup_between_label_and_value_is_read() -> None:
     assert listing.price_raw == "450.000 €"
     assert listing.land_raw == "2.500 m²"
     assert listing.rooms_raw == "8"
+
+
+def test_a_prose_location_on_the_label_line_is_not_a_location() -> None:
+    # The Garant exposé's "Lage:" is a paragraph about the town, not its
+    # name. Taking it made the town "Sauerlach zählt zu den beliebtesten
+    # Wohnorten im südlichen", which geocodes nowhere - and, being set, it
+    # stopped the normaliser finding "82054 Sauerlach" on the cover.
+    text = "Lage: Sauerlach zählt zu den beliebtesten Wohnorten im südlichen"
+
+    assert extract_labeled_fields(text) == {}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Feldkirchen-Westerham",
+        "82054 Sauerlach",
+        "Vogtareuth (Landkreis Rosenheim)",
+        "Musterstraße 12, 83024 Rosenheim",
+        "Dießen am Ammersee",
+        "Pfaffenhofen a.d. Ilm",
+        "Neumarkt i.d.OPf.",
+        "Sacherl bei Bad Aibling",
+        "Rosenheim, sehr ruhig gelegen",
+    ],
+)
+def test_a_place_on_the_label_line_is_still_a_location(value: str) -> None:
+    assert extract_labeled_fields(f"Ort: {value}") == {"location_raw": value}
+
+
+def test_a_prose_location_leaves_room_for_a_later_labelled_one() -> None:
+    text = "Lage: ruhig und doch zentral gelegen\nOrt: 82054 Sauerlach"
+
+    assert extract_labeled_fields(text) == {"location_raw": "82054 Sauerlach"}
