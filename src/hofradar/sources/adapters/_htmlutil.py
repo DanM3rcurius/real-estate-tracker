@@ -45,6 +45,8 @@ _LABEL_FIELD_MAP: dict[str, str] = {
     "verkaufspreis": "price_raw",
     "kaufpreisvorstellung": "price_raw",
     "preisvorstellung": "price_raw",
+    "angebotspreis": "price_raw",
+    "verhandlungsbasis": "price_raw",
     "price": "price_raw",
     # Rent labels map to the same field, but the label is kept in the value
     # (see _LABELS_KEPT_IN_VALUE): "1.250 €" alone would parse as an asking
@@ -64,15 +66,31 @@ _LABEL_FIELD_MAP: dict[str, str] = {
     "grundstuecksgroesse": "land_raw",
     "grundstuecksgroesse (m2)": "land_raw",
     "land": "land_raw",
+    "grundstücksgrösse": "land_raw",
+    "grundstücksfl": "land_raw",
     "wohnfläche": "living_raw",
     "wohnflaeche": "living_raw",
-    "wohnfl.": "living_raw",
+    "wohnfl": "living_raw",
+    "gesamtwohnfläche": "living_raw",
+    "gesamtwohnflaeche": "living_raw",
     "living": "living_raw",
     "nutzfläche": "usable_raw",
     "nutzflaeche": "usable_raw",
+    "gesamtnutzfläche": "usable_raw",
+    "gesamtnutzflaeche": "usable_raw",
+    # A combined figure is not a living area: read as one, it would inflate
+    # every per-m² number the cost model derives. It is still a stated area,
+    # and the dossier shows it as such.
+    "wohn-/nutzfläche": "usable_raw",
+    "wohn-/nutzflaeche": "usable_raw",
+    "wohn- und nutzfläche": "usable_raw",
+    "wohn- und nutzflaeche": "usable_raw",
     "usable": "usable_raw",
     "zimmer": "rooms_raw",
     "zimmeranzahl": "rooms_raw",
+    "anzahl zimmer": "rooms_raw",
+    "anzahl der zimmer": "rooms_raw",
+    "anzahl räume": "rooms_raw",
     "rooms": "rooms_raw",
     "baujahr": "year_raw",
     "year": "year_raw",
@@ -88,8 +106,32 @@ _LABEL_FIELD_MAP: dict[str, str] = {
 #: for these reads "Kaltmiete: 1.250 €", which ``hofradar.normalize.parse_price``
 #: types as RENT.
 _LABELS_KEPT_IN_VALUE: frozenset[str] = frozenset(
-    {"kaltmiete", "warmmiete", "nettokaltmiete", "monatsmiete", "mietpreis", "miete"}
+    {
+        "kaltmiete",
+        "warmmiete",
+        "nettokaltmiete",
+        "monatsmiete",
+        "mietpreis",
+        "miete",
+        # "Verhandlungsbasis: 450.000 €" - the label *is* the price type.
+        "verhandlungsbasis",
+    }
 )
+
+#: Qualifiers a broker bolts onto a label that do not change what it means:
+#: "Wohnfläche ca.", "Grundstücksfläche (m²)", "Zimmer gesamt", "Baujahr
+#: circa". Stripped only to *look up* a label that is otherwise known - like
+#: the parenthetical rule below, never a fuzzy match for an unknown one.
+_LABEL_QUALIFIER_RE = re.compile(
+    r"\s*(?:ca\.?|circa|etwa|rd\.?|gesamt|insgesamt|\(?\s*in\s+(?:m²|m2|qm)\s*\)?"
+    r"|\(\s*(?:m²|m2|qm|€|eur)\s*\)|in\s+€)\s*$",
+    re.IGNORECASE,
+)
+
+#: Characters a page puts inside a word for the typesetter, not the reader:
+#: OVBimmo writes "Kauf&shy;preis", which is not the label "kaufpreis" until
+#: the soft hyphen (and any zero-width space) is gone.
+_INVISIBLE_IN_LABEL_RE = re.compile("[\u00ad\u200b\u200c\u200d\u2060]")
 
 #: A trailing parenthetical qualifier on a label, e.g. "Wohnfläche (Bauernhaus)"
 #: or "Nutzfläche (Wirtschaftsteil)" - owner-written exposés for a Hofstelle
@@ -121,6 +163,68 @@ _NEXT_LINE_FIELDS: frozenset[str] = frozenset(
     {"price_raw", "land_raw", "living_raw", "usable_raw", "rooms_raw", "year_raw"}
 )
 
+#: How many empty lines may sit between a label and its value. A portal's
+#: markup flattened to text puts one or two between every block
+#: (``<div class="col-label">Wohnfläche</div><div class="col-value">165
+#: m²</div>`` on OVBimmo arrives as "Wohnfläche", "", "165 m²"), and reading
+#: only the immediately next line was why every OVB property had no price,
+#: no area and no build year (issue #27). Bounded, so a heading at the end of
+#: one section never reaches into the next.
+_MAX_BLANK_LINES_BEFORE_VALUE = 4
+
+#: What a value has to look like, per field, before a label *not* joined to
+#: it by a colon may claim it. Without a colon the pairing is inferred from
+#: layout, and a layout also puts the wrong things next to each other: the
+#: same OVB page sets "Kaufpreis" directly above the room count's "7" and
+#: "Zimmer" above the area's "165" in its headline block (the value is
+#: *above* its label there). A price needs a currency, four digits or a
+#: price marker; a room count is one or two digits; a year is four; an area
+#: is a number, optionally with its unit. This is shape, not parsing - the
+#: raw string still goes to ``hofradar.normalize`` untouched.
+_APPROX = r"(?:(?:ca\.?|circa|etwa|rd\.?|~|≈)\s*)?"
+_PRICE_MARKER_VALUE_RE = re.compile(
+    r"auf anfrage|verhandlungsbasis|^(?:vb|vhb)\b", re.IGNORECASE
+)
+_PRICE_NUMBER_VALUE_RE = re.compile(
+    r"^" + _APPROX + r"(?:(?:€|eur)\s*)?(?P<number>\d[\d.,\s\u00a0\u202f]*)", re.IGNORECASE
+)
+_PRICE_UNIT_RE = re.compile(r"€|\beur\b|\beuro\b|\bt€|\bmio\b|\btsd\b", re.IGNORECASE)
+_MIN_PRICE_DIGITS = 4
+_VALUE_SHAPES: dict[str, re.Pattern[str]] = {
+    "area": re.compile(r"^" + _APPROX + r"\d[\d.,]*(?:\s|$|[a-zA-Z²])", re.IGNORECASE),
+    "rooms_raw": re.compile(r"^" + _APPROX + r"\d{1,2}(?:[.,]5)?(?:\s|$|\()", re.IGNORECASE),
+    "year_raw": re.compile(r"^(?:(?:ca\.?|um|circa)\s*)?\d{4}\b", re.IGNORECASE),
+}
+_AREA_FIELDS: frozenset[str] = frozenset({"land_raw", "living_raw", "usable_raw"})
+
+#: A label and its value in one cell with no colon between them -
+#: "Wohnfläche ca. 180 m²", "Kaufpreis 450.000 €" - the way pypdf renders a
+#: two-column fact table and a browser copies a ``<dl>``. Only the first few
+#: words can be the label, and the segment has to be short enough to be a
+#: table cell: in prose ("Wohnfläche von ca. 165 m² verteilt auf ...") the
+#: value shape above already refuses "von".
+_MAX_INLINE_LABEL_WORDS = 4
+_MAX_INLINE_SEGMENT_LEN = 60
+
+#: "165 m<sup>2</sup>" flattens to "165 m" and a separate line "2" - the
+#: unit lost and a stray digit left where the next value would be read.
+_SUPERSCRIPT_SQUARE_RE = re.compile(r"m\s*<sup>\s*2\s*</sup>", re.IGNORECASE)
+
+
+def _value_fits(field: str, value: str) -> bool:
+    """Does ``value`` look like a value of ``field``? Shape only, never parsed."""
+    value = value.strip()
+    if field == "price_raw":
+        if _PRICE_MARKER_VALUE_RE.search(value):
+            return True
+        match = _PRICE_NUMBER_VALUE_RE.match(value)
+        if match is None:
+            return False
+        digits = sum(ch.isdigit() for ch in match.group("number"))
+        return digits >= _MIN_PRICE_DIGITS or bool(_PRICE_UNIT_RE.search(value))
+    shape = _VALUE_SHAPES.get("area" if field in _AREA_FIELDS else field)
+    return shape is not None and bool(shape.match(value))
+
 #: "28 Zimmer" or "6 Zi." on a short line of its own - a room count that no
 #: label precedes, the way the BLfD template's fact box and most bullet lists
 #: write it. Restricted to a line no longer than a fact box entry so a room
@@ -143,16 +247,24 @@ def _field_for_label(key: str) -> tuple[str | None, str]:
     field = _LABEL_FIELD_MAP.get(key)
     if field is not None:
         return field, key
-    base_key = _TRAILING_PARENTHETICAL_RE.sub("", key).strip()
-    if base_key != key:
-        field = _LABEL_FIELD_MAP.get(base_key)
+    # Qualifiers first ("Wohnfläche (Bauernhaus) ca."), then the parenthetical,
+    # then qualifiers again ("Grundstück ca. (m²)") - each step only ever
+    # shortens the key, and only a key the map already knows is accepted.
+    candidate = key
+    for strip in (_LABEL_QUALIFIER_RE, _TRAILING_PARENTHETICAL_RE, _LABEL_QUALIFIER_RE):
+        stripped = _label_key(strip.sub("", candidate))
+        if stripped == candidate or not stripped:
+            continue
+        candidate = stripped
+        field = _LABEL_FIELD_MAP.get(candidate)
         if field is not None:
-            return field, base_key
+            return field, candidate
     return None, key
 
 
 def _label_key(label: str) -> str:
-    return label.strip().lower().rstrip(".")
+    cleaned = _INVISIBLE_IN_LABEL_RE.sub("", label)
+    return " ".join(cleaned.split()).lower().rstrip(".").rstrip()
 
 
 def _labelled_segments(line: str) -> Iterator[str]:
@@ -194,16 +306,75 @@ def _take(found: dict[str, str], label: str, value: str) -> None:
     found[field] = value
 
 
+def _next_value_line(lines: list[str], index: int) -> str | None:
+    """The first non-empty line after ``lines[index]``, past a few blank ones."""
+    limit = min(len(lines), index + 2 + _MAX_BLANK_LINES_BEFORE_VALUE)
+    for candidate in lines[index + 1 : limit]:
+        stripped = candidate.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _take_numeric(found: dict[str, str], label: str, value: str) -> bool:
+    """Record a colon-less pairing if the label is numeric and the value fits."""
+    field, lookup_key = _field_for_label(_label_key(label))
+    if field is None or field not in _NEXT_LINE_FIELDS or field in found:
+        return False
+    value = value.strip()
+    if not value or len(value) > _MAX_VALUE_LINE_LEN or not _value_fits(field, value):
+        return False
+    if lookup_key in _LABELS_KEPT_IN_VALUE:
+        value = f"{label.strip()}: {value}"
+    found[field] = value
+    return True
+
+
+def _take_inline(found: dict[str, str], line: str) -> None:
+    """Read colon-less label/value pairs off one line.
+
+    Two shapes: a label segment followed by a value segment ("Kaufpreis",
+    tab or column gap, "450.000 €" - a copied table row, a pypdf table), and
+    one short segment that starts with a label ("Wohnfläche ca. 180 m²").
+    A segment with a colon in it is the colon pass's and is left alone.
+    """
+    segments = [s.strip() for s in _SEGMENT_SPLIT_RE.split(line) if s.strip()]
+    index = 0
+    while index < len(segments):
+        segment = segments[index]
+        if ":" in segment:
+            index += 1
+            continue
+        following = segments[index + 1] if index + 1 < len(segments) else None
+        if (
+            following is not None
+            and ":" not in following
+            and _take_numeric(found, segment, following)
+        ):
+            index += 2
+            continue
+        if len(segment) <= _MAX_INLINE_SEGMENT_LEN:
+            words = segment.split()
+            for width in range(min(_MAX_INLINE_LABEL_WORDS, len(words) - 1), 0, -1):
+                if _take_numeric(found, " ".join(words[:width]), " ".join(words[width:])):
+                    break
+        index += 1
+
+
 def extract_labeled_fields(text: str) -> dict[str, str]:
     """Scan "Label: value" lines for the fields exposés almost always spell out.
 
-    Three layouts are read, in this order of trust: "Label: value" on one
+    Four layouts are read, in this order of trust: "Label: value" on one
     line (several per line when set apart by a tab or a run of spaces); a
-    label on its own line with a short numeric value on the next; and a bare
-    room count ("28 Zimmer") on a short line. The first value found for a
-    field wins - a page's Kurzinfo box beats a figure repeated deeper in the
-    exposé - and nothing here parses: the raw substring is kept for
-    ``hofradar.normalize`` to type.
+    label and its value in one table cell or row with no colon ("Wohnfläche
+    ca. 180 m²", "Kaufpreis<TAB>450.000 €"); a label on its own line - with or
+    without a trailing colon - and a short value on the next non-empty line;
+    and a bare room count ("28 Zimmer") on a short line. The first value
+    found for a field wins - a page's Kurzinfo box beats a figure repeated
+    deeper in the exposé - and nothing here parses: the raw substring is
+    kept for ``hofradar.normalize`` to type. Every layout without a colon
+    only pairs a label with a value of that field's shape (see
+    :data:`_VALUE_SHAPES`), because there the pairing is read off the layout.
     """
     found: dict[str, str] = {}
     lines = text.splitlines()
@@ -214,23 +385,28 @@ def extract_labeled_fields(text: str) -> dict[str, str]:
             label, _, value = segment.partition(":")
             _take(found, label, value)
 
-    for index, line in enumerate(lines[:-1]):
+    for line in lines:
+        _take_inline(found, line)
+
+    for index, line in enumerate(lines):
         stripped = line.strip()
-        if not stripped or ":" in stripped:
+        label = stripped[:-1] if stripped.endswith(":") else stripped
+        if not label or ":" in label:
             continue
-        field, lookup_key = _field_for_label(_label_key(stripped))
+        field, lookup_key = _field_for_label(_label_key(label))
         if field is None or field not in _NEXT_LINE_FIELDS or field in found:
             continue
-        value = lines[index + 1].strip()
+        value = _next_value_line(lines, index)
         if (
-            not value
+            value is None
             or ":" in value
             or len(value) > _MAX_VALUE_LINE_LEN
             or not _VALUE_LINE_RE.search(value)
+            or not _value_fits(field, value)
         ):
             continue
         if lookup_key in _LABELS_KEPT_IN_VALUE:
-            value = f"{stripped}: {value}"
+            value = f"{label}: {value}"
         found[field] = value
 
     if "rooms_raw" not in found:
@@ -573,7 +749,7 @@ def raw_listing_from_html(
     Images: og:image first, then every <img src> on the page, de-duplicated,
     resolved to absolute URLs against ``url``.
     """
-    tree = HTMLParser(html)
+    tree = HTMLParser(_SUPERSCRIPT_SQUARE_RE.sub("m²", html))
 
     title = listing_title(tree, url)
 

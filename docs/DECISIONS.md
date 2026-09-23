@@ -920,3 +920,66 @@ archiving as the cause unless the archived count actually accounts for every
 mark - the failure here was a true-sounding sentence, so a sentence that can
 only be true is part of the fix.
 
+## 26. A label is paired with a value by layout only when the value has that field's shape
+
+**Decision.** `extract_labeled_fields` reads a fact wherever the page puts
+its value, not only after a colon on the same line: a label on its own line
+(with or without a trailing colon) takes the next *non-empty* line, up to
+four blank lines down; a colon-less label and value in one table cell or row
+("Wohnfläche ca. 180 m²", "Kaufpreis<TAB>450.000 €", pypdf's rendering of a
+two-column fact table) are read as a pair; qualified labels ("Wohnfläche
+ca.", "Anzahl Zimmer", "Grundstücksfläche (m²)") resolve to their base field;
+a soft hyphen inside a label ("Kauf&shy;preis") is ignored; and
+`m<sup>2</sup>` keeps its unit. Every pairing inferred from layout rather
+than stated by a colon must pass a per-field *shape* check first: a price has
+a currency, four digits or a price marker; a room count is one or two digits;
+a year is four; an area starts with a number. `hofradar.normalize` reads
+space-grouped numbers ("450 000 €", U+00A0, U+202F) and skips a percentage
+ahead of a price. A listing page with no labelled price, living area or plot
+area gets one `Eckdaten:` warning naming what is missing, and a price stated
+as "auf Anfrage" no longer produces a false "could not parse" warning.
+
+**Why.** Issue #27: the radar and the dossier said "k. A." for price and
+areas that the exposé or web page stated plainly. The biggest cause was one
+enabled source: every OVBimmo property had `price`, `living_sqm`, `land_sqm`,
+`rooms` and `year_built` all NULL. The OVB detail page's "Objektdaten" table is
+`<div class="col-label">Wohnfläche</div><div class="col-value">165
+m<sup>2</sup></div>`, which flattens to "Wohnfläche", a blank line, "165 m",
+"2"; the reader looked only at the *immediately* next line, and the adapter's
+own documentation had misfiled those divs as sidebar widgets, so the gap was
+recorded as a limitation and a test asserted it. Verified live on
+2026-09-23: before, a current OVB detail page yielded no fact at all; after,
+it yields price 559.000 €, 140 m², 1.147 m², 5 rooms, 1995. The same shape -
+a label, markup, the value - is what `<strong>Kaufpreis:</strong> 450.000 €`,
+a `<dl>` and a browser's copy of a fact table look like once they are text,
+so it also hit pasted listings and broker exposés on `/add`. Space-grouped
+numbers were worse than missing: "450 000 €" was a EUR 450 farm and
+"1 050 m²" a 1 m² house.
+
+**Why the shape check.** Without a colon the pairing is a guess from layout,
+and layouts put the wrong things next to each other. OVB's headline block
+sets the value *above* its label - "690.000,00 €", "Kaufpreis", "7",
+"Zimmer", "165", "m²" - so a label-then-next-line reader pairs "Kaufpreis"
+with the room count and "Zimmer" with the living area. The shape check
+refuses both, and because the first value per field wins only once it has
+passed, the Objektdaten table further down supplies the real figures. The
+check is still shape, not parsing: the raw string goes to
+`hofradar.normalize` unchanged. A combined "Wohn-/Nutzfläche" is read as a
+usable area, not a living one: taking it as living area would inflate every
+per-m² figure the cost model derives from it.
+
+**What it may not do.** It is still a string matcher. Location labels still
+never take a next-line value (entry 18's reason stands); the Denkmalbörse
+Kurzinfo and exposé values it read before are unchanged, re-checked on eight
+live objects. The dataLayer's cent-denominated figures on OVB stay unread
+(converting is the normaliser's job, not an adapter's). A fact that genuinely
+is not stated stays `None`, and now says so on `/add` and in the
+observation's stored warnings instead of reaching the card silently.
+
+**Existing rows.** Crawled sources repair themselves on their next run:
+`ingest` fills a NULL fact from any source, and the report does not count a
+first-known price (`old_price` NULL) as a price change. Hand-added listings
+are not re-crawled, so `scripts/repair_pastes.py` re-reads their stored text
+(an uploaded PDF's text included) and now also corrects a stored value the
+re-parse disagrees with, and keeps an upload's cover-page title.
+

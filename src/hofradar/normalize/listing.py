@@ -42,6 +42,10 @@ _PLAUSIBLE_YEAR_RANGE = range(1000, 2101)
 #: itself is strict, but the *field* was inferred, and evidence should say so.
 _UNLABELLED_LOCATION_CONFIDENCE = 0.6
 
+#: Start of the warning for a headline fact no labelled line supplied. German,
+#: because it is read on /add.
+_MISSING_FACTS_PREFIX = "Eckdaten: kein Wert gefunden für "
+
 #: What a page that is not one listing gets told about itself. Every typed
 #: value below it was scraped off a page that offers nothing - on a portal's
 #: result list from several different adverts at once (issue #10) - so the
@@ -121,8 +125,16 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
     price, price_type = parse_price(raw.price_raw)
     listing.price = price
     listing.price_type = price_type
+    # "Kaufpreis: auf Anfrage" is a stated fact with no number in it, not a
+    # value that failed to parse - it gets evidence-free silence, not a warning.
+    price_is_stated_without_number = price is None and price_type == PriceType.ON_REQUEST
     _add_numeric_evidence(
-        listing, "price", price, raw.price_raw, source_key=raw.source_key, url=raw.url
+        listing,
+        "price",
+        price,
+        None if price_is_stated_without_number else raw.price_raw,
+        source_key=raw.source_key,
+        url=raw.url,
     )
 
     land_sqm = parse_area(raw.land_raw)
@@ -146,6 +158,27 @@ def normalize_listing(raw: RawListing, keywords: KeywordConfig) -> NormalizedLis
     listing.rooms = parse_german_number(raw.rooms_raw)
     if listing.rooms is None and raw.rooms_raw:
         listing.warnings.append(f"rooms: could not parse a value from {raw.rooms_raw!r}")
+
+    # The card's three headline facts. A field the page never labelled used to
+    # vanish without a word and reach the reader as "k. A." on a listing whose
+    # exposé states it plainly (issue #27) - so an unfound one is said here,
+    # once, where /add and the observation's raw record both show it. Only for
+    # a listing: an index page already carries its own, bigger warning.
+    if raw.page_kind not in _PAGE_KIND_WARNINGS:
+        missing = [
+            label
+            for label, raw_value in (
+                ("Kaufpreis", raw.price_raw),
+                ("Wohnfläche", raw.living_raw),
+                ("Grundstücksfläche", raw.land_raw),
+            )
+            if not (raw_value and raw_value.strip())
+        ]
+        if missing:
+            listing.warnings.append(
+                f"{_MISSING_FACTS_PREFIX}{', '.join(missing)} - bitte im Exposé "
+                "prüfen; im Radar steht dafür „k. A.“"
+            )
 
     year_value = parse_german_number(raw.year_raw)
     year_built: int | None = None

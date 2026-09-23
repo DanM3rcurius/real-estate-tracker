@@ -38,30 +38,27 @@ structure the plan expected: a `dataLayer` JSON blob carrying `listing_id`
 (price/rooms/area) rendered as three `eps-item` blocks, e.g. `<div
 class="eps-item eps-item-price col-4">690.000,00 €<br> <span
 class="eps-item-unit">Kaufpreis</span></div>` - the VALUE first, then the
-label in a nested span. (The page also has `col-label`/`col-value` divs, but
-those are unrelated sidebar widgets - Umzugsrechner, Immobilienwert, Kredit -
-not the Objektdaten figures.)
+label in a nested span. Further down, the page's "Objektdaten" table sets
+the same facts as `col-label`/`col-value` pairs - "Grundstück" / "611 m²",
+"Wohnfläche" / "165 m²", "Kauf&shy;preis" / "690.000,00 €", "Baujahr" /
+"1962" - label first. (An earlier reading of this capture called those
+sidebar widgets; they are not, and that misreading is how every OVB
+property came to show "k. A." for its price and areas - issue #27.)
 
-Exactly two of those structured fields are read here, and only because
-nothing else on the page carries them: `postal_code` and `locality`, lifted
-verbatim from the `dataLayer` by `_datalayer_location`. Without them an OVB
-property has no town, no postcode, no geocode query and therefore no
-`distance_air_km` at all - the report's in-radius yield and its per-Gemeinde
-coverage map are then structurally unable to see this source, which is a
-worse failure than the vendor coupling. Everything else in that blob stays
-unread: the figures are numbers (`property_price` is in **cents**), and an
-adapter that converts anything has crossed into `hofradar.normalize`'s job.
-For those, `fetch_detail` still uses only the generic HTML fallback in
-`_htmlutil` (og:title/description/images), which is markup-agnostic on
-purpose. Concretely, on the real capture: title and images come through
-cleanly via og: tags, but `extract_labeled_fields` (which wants a single
-"Label: value" line) gets nothing, because "690.000,00 €" and "Kaufpreis"
-land on separate lines in that order, never as "Kaufpreis: 690.000,00 €".
-Parsing the `eps-item` blocks would need a page-specific extension to this
-adapter (or to `_htmlutil`) that does not exist yet - the price/rooms/area
-figures still reach `description` as plain text, so the hidden_score keyword
-vocabulary still fires on them, but no typed RawListing field does. See
-docs/SOURCES.md.
+Exactly two of the dataLayer's structured fields are read here, and only
+because nothing else on the page carries them: `postal_code` and
+`locality`, lifted verbatim from the `dataLayer` by `_datalayer_location`.
+Without them an OVB property has no town, no postcode, no geocode query and
+therefore no `distance_air_km` at all - the report's in-radius yield and its
+per-Gemeinde coverage map are then structurally unable to see this source,
+which is a worse failure than the vendor coupling. Everything else in that
+blob stays unread: the figures are numbers (`property_price` is in
+**cents**), and an adapter that converts anything has crossed into
+`hofradar.normalize`'s job. The figures come from the visible Objektdaten
+table instead, through the generic `_htmlutil` lift, which reads a label on
+its own line and a value of that field's shape on the next non-empty one;
+the headline `eps-item` blocks (value *above* label) are refused by that
+same shape check rather than mis-paired. See docs/SOURCES.md.
 
 The external id always comes from the URL, never the page - deliberately,
 since it needs no parser at all and survives a broker rewriting the title.
