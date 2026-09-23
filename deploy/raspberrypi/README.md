@@ -428,7 +428,7 @@ put the Pi on the same branch if they differ.
 ### On the laptop
 
 ```bash
-cd ~/…/real-estate-tracker
+cd ~/path/to/real-estate-tracker    # wherever your checkout lives
 hofradar migrate --check          # note the "revision <X>, head <Y>" line
 python scripts/backup_db.py       # -> backups/hofradar-<stamp>.db
 ```
@@ -508,11 +508,15 @@ checkout; a Docker dev setup uses whatever `HOFRADAR_DATA_DIR` names, `/data`
 in the repo's own `docker-compose.yml`, so on that runtime copy out of the
 named volume the same way *Restoring a backup* reads one in.
 
+Replace `~/path/to/real-estate-tracker` with your checkout — the trailing
+`/tmp/uploads` on the Pi must not exist yet, or `scp -r` nests the directory
+one level deeper than the next step looks:
+
 ```bash
 # from the laptop, native dev default:
-rsync -av ~/…/real-estate-tracker/data/uploads/ dan@hofradar.local:/tmp/uploads/
+rsync -av ~/path/to/real-estate-tracker/data/uploads/ dan@hofradar.local:/tmp/uploads/
 # scp, if you would rather not install rsync:
-scp -r ~/…/real-estate-tracker/data/uploads dan@hofradar.local:/tmp/uploads
+scp -r ~/path/to/real-estate-tracker/data/uploads dan@hofradar.local:/tmp/uploads
 ```
 
 Then move the files into the data directory the Pi actually reads from and
@@ -531,11 +535,23 @@ sudo rsync -av /tmp/uploads/ /var/lib/hofradar/uploads/
 sudo chown -R hofradar:hofradar /var/lib/hofradar/uploads
 ```
 
-If `HOFRADAR_DATA_MOUNT` is empty, the data directory is a Docker volume, not
-a path — copy in with `docker run --rm -v hofradar_hofradar-data:/data -v
-/tmp/uploads:/host alpine sh -c 'cp -r /host/. /data/uploads/ && chown -R
-10001:10001 /data/uploads'`, the same shape *Restoring a backup* uses for the
-database.
+If `HOFRADAR_DATA_MOUNT` is empty — which is every **layout A** Pi, booting
+from the SSD — the data directory is a Docker volume, not a path, and neither
+`/mnt/ssd/hofradar` nor `/var/lib/hofradar` exists to copy into. Copy in with
+the same shape *Restoring a backup* uses for the database. `mkdir -p` is not
+optional: on a Pi that has never had an upload, `/data/uploads` does not exist
+yet and `cp` fails.
+
+```bash
+sudo docker volume ls | grep hofradar   # expect hofradar_hofradar-data
+ls /tmp/uploads                         # the .pdf files themselves, not a nested uploads/
+
+sudo docker run --rm \
+  -v hofradar_hofradar-data:/data \
+  -v /tmp/uploads:/host:ro \
+  alpine sh -c 'mkdir -p /data/uploads && cp -r /host/. /data/uploads/ \
+    && chown -R 10001:10001 /data/uploads'
+```
 
 Verify the count matches and, more to the point, that every row the database
 references actually resolves:
@@ -548,6 +564,13 @@ sudo hofradar-cli documents --check     # exit 0, no rows printed
 `documents --check` reads `Document.local_path` for every row, so it also
 catches a file that arrived under the wrong name — the one case a bare file
 count cannot.
+
+The subcommand arrived with #26, and so did the fallback that lets a stale
+`local_path` from the old machine resolve by digest here. `invalid choice:
+'documents'` means the Pi's checkout predates it, in which case copying the
+files over is not enough on its own — every hand-added listing still 410s.
+Run `sudo hofradar-update` first (it pulls, backs up and restarts; #26 carries
+no migration), then verify.
 
 ### Verify, then decide which machine is real
 
