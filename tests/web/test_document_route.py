@@ -113,19 +113,60 @@ def test_a_vanished_file_says_so_rather_than_404ing_silently(
 
     response = client.get(f"/document/{document.id}")
     assert response.status_code == 410
-    assert "nicht mehr vorhanden" in response.text
+    assert "fehlt auf diesem Server" in response.text
 
 
 def test_a_path_outside_the_uploads_directory_is_refused(
     client: TestClient, db_session, uploaded, tmp_path
 ) -> None:
-    """``local_path`` is a plain string column; the route decides what it serves."""
+    """``local_path`` is a plain string column; the route decides what it serves.
+
+    The digest fallback (below) never consults this column for its path, so
+    corrupting it - or pointing it at a file the route was never meant to
+    read - still can never leak that file's content. ``document_url`` is
+    mangled too, so the digest fallback has nothing genuine to recover either
+    and the row is genuinely, not just apparently, unreadable here.
+    """
     outside = tmp_path / "secret.pdf"
     outside.write_bytes(b"%PDF-1.4 not yours")
     _prop, document = uploaded
     document.local_path = str(outside)
+    document.document_url = "upload:0000000000000000"
     db_session.commit()
 
     response = client.get(f"/document/{document.id}")
     assert response.status_code == 410
     assert b"not yours" not in response.content
+
+
+def test_a_stale_local_path_from_another_machine_is_recovered_by_digest(
+    client: TestClient, db_session, uploaded
+) -> None:
+    """Issue #26: a database that moved here still names the file by digest.
+
+    ``local_path`` from the machine that wrote it never resolves under this
+    machine's ``uploads_dir()`` - that is expected, not corruption - but the
+    file itself lives here under its digest, and ``document_url`` (the
+    listing's identity, never rewritten by a move) still names it.
+    """
+    _prop, document = uploaded
+    document.local_path = "/Users/someone/old-checkout/data/uploads/" + document.local_path.rsplit(
+        "/", 1
+    )[-1]
+    db_session.commit()
+
+    response = client.get(f"/document/{document.id}")
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+
+
+def test_the_dossier_shows_a_missing_file_notice_instead_of_a_dead_link(
+    client: TestClient, db_session, uploaded, tmp_path
+) -> None:
+    """The dossier's own page says the file is gone, not just the 410 behind it."""
+    prop, document = uploaded
+    (tmp_path / "uploads" / f"{document.local_path.rsplit('/', 1)[-1]}").unlink()
+
+    body = client.get(f"/property/{prop.public_id}").text
+    assert "Datei fehlt auf diesem Server" in body
+    assert f'href="/document/{document.id}"' not in body
