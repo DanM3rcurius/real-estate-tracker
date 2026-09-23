@@ -7,7 +7,8 @@ space-grouped numbers were not read, so an uploaded exposé's facts reached the
 radar as "k. A."). An uploaded PDF counts: its extracted text is what the
 observation stored. Decision 28 adds three more: a font's unmapped ligature
 glyphs ("WohnŦäche"), a "Lage:" paragraph taken as the town, and a broker's
-name taken as an upload's title.
+name taken as an upload's title. Decision 29 adds a price labelled "Verkauf:"
+and an upload titled with the first row of the fact box its cover opens with.
 
 Ingest writes the Observation before the Property, so the text you pasted is
 still on record even though the fields it should have produced are empty. This

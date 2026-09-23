@@ -230,7 +230,10 @@ it a string matcher. Tests build PDFs with `tests/fixtures/pdf.py::make_pdf`,
 never from real files. Decision 24. A letter above Latin-1 inside a word
 ("WohnŦäche") is a ligature glyph the font never mapped, and
 `recover_ligatures` reads it back by stem. A `location_raw` has to read like a
-place, so a "Lage:" paragraph never becomes the town. Decision 28.
+place, so a "Lage:" paragraph never becomes the town. Decision 28. "Verkauf" is
+a price label that is as often a value, so it claims only a price-shaped value
+even behind a colon; a cover that opens with its fact box ("Baujahr 1993", ...)
+is skipped as a block by `pdf_title`. Decision 29.
 
 **A link is only a link when a browser can follow it.** `upload:<digest>`
 (a reader's PDF) and `manual:<timestamp>` (a text paste) are how a hand-added

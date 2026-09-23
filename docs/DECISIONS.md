@@ -1087,6 +1087,55 @@ gazetteer: "Lage: Zentral" still passes. A euro sign the PDF itself maps to
 "e" (a TeX `feymr10` font's `ToUnicode` says so) is left to `parse_price`,
 which already reads "570.000,00 e".
 
+## 29. A label that is also a value needs a value's shape, and a cover's fact box is not its headline
+
+**Decision.** `extract_labeled_fields` knows "Verkauf" as a price label, but
+unlike every other label it claims a value only when that value has a price's
+shape (`_value_fits`), even behind a colon. `_LABELS_NEEDING_VALUE_SHAPE` holds
+it, for any later label with the same double life. `pdf_title` treats a cover
+that opens with its fact box as a block: a line the fact reader reads a fact
+off opens the box, and every following row of at most three words
+(`_MAX_FACT_ROW_WORDS`) belongs to it. The title is the first line after the
+box, or `None` when the first page holds nothing else.
+
+**Why.** Issue #31: an uploaded ohne-makler.net exposé for a house in Mühldorf
+reached the radar titled "Baujahr 1993", and its price read "k. A." The cover
+prints "Verkauf: 720.000 €". The portal labels a sale's price with the
+marketing type, the way it labels a rental's with "Miete", and the label map
+knew "Verkaufspreis" but not "Verkauf". The title came from the cover's text
+layer, which pypdf reads with the two-column fact box first ("Baujahr 1993",
+"Grundstücksfläche 670 m²", "Etagen 4", ... "Heizung Zentralheizung") and
+the headline after it. A colon marked a fact line, and there was none.
+
+**Why a shape even behind a colon.** Everywhere else a colon is trusted to
+pair a label with its value (entry 26). "Verkauf" breaks that trust, because
+it is at least as often a value ("Vermarktungsart: Verkauf") and, as a label,
+heads whatever the marketing type has to say ("Verkauf: provisionsfrei"). The
+first price found wins, so a slogan read as the price would hide the fact
+box's real one. That is worse than the gap being fixed: the dossier would show
+a wrong price instead of a missing one.
+
+**Why a block and not a line.** Most rows of that fact box name a label the
+fact reader has never heard of and carry no figure: "Energieträger Gas",
+"Zustand gepflegt", "Übernahme ab Datum". Skipping only the rows the fact
+reader reads would have titled the same exposé "Etagen 4", and then
+"Energieträger Gas". No test of a single line can tell "Zustand gepflegt"
+from a two-word headline without a vocabulary. The box as a whole can be
+told apart: it starts with a known fact and runs in short label-value rows.
+Font size would say which line is the headline (the real one is set at
+19.5 pt against the box's 9), but the stored text that
+`scripts/repair_pastes.py` re-titles uploads from has no font. So the rule
+stays one a string can answer.
+
+**What it may not do.** It is still a string matcher. A headline of three words
+or fewer set directly below the fact box is read as one of its rows. So is a
+headline that states a room count in the box's own words ("Hof mit 8 Zimmer"),
+which opens a box of its own. A box whose first row the fact reader does not
+know ("Objektart Einfamilienhaus") is not recognised, and that row becomes
+the title. On this cover the title is "EINFAMILIENHAUS IN MÜHLDORF AM INN", a
+small kicker set above the headline: the first headline-like line, as the
+rule says, and an honest name for the house. The four uploads repaired under
+entry 28 keep the title and price they had.
 ## 29. The reader's name for a place is theirs; the listing's title stays evidence
 
 **Decision.** A reader can rename a property from the dossier, because an

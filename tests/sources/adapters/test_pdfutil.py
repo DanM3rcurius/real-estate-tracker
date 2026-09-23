@@ -498,3 +498,57 @@ def test_pdf_title_still_takes_a_headline_under_a_bare_non_contact_label():
     data = make_pdf([["Exposé:", "Hofstelle mit Stadel und Obstgarten"]])
 
     assert pdf_title(extract_pdf_text(data)) == "Hofstelle mit Stadel und Obstgarten"
+
+
+#: The ohne-makler.net cover as pypdf reads it (issue #31): its two-column fact
+#: box comes first in the text layer, label and value joined by a space, and
+#: the headline only after it. Several rows name no label the fact reader
+#: knows and carry no figure ("Energieträger Gas", "Zustand gepflegt").
+_FACT_TABLE_COVER = [
+    "Baujahr 1993",
+    "Grundstücksfläche 670 m²",
+    "Etagen 4",
+    "Zimmer 5",
+    "Wohnfläche 168 m²",
+    "Energieträger Gas",
+    "Übernahme ab Datum",
+    "Übernahmedatum 01.04.2027",
+    "Zustand gepflegt",
+    "Schlafzimmer 4",
+    "Heizung Zentralheizung",
+    "EINFAMILIENHAUS IN MÜHLDORF AM INN",
+    "Provisionsfrei - Freistehendes Einfamilienhaus mit",
+    "großem Garten nahe Stadtplatz und Innauen",
+    "OBJEKT-NR. OM-439536",
+    "Einfamilienhaus",
+    "Verkauf: 720.000 €",
+    "84453 Mühldorf am Inn",
+]
+
+
+def test_pdf_title_reads_past_a_fact_table_that_opens_the_cover():
+    data = make_pdf([_FACT_TABLE_COVER])
+
+    assert pdf_title(extract_pdf_text(data)) == "EINFAMILIENHAUS IN MÜHLDORF AM INN"
+
+
+def test_pdf_title_keeps_a_short_headline_above_the_fact_table():
+    # Only a table the cover *opens* with is skipped: a headline set above
+    # its facts is still the first line that reads like one.
+    data = make_pdf([["Hofstelle mit Stadel", "Baujahr 1850", "Zustand renovierungsbedürftig"]])
+
+    assert pdf_title(extract_pdf_text(data)) == "Hofstelle mit Stadel"
+
+
+def test_pdf_title_is_none_for_a_cover_that_is_only_a_fact_table():
+    data = make_pdf([["Baujahr 1993", "Zimmer 5", "Zustand gepflegt"], ["Objektbeschreibung"]])
+
+    assert pdf_title(extract_pdf_text(data)) is None
+
+
+def test_raw_listing_from_pdf_reads_the_ohne_makler_cover():
+    listing = raw_listing_from_pdf("manual", "upload:0000", make_pdf([_FACT_TABLE_COVER]))
+
+    assert listing.title == "EINFAMILIENHAUS IN MÜHLDORF AM INN"
+    assert listing.price_raw == "720.000 €"
+    assert listing.year_raw == "1993"
