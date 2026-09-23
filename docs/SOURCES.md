@@ -329,9 +329,12 @@ structure expected going in: a `dataLayer` JSON blob carrying `listing_id`
 rooms/area figures rendered as three `eps-item` blocks, e.g. `<div
 class="eps-item eps-item-price col-4">690.000,00 €<br> <span
 class="eps-item-unit">Kaufpreis</span></div>` (value first, label in a
-nested span). The page also carries `col-label`/`col-value` divs, but those
-are unrelated sidebar widgets (Umzugsrechner, Immobilienwert, Kredit) - not
-where the Objektdaten figures live.
+nested span). The page's "Objektdaten" table then sets the same facts as
+`col-label`/`col-value` pairs, label first ("Grundstück" / "611 m²",
+"Wohnfläche" / "165 m²", "Kauf&shy;preis" / "690.000,00 €", "Baujahr" /
+"1962"). This section used to call those divs unrelated sidebar widgets;
+they are not, and that misreading is why every OVB property showed "k. A."
+for price and areas until issue #27.
 
 Exactly two of those structured fields are parsed by this adapter, and only
 because nothing else on the page carries them: `postal_code` and `locality`,
@@ -355,15 +358,15 @@ the real page, that gets:
 - **description**, the full visible body text - which means the price,
   room count and phrases like "Provision für Käufer" all reach it as plain
   text, so the `hidden_score` keyword vocabulary still fires on them;
-- **nothing** for `price_raw`/`rooms_raw`/`living_raw`/`land_raw`/etc.
-  `extract_labeled_fields` wants a single "Label: value" line, and this
-  page's `eps-item` blocks render the value *before* its label, each on its
-  own line after the body text is flattened ("690.000,00 €" then
-  "Kaufpreis", never "Kaufpreis: 690.000,00 €") - so it genuinely extracts
-  nothing here. This is a real limitation: reading the `eps-item` blocks (or
-  the dataLayer's cent-denominated `property_price`) into typed raw fields
-  would need a purpose-built extension to this adapter — or to `_htmlutil` —
-  that does not exist yet.
+- `price_raw`, `living_raw`, `land_raw`, `rooms_raw` and `year_raw` from the
+  Objektdaten table. Flattened to text, each label sits on its own line with
+  its value on the next non-empty one, a blank line or two between them;
+  `extract_labeled_fields` bridges those blank lines and pairs a label only
+  with a value of that field's shape (decision 26). The headline `eps-item`
+  blocks put the value *above* its label, so "Kaufpreis" is followed there
+  by the room count "7" - the shape check refuses it rather than reading a
+  EUR 7 house, and the table below supplies the real figure. Until issue #27
+  none of this was read: the lift only looked at the immediately next line.
 - `external_id` always comes from the **URL**, never the page - the same
   6-char code the dataLayer also carries, but reading it from the URL needs
   no parser at all and survives a broker rewriting the title.

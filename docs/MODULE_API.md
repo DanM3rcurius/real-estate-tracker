@@ -352,10 +352,14 @@ def raw_listing_from_html(source_key, url, html, *, http_status=None,
                           extra=None) -> RawListing
 def extract_labeled_fields(text: str) -> dict[str, str]
     # "Label: value" lines, several per line when set apart by a tab or a
-    # run of two spaces; a label on its own line with a short numeric value
-    # on the next (numeric fields only, never location_raw); a bare room
-    # count ("28 Zimmer") on a short line. First value per field wins.
-    # Strings only - it parses nothing. DECISIONS entry 24.
+    # run of two spaces; a colon-less label and value in one cell or row
+    # ("Wohnfläche ca. 180 m²", "Kaufpreis\t450.000 €"); a label on its own
+    # line (trailing colon optional) with a short value on the next non-empty
+    # line (numeric fields only, never location_raw); a bare room count
+    # ("28 Zimmer") on a short line. A pairing without a colon needs a value
+    # of the field's shape. Qualified labels ("Wohnfläche ca.", "Anzahl
+    # Zimmer") resolve to their base field. First value per field wins.
+    # Strings only - it parses nothing. DECISIONS entries 24 and 26.
 
 # hofradar.sources.adapters._pdfutil - the shared PDF lift, same station as
 # _htmlutil for the other container. Used by denkmalboerse, pdf_bulletin,

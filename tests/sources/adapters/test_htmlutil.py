@@ -11,7 +11,7 @@ fix and its guard rail both live here rather than in one adapter.
 
 from __future__ import annotations
 
-from hofradar.sources.adapters._htmlutil import extract_labeled_fields
+from hofradar.sources.adapters._htmlutil import extract_labeled_fields, raw_listing_from_html
 
 
 def test_rent_labels_keep_the_label_in_the_value():
@@ -152,8 +152,18 @@ def test_next_line_value_not_taken_for_location_labels() -> None:
     assert extract_labeled_fields("Ort\nRosenheim") == {}
 
 
-def test_a_blank_line_between_label_and_value_is_not_bridged() -> None:
-    assert extract_labeled_fields("Wohnfläche\n\n118 m²") == {}
+def test_a_blank_line_between_label_and_value_is_bridged() -> None:
+    # Issue #27: flattened HTML puts one or two empty lines between every
+    # block, and refusing to look past them left every OVB property with no
+    # price or area at all.
+    assert extract_labeled_fields("Wohnfläche\n\n118 m²") == {"living_raw": "118 m²"}
+    assert extract_labeled_fields("Kaufpreis\n\n\n690.000,00 €") == {
+        "price_raw": "690.000,00 €"
+    }
+
+
+def test_too_many_blank_lines_end_the_pairing() -> None:
+    assert extract_labeled_fields("Wohnfläche" + "\n" * 8 + "118 m²") == {}
 
 
 # --------------------------------------------------------------------------- #
@@ -180,3 +190,109 @@ def test_a_four_digit_number_before_zimmer_is_not_a_room_count() -> None:
 def test_an_explicit_zimmer_label_beats_a_later_bare_room_count() -> None:
     fields = extract_labeled_fields("Zimmer: 4\n7 Zimmer")
     assert fields == {"rooms_raw": "4"}
+
+
+# --------------------------------------------------------------------------- #
+# Issue #27: facts the exposé states plainly that reached the card as "k. A."
+# --------------------------------------------------------------------------- #
+
+
+def test_a_label_ending_in_a_colon_with_its_value_on_the_next_line() -> None:
+    """``<strong>Kaufpreis:</strong> 450.000 €`` and ``<dt>Wohnfläche:</dt>``
+    flatten to the label and its value on separate lines, and a line holding
+    a colon was skipped by both passes."""
+    fields = extract_labeled_fields("Kaufpreis:\n450.000 €\n\nWohnfläche:\nca. 180 m²")
+    assert fields == {"price_raw": "450.000 €", "living_raw": "ca. 180 m²"}
+
+
+def test_qualified_labels_resolve_to_their_base_field() -> None:
+    fields = extract_labeled_fields(
+        "Wohnfläche ca.: 180 m²\n"
+        "Grundstücksfläche ca.: 2.500 m²\n"
+        "Anzahl Zimmer: 8\n"
+        "Nutzfläche (m²): 300\n"
+        "Baujahr ca.: 1890"
+    )
+    assert fields == {
+        "living_raw": "180 m²",
+        "land_raw": "2.500 m²",
+        "rooms_raw": "8",
+        "usable_raw": "300",
+        "year_raw": "1890",
+    }
+
+
+def test_a_combined_living_and_usable_area_is_not_a_living_area() -> None:
+    fields = extract_labeled_fields("Wohn-/Nutzfläche: ca. 420 m²")
+    assert fields == {"usable_raw": "ca. 420 m²"}
+
+
+def test_a_soft_hyphen_inside_a_label_does_not_hide_it() -> None:
+    assert extract_labeled_fields("Kauf\u00adpreis\n\n690.000,00 €") == {
+        "price_raw": "690.000,00 €"
+    }
+
+
+def test_colon_less_label_and_value_in_one_cell() -> None:
+    """How pypdf renders a two-column fact table and how a browser copies one."""
+    fields = extract_labeled_fields(
+        "Kaufpreis 450.000 €\nWohnfläche ca. 180 m²\nGrundstück ca. 2.500 m²\nZimmer 8"
+    )
+    assert fields == {
+        "price_raw": "450.000 €",
+        "living_raw": "180 m²",
+        "land_raw": "2.500 m²",
+        "rooms_raw": "8",
+    }
+
+
+def test_a_copied_table_row_with_tabs() -> None:
+    fields = extract_labeled_fields("Kaufpreis\t690.000,00 €\tWohnfläche\t165 m2")
+    assert fields == {"price_raw": "690.000,00 €", "living_raw": "165 m2"}
+
+
+def test_colon_less_prose_is_not_read_as_a_fact() -> None:
+    assert extract_labeled_fields("Wohnfläche von ca. 165 m² auf zwei Etagen") == {}
+    assert extract_labeled_fields("Zimmer mit Blick auf den Garten") == {}
+
+
+def test_a_value_above_its_label_is_not_paired_with_the_next_label() -> None:
+    """OVBimmo's headline block: value, label, value, label. "Kaufpreis" is
+    followed by the room count, "Zimmer" by the living area - neither fits."""
+    text = "690.000,00 €\n\nKaufpreis\n\n\n7\n\nZimmer\n\n\n165\n m²\nFläche"
+    assert extract_labeled_fields(text) == {}
+
+
+def test_the_live_ovbimmo_objektdaten_table_is_read() -> None:
+    """Shape of a live OVB detail page (2026-09-23): label div, blank lines,
+    value div. Every one of these was None before issue #27."""
+    text = (
+        "Zimmer\n\n5\n\n\n\n\nGrundstück\n\n1.147 m²\n\n\n\n\n"
+        "Wohnfläche\n\n140 m²\n\n\nPreise\n\n\nKauf\u00adpreis\n\n\n559.000,00\u00a0€\n"
+        "\n\nBaujahr\n\n1995"
+    )
+    assert extract_labeled_fields(text) == {
+        "rooms_raw": "5",
+        "land_raw": "1.147 m²",
+        "living_raw": "140 m²",
+        "price_raw": "559.000,00\u00a0€",
+        "year_raw": "1995",
+    }
+
+
+def test_html_markup_between_label_and_value_is_read() -> None:
+    html = (
+        "<html><body><h1>Bauernhaus</h1>"
+        '<div class="col-label">Wohnfläche</div>'
+        '<div class="col-value">165 m<sup>2</sup></div>'
+        "<p><strong>Kaufpreis:</strong> 450.000 €</p>"
+        "<dl><dt>Grundstücksfläche ca.</dt><dd>2.500 m²</dd></dl>"
+        "<table><tr><td>Anzahl Zimmer</td><td>8</td></tr></table>"
+        "</body></html>"
+    )
+    listing = raw_listing_from_html("x", "https://broker.example/objekt/1", html)
+    # "165 m<sup>2</sup>" flattened to "165 m" plus a stray "2" line.
+    assert listing.living_raw == "165 m²"
+    assert listing.price_raw == "450.000 €"
+    assert listing.land_raw == "2.500 m²"
+    assert listing.rooms_raw == "8"

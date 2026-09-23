@@ -207,3 +207,38 @@ def test_parse_area(text, expected):
     else:
         assert result == pytest.approx(expected)
         assert isinstance(result, float)
+
+
+# --------------------------------------------------------------------------- #
+# Issue #27: numbers grouped by spaces, and a percentage ahead of the price
+# --------------------------------------------------------------------------- #
+
+SPACE_GROUPED_PRICE_CASES = [
+    pytest.param("450 000 €", 450000.0, id="plain-space"),
+    pytest.param("450\u00a0000 €", 450000.0, id="no-break-space"),
+    pytest.param("450\u202f000 €", 450000.0, id="narrow-no-break-space"),
+    pytest.param("1 250 000 EUR", 1250000.0, id="two-groups"),
+    pytest.param("€ 1 250 000,00", 1250000.0, id="currency-first-with-cents"),
+]
+
+
+@pytest.mark.parametrize("text,expected", SPACE_GROUPED_PRICE_CASES)
+def test_parse_price_space_grouped_thousands(text, expected):
+    """Read as a plain digit run, "450 000 €" was a EUR 450 farm."""
+    value, price_type = parse_price(text)
+    assert value == pytest.approx(expected)
+    assert price_type == PriceType.ASKING.value
+
+
+def test_parse_area_space_grouped_thousands():
+    assert parse_area("1 050 m²") == pytest.approx(1050.0)
+    assert parse_area("ca. 7\u202f112 m²") == pytest.approx(7112.0)
+
+
+def test_a_postcode_is_not_space_grouped():
+    assert parse_german_number("83109 Großkarolinenfeld") == pytest.approx(83109.0)
+
+
+def test_parse_price_skips_a_percentage_before_the_price():
+    value, _ = parse_price("3,57 % Käuferprovision, Kaufpreis 450.000 €")
+    assert value == pytest.approx(450000.0)

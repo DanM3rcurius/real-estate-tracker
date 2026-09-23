@@ -224,3 +224,62 @@ def test_raw_warnings_and_documents_are_carried_through():
     assert result.warnings[0] == (
         "PDF: das Dokument enthält keinen lesbaren Text (vermutlich gescannt)"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Issue #27: a headline fact that no labelled line supplied is said, not "k. A."
+# --------------------------------------------------------------------------- #
+
+
+def _eckdaten(result) -> list[str]:
+    return [w for w in result.warnings if w.startswith("Eckdaten:")]
+
+
+def test_missing_headline_facts_are_named_in_one_warning():
+    raw = RawListing(
+        source_key="test_source",
+        url="https://example.test/listings/thin",
+        title="Bauernhaus",
+        description="Schönes Bauernhaus, 83569 Vogtareuth.",
+        price_raw="450.000 €",
+    )
+
+    warnings = _eckdaten(normalize_listing(raw, KEYWORDS))
+
+    assert len(warnings) == 1
+    assert "Wohnfläche" in warnings[0]
+    assert "Grundstücksfläche" in warnings[0]
+    assert "Kaufpreis" not in warnings[0]
+    assert "k. A." in warnings[0]
+
+
+def test_a_complete_listing_gets_no_missing_facts_warning():
+    assert _eckdaten(normalize_listing(VIERSEITHOF_ROSENHEIM, KEYWORDS)) == []
+
+
+def test_an_index_page_is_not_also_told_its_facts_are_missing():
+    raw = RawListing(
+        source_key="test_source",
+        url="https://example.test/suche",
+        title="Trefferliste",
+        page_kind=PAGE_KIND_INDEX,
+    )
+    assert _eckdaten(normalize_listing(raw, KEYWORDS)) == []
+
+
+def test_price_on_request_is_a_stated_fact_not_a_parse_failure():
+    raw = RawListing(
+        source_key="test_source",
+        url="https://example.test/listings/anfrage",
+        title="Schloss",
+        price_raw="auf Anfrage",
+        living_raw="ca. 800 m²",
+        land_raw="ca. 14.500 m²",
+    )
+
+    result = normalize_listing(raw, KEYWORDS)
+
+    assert result.price is None
+    assert result.price_type == PriceType.ON_REQUEST.value
+    assert not any(w.startswith("price:") for w in result.warnings)
+    assert _eckdaten(result) == []

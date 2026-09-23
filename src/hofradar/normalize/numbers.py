@@ -23,7 +23,21 @@ from hofradar.normalize.text import normalize_text
 #: A run of digits that may contain internal "." (thousands) or ","
 #: (decimal) separators, anchored to start and end on a digit so a trailing
 #: sentence-ending "." (e.g. "Baujahr 1995.") is never swallowed.
-_NUMBER_TOKEN_RE = re.compile(r"\d[\d.,]*\d|\d")
+#:
+#: The first alternative is a number grouped by spaces - "450 000 €", and
+#: the same with a no-break space (U+00A0) or the narrow no-break space
+#: (U+202F) that DIN 5008 and most typesetting software put there. Read
+#: as a plain digit run it was "450", which the currency sign then let
+#: through as a EUR 450 price, and "1 050 m²" was a 1 m² house (issue #27).
+#: Only a leading group of one to three digits, single separators and
+#: groups of exactly three digits qualify, so a postcode ("83109 Ort") or a
+#: year next to a count never has the shape. This runs on a field's raw
+#: value, never on prose.
+_SPACE_GROUP_CHARS = " \u00a0\u202f\u2009"
+_NUMBER_TOKEN_RE = re.compile(
+    rf"\d{{1,3}}(?:[{_SPACE_GROUP_CHARS}]\d{{3}})+(?:,\d+)?(?![\d.])|\d[\d.,]*\d|\d"
+)
+_SPACE_GROUP_RE = re.compile(f"[{_SPACE_GROUP_CHARS}]")
 
 _MAGNITUDE_WORDS: dict[str, float] = {
     "k": 1_000,
@@ -48,8 +62,10 @@ def _parse_number_token(token: str) -> float:
     if every group after a "." is exactly three digits and the leading group
     is at most three digits, "." is a thousands separator ("750.000" ->
     750000, "1.234.567" -> 1234567). Otherwise it is treated as a decimal
-    point (covers stray non-German input like "0.75").
+    point (covers stray non-German input like "0.75"). A space-grouped token
+    ("450 000") has its group separators removed first.
     """
+    token = _SPACE_GROUP_RE.sub("", token)
     if "," in token:
         int_part, _, dec_part = token.rpartition(",")
         int_part = int_part.replace(".", "")
@@ -94,6 +110,7 @@ _CURRENCY_RE = re.compile(r"€|eur\b|euro\b", re.IGNORECASE)
 #: "750 T€" - a magnitude marker fused onto the currency symbol rather than
 #: the number, so it needs its own pattern ahead of the generic one.
 _T_EURO_RE = re.compile(r"(\d[\d.,]*\d|\d)\s*t\s*€", re.IGNORECASE)
+_PERCENT_RE = re.compile(r"\s*(?:%|prozent\b)", re.IGNORECASE)
 
 
 def _extract_price_value(text: str) -> float | None:
@@ -107,7 +124,12 @@ def _extract_price_value(text: str) -> float | None:
     if t_match:
         return _parse_number_token(t_match.group(1)) * 1_000
 
-    match = _NUMBER_TOKEN_RE.search(text)
+    # A percentage is never the price: "3,57 % Provision, Kaufpreis 450.000 €"
+    # read its first number as a EUR 3.57 farm.
+    match = next(
+        (m for m in _NUMBER_TOKEN_RE.finditer(text) if not _PERCENT_RE.match(text, m.end())),
+        None,
+    )
     if not match:
         return None
     base = _parse_number_token(match.group())
