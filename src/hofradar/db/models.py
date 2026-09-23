@@ -198,6 +198,11 @@ class Property(Base, TimestampMixin):
     #: Human triage - survives every re-run and every profile change.
     user_state: Mapped[str | None] = mapped_column(String(24), index=True)
     user_note: Mapped[str | None] = mapped_column(Text)
+    #: The reader's own name for the place. Triage-class like ``user_note``:
+    #: ``canonical_title`` stays the listing's words and ingest keeps updating
+    #: it, while this survives every re-crawl. Null means "use the listing's".
+    #: Written only by the ``/title`` route (and carried across a merge).
+    user_title: Mapped[str | None] = mapped_column(String(500))
 
     #: On the reader's Merkliste since. Triage-class data like ``user_state``;
     #: null means not on the list. Written only by the ``/merken`` route.
@@ -232,6 +237,17 @@ class Property(Base, TimestampMixin):
         Index("ix_properties_geo", "lat", "lon"),
         Index("ix_properties_active", "listing_status", "distance_air_km"),
     )
+
+    @property
+    def display_title(self) -> str:
+        """What a reader sees: their own name for the place, else the listing's.
+
+        A blank name falls back like a missing one - the route never stores
+        one, but a heading of spaces would be a title nobody can click.
+        """
+        if self.user_title and self.user_title.strip():
+            return self.user_title
+        return self.canonical_title
 
     @property
     def source_count(self) -> int:

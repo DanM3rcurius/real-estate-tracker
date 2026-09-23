@@ -501,7 +501,7 @@ def build_report(
             ReportEntry(
                 rank=rank,
                 public_id=prop.public_id,
-                title=prop.canonical_title,
+                title=prop.display_title,
                 town=prop.town,
                 price=prop.price,
                 price_type=prop.price_type,
