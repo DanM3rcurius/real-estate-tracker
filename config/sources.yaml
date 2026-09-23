@@ -330,11 +330,11 @@ sources:
       paper, not a portal. listing_ttl_days: 14 because adverts run a fixed
       paid window, so a disappearance within that window is EXPIRED, not
       REMOVED - see docs/DECISIONS.md entry 15.
-      The detail page's dataLayer JSON and its three eps-item price/rooms/
-      area blocks are confirmed by a real capture but not parsed -
-      fetch_detail only reads the external id from the URL and the generic
-      og:/body-text fallback, so price/rooms/area stay in description as
-      plain text rather than typed fields. See docs/SOURCES.md. contact_kind
+      The detail page's dataLayer figures are confirmed by a real capture but
+      not parsed - price, areas, rooms and build year come from the visible
+      "Objektdaten" table through the generic label reader (issue #27,
+      docs/DECISIONS.md entry 26), the town and postcode from the dataLayer.
+      See docs/SOURCES.md. contact_kind
       is deliberately left unset because this source carries both broker and
       private inventory, and the one detail page captured so far is a
       broker listing whose own dataLayer.features disagrees with its body

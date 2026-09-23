@@ -242,6 +242,45 @@ def cmd_delete_property(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_documents(args: argparse.Namespace) -> int:
+    """List ``Document`` rows whose stored file cannot be found on this machine.
+
+    A database that moves to another machine without its ``uploads/``
+    directory (GitHub issue #26) looks fine until a reader clicks "Dokument
+    öffnen" and gets a dead link - the dossier now says so per-document, but
+    a fresh deployment wants to know *before* anyone clicks anything.
+    ``--check`` turns "some are missing" into a non-zero exit, the same shape
+    ``migrate --check`` already uses.
+    """
+    from sqlalchemy import select
+
+    from hofradar.db.models import Document
+    from hofradar.web.uploads import resolve_upload_path
+
+    ensure_schema()
+    with session_scope() as session:
+        rows = session.scalars(
+            select(Document).where(Document.local_path.is_not(None))
+        ).all()
+        missing = [
+            row for row in rows if resolve_upload_path(row.local_path, row.document_url) is None
+        ]
+
+    print(f"{len(rows)} document(s) with a stored local_path, {len(missing)} missing here")
+    for row in missing:
+        print(f"  #{row.id} {row.title or row.kind!r}: {row.local_path}")
+
+    if missing:
+        print(
+            "\nlikely cause: a database moved here without its uploads/ directory. "
+            "See deploy/raspberrypi/README.md, \"Bringing an existing database "
+            "with you\", for the scp/rsync step."
+        )
+    if args.check and missing:
+        return 1
+    return 0
+
+
 def cmd_hash_password(args: argparse.Namespace) -> int:
     """Print a PBKDF2 hash to put in HOFRADAR_PASSWORD_HASH.
 
@@ -355,6 +394,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip the snapshot (for a Postgres deployment, where the dump is your job)",
     )
     p_delete.set_defaults(func=cmd_delete_property)
+
+    p_documents = sub.add_parser(
+        "documents",
+        help="list Document rows whose local file is missing on this machine (GitHub issue #26)",
+    )
+    p_documents.add_argument(
+        "--check", action="store_true", help="exit 1 if any file is missing"
+    )
+    p_documents.set_defaults(func=cmd_documents)
 
     p_hash = sub.add_parser(
         "hash-password", help="print a PBKDF2 hash for HOFRADAR_PASSWORD_HASH"

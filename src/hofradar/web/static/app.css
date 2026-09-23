@@ -92,6 +92,7 @@ small { color: var(--ink-soft); }
 
 .page { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
 .hint { color: var(--ink-soft); font-size: .9rem; margin-top: 0; }
+.hint--warning { color: var(--warn); }
 .crumb { margin: 0 0 8px; font-size: .9rem; }
 .empty { color: var(--ink-soft); background: var(--bg-sunken); padding: 14px; border-radius: var(--radius); }
 .fold > summary { cursor: pointer; font-weight: 600; margin: 8px 0; }

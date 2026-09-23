@@ -13,12 +13,10 @@ Four things worth pinning:
    before exhausting `<link rel="next">` must never leave the enumeration
    flagged complete.
 4. What `fetch_detail` genuinely pulls out of a real detail page: the title
-   (og:title), the visible body text as description, and image URLs - but
-   NOT the structured price/rooms/area fields, because
-   `_htmlutil.extract_labeled_fields` looks for "Label: value" lines and
-   this page's `eps-item` blocks render the value *before* the label, each
-   on its own line once the body is flattened. See docs/SOURCES.md for the
-   consequence.
+   (og:title), the visible body text as description, image URLs, and - since
+   issue #27 - the price, areas, rooms and build year from the page's
+   "Objektdaten" table, while the headline `eps-item` blocks (value *before*
+   label) are refused rather than mis-paired. See docs/SOURCES.md.
 
 Both fixtures used here are real captures, not hand-written approximations:
 `ovbimmo_search_rosenheim.html` (`ovbimmo.de/kaufen/rosenheim-kreis`,
@@ -96,8 +94,8 @@ async def test_fetch_detail_extracts_external_id_from_the_url_not_the_page(adapt
 @pytest.mark.asyncio
 async def test_fetch_detail_against_the_real_capture(adapter, read_fixture) -> None:
     """What `raw_listing_from_html` genuinely pulls out of a real OVB detail
-    page - not what the dataLayer/Objektdaten *could* offer with a purpose-
-    built parser, which does not exist yet (see the module docstring).
+    page - not what the dataLayer's cent-denominated figures *could* offer,
+    which stay unread (see the module docstring).
     """
     with respx.mock:
         respx.get(REAL_DETAIL_URL).mock(
@@ -123,19 +121,17 @@ async def test_fetch_detail_against_the_real_capture(adapter, read_fixture) -> N
     assert "Provision für Käufer" in (listing.description or "")
     assert "690.000,00" in (listing.description or "")
     assert "Kaufpreis" in (listing.description or "")
-    # ...but NOT as structured fields: extract_labeled_fields wants a single
-    # "Label: value" line, and this page's eps-item blocks render the value
-    # and its label on separate lines with the value FIRST
-    # ("690.000,00 €\n\nKaufpreis", not "Kaufpreis: 690.000,00 €"). So the
-    # generic extractor genuinely gets nothing from those blocks; see
-    # docs/SOURCES.md. The one exception is the room count, which the page
-    # also states as a bare "* Gesamt 7 Zimmer" bullet - the shape
-    # extract_labeled_fields reads since the exposé-PDF work (a BLfD fact box
-    # writes "28 Zimmer" the same way).
-    assert listing.price_raw is None
+    # ...and as structured fields, read off the page's "Objektdaten" table
+    # (label, blank lines, value). Until issue #27 all four of these were
+    # None and every OVB card read "k. A." - the lift looked only at the
+    # immediately next line, and the headline eps-item block (value ABOVE
+    # its label, "Kaufpreis" followed by the room count "7") must not be
+    # mis-paired either: the shape check refuses a EUR 7 price.
+    assert listing.price_raw == "690.000,00\u00a0€"
     assert listing.rooms_raw == "7"
-    assert listing.living_raw is None
-    assert listing.land_raw is None
+    assert listing.living_raw == "165 m²"
+    assert listing.land_raw == "611 m²"
+    assert listing.year_raw == "1962"
     # ...with two exceptions, read straight out of the dataLayer because
     # nothing else on the page states them: the postcode and the town. Without
     # them this listing has no location at all, no geocode query and so no

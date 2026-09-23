@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Re-parse hand-pasted listings that were stored before the paste box was fixed.
 
+Covers both fixes so far: issue #3 (the paste box never parsed the text) and
+issue #27 (labels without a colon, a value a blank line below its label, and
+space-grouped numbers were not read, so an uploaded exposé's facts reached the
+radar as "k. A."). An uploaded PDF counts: its extracted text is what the
+observation stored.
+
 Ingest writes the Observation before the Property, so the text you pasted is
 still on record even though the fields it should have produced are empty. This
 re-reads that text through the fixed parser and re-ingests it under the
@@ -41,6 +47,7 @@ from hofradar.geo import locate
 from hofradar.lifecycle import ingest
 from hofradar.normalize import normalize_listing
 from hofradar.sources import get_adapter
+from hofradar.web.uploads import UPLOAD_URL_PREFIX
 
 MANUAL_KEY = "manual"
 
@@ -51,10 +58,18 @@ RECOVERABLE_FIELDS: tuple[str, ...] = (
     "price",
     "land_sqm",
     "living_sqm",
+    "usable_sqm",
+    "rooms",
     "year_built",
     "town",
     "postcode",
 )
+
+#: Numeric facts an older parser could get *wrong* rather than miss: before
+#: issue #27, "450 000 €" was a EUR 450 price and "1 050 m²" a 1 m² house.
+#: A re-parse that disagrees with the stored value is shown, and with
+#: --apply written - the manual source verifies, so ingest may overwrite.
+CORRECTABLE_FIELDS: tuple[str, ...] = ("price", "land_sqm", "living_sqm", "usable_sqm", "rooms")
 
 
 async def run(apply: bool) -> int:
@@ -107,6 +122,18 @@ async def run(apply: bool) -> int:
                 for name in RECOVERABLE_FIELDS
                 if getattr(prop, name, None) is None and getattr(listing, name, None) is not None
             ]
+            gains += [
+                f"{name} {getattr(prop, name)} -> {getattr(listing, name)}"
+                for name in CORRECTABLE_FIELDS
+                if getattr(prop, name, None) is not None
+                and getattr(listing, name, None) is not None
+                and getattr(prop, name) != getattr(listing, name)
+            ]
+            if observation.url.startswith(UPLOAD_URL_PREFIX):
+                # An uploaded PDF was titled from its cover page, not from the
+                # first line of its text, which is all a re-parse of the stored
+                # text can see - so the title it has is the right one.
+                listing.title = prop.canonical_title
             # The title is the odd one out: ``canonical_title`` is never NULL
             # (a paste that produced none got "Objekt <Ort>"), and a chrome
             # title lifted off portal markup is a *wrong* value rather than a

@@ -336,3 +336,92 @@ def test_a_triage_outage_is_said_on_the_confirmation_page(
     assert response.status_code == 200
     assert "ohne Zweitmeinung" in response.text
     assert db_session.query(Property).count() == 1, "an outage must not lose the paste"
+
+
+# --------------------------------------------------------------------------- #
+# Issue #27: the exposé states the facts, the card said "k. A."
+# --------------------------------------------------------------------------- #
+
+#: What a browser puts on the clipboard when a reader selects a portal's
+#: detail page: every table cell on its own line, labels without colons, a
+#: soft hyphen the portal set for line breaking, and the "m²" superscript
+#: copied as a plain "2".
+PASTED_FROM_A_PORTAL = """Charmantes Bauernhaus mit großem Garten
+83109 Großkarolinenfeld
+Objektdaten
+Zimmer
+
+5
+Grundstück
+
+1.147 m2
+Wohnfläche
+
+140 m2
+Kauf\u00adpreis
+
+559.000,00 €
+Baujahr
+
+1995
+Ehemalige Landwirtschaft mit Stadel und Obstgarten."""
+
+
+def test_a_paste_copied_from_a_portal_page_keeps_its_facts(
+    client: TestClient, db_session
+) -> None:
+    with _offline():
+        response = client.post("/add", data={"url": "", "text": PASTED_FROM_A_PORTAL})
+
+    assert response.status_code == 200
+    prop = db_session.query(Property).one()
+    assert prop.price == 559000.0
+    assert prop.land_sqm == 1147.0
+    assert prop.living_sqm == 140.0
+    assert prop.rooms == 5
+    assert prop.year_built == 1995
+    assert "Eckdaten" not in response.text
+
+
+#: A broker's exposé as pypdf reads a two-column fact table: label and value
+#: on one line with no colon, a label above its value, and a price grouped by
+#: a no-break space (WinAnsi, which make_pdf writes, has no narrow one).
+#: Every one of these used to come out None.
+PDF_TABLE_LINES = [
+    [
+        "Idyllische Hofstelle bei Vogtareuth",
+        "83569 Vogtareuth",
+        "Kaufpreis 1\u00a0250\u00a0000 €",
+        "Wohnfläche ca. 310 m²",
+        "Grundstücksfläche ca.",
+        "7.112 m²",
+        "Anzahl Zimmer 9",
+    ],
+    ["Scheune, Stall und Tenne. Obstgarten."],
+]
+
+
+def test_an_uploaded_expose_with_a_fact_table_keeps_its_facts(
+    client: TestClient, db_session, data_dir: Path
+) -> None:
+    with _offline():
+        response = client.post(
+            "/add", data={"url": "", "text": ""}, files=_pdf_upload(make_pdf(PDF_TABLE_LINES))
+        )
+
+    assert response.status_code == 200, response.text[:400]
+    prop = db_session.query(Property).one()
+    assert prop.price == 1250000.0
+    assert prop.living_sqm == 310.0
+    assert prop.land_sqm == 7112.0
+    assert prop.rooms == 9
+
+
+def test_a_paste_without_its_areas_says_so_on_the_confirmation_page(
+    client: TestClient,
+) -> None:
+    thin = "Sacherl bei Vogtareuth\n83569 Vogtareuth\nKaufpreis: 300.000 EUR"
+    with _offline():
+        response = client.post("/add", data={"url": "", "text": thin})
+
+    assert "Eckdaten: kein Wert gefunden für Wohnfläche, Grundstücksfläche" in response.text
