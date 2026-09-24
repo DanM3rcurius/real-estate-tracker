@@ -1219,3 +1219,60 @@ and town - third-party advert text, and now the reader's. It escapes them
 listing reads `canonical_title`. Picking the wrong one is silent either way -
 the reader's name leaking into a score, or the listing's words overriding a
 name the reader chose - so the choice is made per call site, not by default.
+
+## 30. The Sanierungsstufe is inferred until a reader says otherwise, and its thresholds are the reader's
+
+**Decision.** The renovation tier (`RenovationTier`, shown as *Sanierungsstufe*)
+has two new inputs a reader controls.
+
+1. **A manual tier.** `Property.user_renovation_tier` (nullable `String(16)`,
+   one of `costmodel.MANUAL_TIERS`: light, medium, heavy, complete) is set from
+   the dossier's Kostenmodell table by `POST /property/{public_id}/sanierung`,
+   the only route that writes it; `dedupe.merge` carries it like `user_title`.
+   When set, `infer_renovation_tier` returns it outright - no tag, no
+   `condition`, no pre-modern bump - and `renovation_evidence` returns
+   `"manual"`. *Automatisch* clears it to NULL.
+2. **The age thresholds.** `PRE_MODERN_YEAR` (1960) and `MODERN_YEAR` (1995)
+   were module constants in `costmodel.renovation`. They are now
+   `RenovationRates.pre_modern_year` / `modern_year` on the search profile,
+   editable on `/settings` beside the €/m² bands (which were not editable there
+   either until now). The module constants remain as the defaults' names.
+
+**Why the manual tier wins outright.** The inference is deliberately
+pessimistic because nobody has looked: silence on a pre-1960 building is
+HEAVY, and "renoviert" on one is bumped a tier. Every rule in that module
+stands in for a survey. A reader who has stood in the building *is* the
+survey, so bumping their verdict by the same age rule would overrule the only
+first-hand evidence with the guess it replaced.
+
+**Why it is not written to `condition`.** Same reason as entry 29:
+`condition` is the listing's words and `ingest` rewrites it; an edit there
+would hold until the next crawl undid it, silently. The reader's tier is
+triage-class data, so it survives every re-crawl and needs no `Observation`
+(invariant 1 is about what a listing says).
+
+**Why "manual" counts as stood-behind.** The engine's cost gate
+(`_cost_reject`) only hard-rejects on a total somebody stood behind; an
+inferred one only raises `FLAG_COST_INFERRED`. A tier a reader chose on
+purpose is at least as stood-behind as a listing's adjective, so the gate now
+asks `evidence == "inferred"` rather than `!= "observed"`. A reader who marks
+a place *Kernsanierung* and so pushes it over the hard budget sees it
+rejected, which is the answer they asked for.
+
+**Never hidden.** The dossier row says *manuell gesetzt* and what the
+inference would have said, so an override cannot quietly become the fact
+nobody remembers setting. The JSON carries `user_renovation_tier`.
+
+**Why the thresholds are on the profile.** They are not facts about a
+building; they are how pessimistic *we* are about silence, which is a policy
+the reader may reasonably disagree with in a region full of 1970s barns. On
+`RenovationRates` they are in `scoring_payload`, so moving one changes
+`profile_hash` and every score is recomputed - nothing is stale-wrong. The
+cost model already depended on `profile.renovation`; it still depends on
+facts and that section only. A validator refuses `modern_year <
+pre_modern_year`, and `/settings` shows that refusal instead of saving.
+
+**Consequence.** `CostEstimate` is one row per property recomputed under
+whichever profile last scored it, so a manual tier is applied on the next
+rescore; the `/sanierung` route recomputes that one property immediately so
+the dossier never shows the old figure under the new tier.

@@ -260,6 +260,14 @@ bewertet". `/merken` follows `merged_into_id` the way `ingest` does, because a
 merged row is never rendered. When you touch `build_results`, the rule is: the
 Merkliste's rows come from `properties`, never only from the scorer.
 
+**The Sanierungsstufe has a reader override and profile thresholds.**
+`Property.user_renovation_tier` (written only by `POST /property/{id}/sanierung`,
+carried by `dedupe.merge`) beats every inference rule, and
+`renovation_evidence` then says `"manual"`, which the cost gate treats as
+stood-behind. The age thresholds are `profile.renovation.pre_modern_year` /
+`modern_year`, not module constants - pass `rates` to `infer_renovation_tier`
+or you silently get the defaults. Decision 30.
+
 **Unresolved, deliberately.** `config/sources.yaml` gives `manual` role
 `primary` while `web/routes/add.py` creates it `LOCAL` with a docstring arguing
 it must not be able to mark a listing verified. `init-db` syncs the YAML, so

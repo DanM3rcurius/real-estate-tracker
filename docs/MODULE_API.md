@@ -18,8 +18,8 @@ were read from; `lifecycle.ingest` remembers each as a `Document` row. See
 `hofradar.contracts`), defaulting to `"listing"` so a source that hands over
 one advert it already knows to be one says nothing. Only a `listing` may
 become a `Property`; see `docs/DECISIONS.md` entry 19.
-`CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
-`hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
+`CostResult.renovation_evidence` is `"manual"`, `"observed"` or `"inferred"` (see
+`hofradar.costmodel.renovation_evidence`) - a "manual" or "observed" figure may
 hard-reject a property on total cost; an "inferred" one only flags it.
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig,
 CoverageConfig). `SearchProfile.coverage.municipalities` is not a scoring slider - it
@@ -222,9 +222,20 @@ def town_in_radius(town: str | None, profile: SearchProfile) -> bool | None  # N
 ```python
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
-def infer_renovation_tier(prop: Property) -> str
-def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
+def infer_renovation_tier(prop: Property,
+                          rates: RenovationRates | None = None) -> RenovationTier
+def renovation_evidence(prop: Property) -> str   # "manual" | "observed" | "inferred"
+def manual_tier(prop: Property) -> RenovationTier | None
+MANUAL_TIERS: tuple[RenovationTier, ...]         # light, medium, heavy, complete
+EVIDENCE_MANUAL, EVIDENCE_OBSERVED, EVIDENCE_INFERRED
 ```
+
+`Property.user_renovation_tier` (a `MANUAL_TIERS` value or null) is the
+reader's own Sanierungsstufe; when set, `infer_renovation_tier` returns it
+outright and `renovation_evidence` says `"manual"`. The age fallback reads
+`rates.pre_modern_year` / `rates.modern_year` (`SearchProfile.renovation`,
+defaults 1960 / 1995, part of `profile_hash`); `estimate_costs` passes
+`profile.renovation`. See `docs/DECISIONS.md` entry 30.
 
 ## `hofradar.scoring`
 
