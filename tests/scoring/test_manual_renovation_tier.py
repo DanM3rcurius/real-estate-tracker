@@ -101,3 +101,13 @@ def test_the_cost_gate_rejects_on_a_manual_tier() -> None:
 
     assert REJECT_TOTAL_COST in result.reject_reasons
     assert FLAG_COST_INFERRED not in result.flags
+
+
+def test_the_cost_assumptions_say_a_tier_was_set_by_hand() -> None:
+    manual = estimate_costs(
+        make_property(year_built=1890, user_renovation_tier="light"), make_profile()
+    )
+    assert "Sanierungsstufe leicht (manuell gesetzt)" in manual.assumptions[0]
+
+    inferred = estimate_costs(make_property(year_built=1890), make_profile())
+    assert "manuell" not in inferred.assumptions[0]

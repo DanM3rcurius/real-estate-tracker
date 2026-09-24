@@ -619,9 +619,22 @@ POST /property/{public_id}/title
     # HX-Redirect to the survivor when the id was merged away - and a 303 to
     # the survivor's dossier for a plain post. 404 for an unknown id.
 
+POST /property/{public_id}/sanierung
+    # Form field tier: one of costmodel.MANUAL_TIERS (light, medium, heavy,
+    # complete), or "auto" / "" to clear. Sets Property.user_renovation_tier,
+    # the only route that writes it (dedupe.merge carries it, docs/DECISIONS.md
+    # entry 30). Follows merged_into_id to the survivor. Commits the tier, then
+    # recomputes this one property's CostEstimate and Score under the base
+    # profile (scoring.rescore_property) in a second transaction, so a crawl's
+    # lock on the recompute costs only the figures, never the decision. 303 to
+    # /property/{id}?sanierung=gespeichert|nicht-neu-berechnet#kostenmodell;
+    # 204 + HX-Redirect for HTMX. 400 for any other tier, 503 when the lock
+    # refuses the tier itself, 404 for an unknown id.
+
 GET /api/property/{public_id}.json
     # The dossier as JSON: row_to_dict plus evidence, user_note, timeline,
-    # sources, documents. "title" is display_title; "user_title" (None unless
+    # sources, documents. "title" is display_title; "user_renovation_tier" is
+    # the reader's Sanierungsstufe or None; "user_title" (None unless
     # renamed) and "listing_title" (canonical_title, also on every row_to_dict
     # row, so the list JSON and the map carry it too) say whose words it is.
 
