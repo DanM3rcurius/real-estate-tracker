@@ -18,9 +18,10 @@ were read from; `lifecycle.ingest` remembers each as a `Document` row. See
 `hofradar.contracts`), defaulting to `"listing"` so a source that hands over
 one advert it already knows to be one says nothing. Only a `listing` may
 become a `Property`; see `docs/DECISIONS.md` entry 19.
-`CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
-`hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
-hard-reject a property on total cost; an "inferred" one only flags it.
+`CostResult.renovation_evidence` is `"reader"`, `"observed"` or `"inferred"`
+(see `hofradar.costmodel.renovation_evidence`) - a "reader" or "observed"
+figure (`hofradar.costmodel.STATED_EVIDENCE`) may hard-reject a property on
+total cost; an "inferred" one only flags it. See `docs/DECISIONS.md` entry 30.
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig,
 CoverageConfig). `SearchProfile.coverage.municipalities` is not a scoring slider - it
 is excluded from `scoring_payload()` / `profile_hash` - but loads through the same
@@ -47,6 +48,10 @@ sees - templates, `row_to_dict`, the digest, the change feed. `user_title` is
 the reader's rename, triage-class like `user_note` and never written by
 `ingest`; `canonical_title` stays the listing's words and is what scoring,
 dedupe and the LLM read — see `docs/DECISIONS.md` entry 29.
+`Property.user_renovation_tier` is the reader's own Sanierungsstufe, triage-class
+the same way and never written by `ingest`; NULL means "infer it from the
+listing". `costmodel.infer_renovation_tier` prices it outright in place of the
+inference — see `docs/DECISIONS.md` entry 30.
 
 ```python
 # hofradar.db.backup - the snapshot before anything destructive
@@ -222,9 +227,25 @@ def town_in_radius(town: str | None, profile: SearchProfile) -> bool | None  # N
 ```python
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
-def infer_renovation_tier(prop: Property) -> str
-def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
+def infer_renovation_tier(prop: Property) -> RenovationTier
+    # The reader's tier (reader_renovation_tier) if set, else listing_renovation_tier.
+    # What the cost model prices.
+def listing_renovation_tier(prop: Property) -> RenovationTier
+    # What the listing alone implies (tags, condition, year-of-construction
+    # fallback). Ignores the reader's override.
+def reader_renovation_tier(prop: Property) -> RenovationTier | None
+    # Property.user_renovation_tier, parsed and validated against READER_TIERS;
+    # an unparseable or unknown stored value is ignored (None), not trusted.
+def renovation_evidence(prop: Property) -> str   # "reader" | "observed" | "inferred"
+def listing_renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
+    # What listing_renovation_tier rests on, ignoring the reader.
+
+READER_TIERS: tuple[RenovationTier, ...]   # the tiers a reader may set (excludes UNKNOWN)
+STATED_EVIDENCE: frozenset[str]            # {"observed", "reader"} - may hard-reject on cost
 ```
+
+See `docs/DECISIONS.md` entry 30 for why the reader's tier lives in its own
+column and outranks the inference outright.
 
 ## `hofradar.scoring`
 
@@ -247,6 +268,13 @@ def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True,
                 now: datetime | None = None) -> int
     # now: the clock freshness/confidence bands are measured against
     # (default wall clock); tests pass their fixed fixture clock.
+def rescore_property(session, prop: Property, profile: SearchProfile, *,
+                     now: datetime | None = None) -> ScoreResult
+    # Recomputes one property's CostEstimate and Score under one profile;
+    # flushes, does not commit. For a reader's edit (the Sanierungsstufe) that
+    # must show its new numbers in the same transaction, not after the next
+    # slider move. Other profiles go dirty via Property.updated_at and are
+    # picked up by the next rescore_all. See docs/DECISIONS.md entry 30.
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
                       include_rejected: bool = False, include_hidden: bool = False,
                       filters: dict | None = None) -> list[tuple[Property, Score]]
@@ -602,11 +630,26 @@ POST /property/{public_id}/title
     # HX-Redirect to the survivor when the id was merged away - and a 303 to
     # the survivor's dossier for a plain post. 404 for an unknown id.
 
+POST /property/{public_id}/sanierungsstufe
+    # Form field tier, in {"auto", "light", "medium", "heavy", "complete"}.
+    # "auto" (or empty) clears Property.user_renovation_tier to NULL; any other
+    # value is refused with a 400, never silently mapped to "auto". Unlike
+    # /title, picking the tier the inference already gives is stored, not
+    # cleared - see docs/DECISIONS.md entry 30. Follows merged_into_id to the
+    # survivor, like /merken and /title. Writes the override and calls
+    # scoring.rescore_property (current profile from the query params) in one
+    # commit; a crawl holding the write lock rolls back and renders the
+    # dossier at 503 with a notice. 404 for an unknown id. Success is a 303 to
+    # the survivor's `/property/{id}?<same query>#kostenmodell` - a full reload, because
+    # the tier band, the cost table and the score section all move.
+
 GET /api/property/{public_id}.json
     # The dossier as JSON: row_to_dict plus evidence, user_note, timeline,
     # sources, documents. "title" is display_title; "user_title" (None unless
     # renamed) and "listing_title" (canonical_title, also on every row_to_dict
     # row, so the list JSON and the map carry it too) say whose words it is.
+    # "user_renovation_tier" is Property.user_renovation_tier, None unless the
+    # reader set one - see docs/DECISIONS.md entry 30.
 
 GET /?reset=1
     # Deletes the filter cookie and renders the default profile and filters

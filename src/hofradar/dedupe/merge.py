@@ -64,6 +64,7 @@ _FILLABLE_FIELDS = (
     "user_state",
     "user_note",
     "user_title",
+    "user_renovation_tier",
 )
 
 #: JSON list columns that are unioned rather than replaced.

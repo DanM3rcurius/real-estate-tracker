@@ -31,7 +31,7 @@ from hofradar.report.yield_stats import (
     source_yield,
 )
 from hofradar.web import history, lazy
-from hofradar.web.filters import de_eur, de_km, de_pct, de_sqm, week_label
+from hofradar.web.filters import de_eur, de_km, de_pct, de_sqm, de_tier, week_label
 
 #: How far back a weekly report looks when the caller does not say.
 DEFAULT_PERIOD_DAYS = 7
@@ -318,7 +318,7 @@ def _risks(prop: Property, score: Score | None, cost: Any, profile: SearchProfil
     if cost is not None and cost.total_high and cost.total_high > profile.budget.effective_total_hard_max:
         risks.append(f"Oberes Kostenband {de_eur(cost.total_high)} über Budgetgrenze")
     if cost is not None and cost.renovation_tier in ("heavy", "complete"):
-        risks.append(f"Sanierungsstufe {cost.renovation_tier}")
+        risks.append(f"Sanierungsstufe {de_tier(cost.renovation_tier)}")
     if not risks:
         risks.append("Keine harten Risiken erkannt – trotzdem vor Ort prüfen")
     return risks[:6]

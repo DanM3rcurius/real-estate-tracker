@@ -22,7 +22,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from hofradar.contracts import CostResult, ScoreResult
-from hofradar.costmodel import estimate_costs
+from hofradar.costmodel import STATED_EVIDENCE, estimate_costs
 from hofradar.db.enums import (
     HIDDEN_USER_STATES,
     CapitalRisk,
@@ -175,7 +175,9 @@ def _apply_gates(
 
     total_mid = float(cost.total_mid or 0.0)
     carve_out = development_score >= gates.exceptional_development_min
-    cost_is_inferred = cost.renovation_evidence != "observed"
+    # The listing's stated condition or the reader's own tier: somebody stood
+    # behind it. Only the age fallback is a guess.
+    cost_is_inferred = cost.renovation_evidence not in STATED_EVIDENCE
 
     def _cost_reject(reason: str) -> None:
         """Reject only on a figure somebody stood behind; otherwise flag."""
@@ -366,6 +368,36 @@ def _write_score(
         return
     for key, value in values.items():
         setattr(row, key, value)
+
+
+def rescore_property(
+    session: Session,
+    prop: Property,
+    profile: SearchProfile,
+    *,
+    now: datetime | None = None,
+) -> ScoreResult:
+    """Recompute one property's ``CostEstimate`` and its ``Score`` under ``profile``.
+
+    For a reader's edit that moves the numbers (the Sanierungsstufe): the
+    dossier must show the new cost at once, not after the next slider move.
+    Flushes but does not commit, so the caller's edit and the numbers it
+    produces land in one transaction or not at all. Score rows of other
+    profiles are left alone - the edit bumps ``Property.updated_at``, so
+    :func:`rescore_all` finds them dirty when their profile is next used.
+    """
+    cost_row = session.scalar(select(CostEstimate).where(CostEstimate.property_id == prop.id))
+    score_row = session.scalar(
+        select(Score).where(
+            Score.property_id == prop.id, Score.profile_hash == profile.profile_hash
+        )
+    )
+    cost = estimate_costs(prop, profile)
+    result = score_property(prop, profile, cost=cost, now=now)
+    _write_cost(session, prop, cost, cost_row)
+    _write_score(session, prop, profile.profile_hash, result, score_row)
+    session.flush()
+    return result
 
 
 def rescore_all(

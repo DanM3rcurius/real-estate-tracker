@@ -1,0 +1,27 @@
+{# The reader's own Sanierungsstufe. A plain form post, not HTMX: a new tier
+   moves the band, the table, the assumptions and the score, so the whole
+   dossier reloads rather than one fragment going stale beside the rest. #}
+<details class="tier-edit"{% if tier_error %} open{% endif %}>
+  <summary>Sanierungsstufe ändern</summary>
+  <form method="post"
+        action="/property/{{ prop.public_id }}/sanierungsstufe{% if request.url.query %}?{{ request.url.query }}{% endif %}">
+    <fieldset>
+      <legend>Welche Sanierung braucht das Objekt?</legend>
+      <label class="switch">
+        <input type="radio" name="tier" value="auto" {% if not prop.user_renovation_tier %}checked{% endif %}>
+        <span>Automatisch <small>(aus dem Inserat: {{ listing_tier_label }})</small></span>
+      </label>
+      {% for choice in tier_choices %}
+      <label class="switch">
+        <input type="radio" name="tier" value="{{ choice.value }}"
+               {% if prop.user_renovation_tier == choice.value %}checked{% endif %}>
+        <span>{{ choice.label }} <small>({{ choice.band }})</small></span>
+      </label>
+      {% endfor %}
+    </fieldset>
+    <button class="btn" type="submit">Speichern</button>
+    <p class="hint">Kosten und Bewertung werden sofort neu gerechnet. Eine selbst gesetzte
+      Stufe gilt als belegt: liegen die Gesamtkosten dann über der Budgetgrenze, fällt das
+      Objekt durch die Kostengrenze, statt nur markiert zu werden.</p>
+  </form>
+</details>

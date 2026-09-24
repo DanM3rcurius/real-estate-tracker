@@ -1219,3 +1219,61 @@ and town - third-party advert text, and now the reader's. It escapes them
 listing reads `canonical_title`. Picking the wrong one is silent either way -
 the reader's name leaking into a score, or the listing's words overriding a
 name the reader chose - so the choice is made per call site, not by default.
+
+## 30. The reader's Sanierungsstufe replaces the guess, and moves the numbers
+
+**Decision.** A reader who has walked the building knows its condition better
+than any tag or a fallback keyed on `year_built`. They can set it from the
+dossier; the choice lives in `Property.user_renovation_tier` (nullable
+`String(16)`, one of `costmodel.READER_TIERS`), which `estimate_costs` prices
+outright, no age bump, in place of the inference.
+
+**Why a separate column, not a fact edit.** The inference reads the
+listing's facts: the tags `ingest` merges on every crawl (`building_features`
+and friends) and `condition`, which the LLM review is handed as the listing's
+own *Zustand*. Writing the reader's verdict into either would have a crawl
+quietly undo it, or pass the reader's words off as the advert's - the two
+failures entry 29 kept the title apart to avoid. `listing_renovation_tier`
+keeps answering what the listing alone implies; `reader_renovation_tier` is
+the reader's own, and `infer_renovation_tier` prefers it outright.
+
+**Why it may hard-reject.** `renovation_evidence` returns `"reader"` when set,
+and `STATED_EVIDENCE = {"observed", "reader"}` is what the scoring gates check
+before hard-rejecting on total cost. The age-fallback-only-flags rule exists
+because an unstated condition is a guess, and a guess must not reject a
+property outright - but a reader's judgement is not a guess. They stood
+behind it, so the cost gate may stand behind it too.
+
+**Pinning, not clearing.** Unlike the title (typed back clears), choosing the
+tier the inference already gives is stored, not thrown away: the inference
+moves every time a crawl adds a fact, but the reader's pick is a judgement
+that should hold regardless, and storing it is what turns the evidence from
+`"inferred"` to `"reader"`. "Automatisch" - clearing the column back to NULL
+- is the explicit way back to letting the listing decide.
+
+**Recompute at once.** `scoring.rescore_property(session, prop, profile, *,
+now=None)` recomputes one property's `CostEstimate` and `Score` and flushes,
+in the same transaction as the edit, so the dossier shows the new band
+without a slider move. Other profiles are not touched; the edit bumps
+`Property.updated_at`, so `rescore_all`'s dirty check picks them up the next
+time their profile is used.
+
+**Refused, never mapped.** `POST /property/{public_id}/sanierungsstufe` takes
+one form field, `tier`, in `{"auto", "light", "medium", "heavy", "complete"}`;
+anything else is a 400, never silently folded into "auto". A crawl holding
+the write lock rolls back the tier and its numbers together and re-renders the
+dossier at 503 with the notice in the Kostenmodell section. The form is a plain
+post, not HTMX: a new tier moves the band, the cost table, the assumptions and
+the score, and a swapped fragment would sit stale beside the rest. It lives
+outside the `{% if cost %}` block, because a hand-added row has no estimate
+until something scores it - and setting its tier is what does.
+
+**Merge.** `user_renovation_tier` is a `dedupe.merge` fillable field: the
+survivor keeps its own tier and takes the dropped row's only when it has
+none.
+
+**Consequence.** New code that needs what a listing implies calls
+`listing_renovation_tier`; new code that prices a property calls
+`infer_renovation_tier`, which is the reader's tier when they set one. The
+digest's risk line now prints the German word (`web.filters.de_tier`) instead
+of the enum's raw value ("heavy").

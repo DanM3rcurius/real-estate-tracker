@@ -30,7 +30,12 @@ from typing import TYPE_CHECKING
 
 from hofradar.contracts import CostResult
 from hofradar.costmodel._text import fold_all
-from hofradar.costmodel.renovation import infer_renovation_tier, renovation_evidence
+from hofradar.costmodel.renovation import (
+    infer_renovation_tier,
+    listing_renovation_tier,
+    reader_renovation_tier,
+    renovation_evidence,
+)
 from hofradar.db.enums import RenovationTier
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -166,9 +171,18 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
     tier = infer_renovation_tier(prop)
     rate_low, rate_mid, rate_high = _tier_rates(tier, profile)
     tier_word = TIER_WORDS.get(tier.value, tier.value)
-    assumptions.append(
-        f"Sanierungsstufe {tier_word} mit {rate_low:.0f}–{rate_high:.0f} €/m² Wohnfläche."
-    )
+    if reader_renovation_tier(prop) is not None:
+        # Whose tier this is belongs in the sentence a human argues with.
+        listing_tier = listing_renovation_tier(prop).value
+        assumptions.append(
+            f"Sanierungsstufe {tier_word} (selbst gesetzt; aus dem Inserat geschätzt: "
+            f"{TIER_WORDS.get(listing_tier, listing_tier)}) mit "
+            f"{rate_low:.0f}–{rate_high:.0f} €/m² Wohnfläche."
+        )
+    else:
+        assumptions.append(
+            f"Sanierungsstufe {tier_word} mit {rate_low:.0f}–{rate_high:.0f} €/m² Wohnfläche."
+        )
 
     living_sqm = _living_sqm(prop, assumptions)
     house_low = living_sqm * rate_low

@@ -12,6 +12,16 @@ tier**. An unknown condition on a pre-1960 building is HEAVY, never MEDIUM.
 The tier is a fact about the building, not about the user's sliders, which is
 why it lives here and not in :mod:`hofradar.scoring` - it is cached once per
 property in ``CostEstimate`` and survives every slider move.
+
+The reader outranks all of it
+=============================
+
+Everything above is a guess made from an advert. The reader who has walked
+through the building knows better, so ``Property.user_renovation_tier`` - set
+from the dossier, never by ingest - replaces the inferred tier outright: no
+age bump, no worst-signal rule. :func:`listing_renovation_tier` keeps answering
+what the listing alone implies, so the dossier can show both and a reset can
+say what it returns to. See docs/DECISIONS.md entry 30.
 """
 
 from __future__ import annotations
@@ -158,6 +168,38 @@ def _tier_from_age(year_built: int | None) -> RenovationTier:
 #: rule, which is a deliberately pessimistic default rather than a measurement.
 EVIDENCE_OBSERVED = "observed"
 EVIDENCE_INFERRED = "inferred"
+#: The reader set the tier themselves (``Property.user_renovation_tier``).
+EVIDENCE_READER = "reader"
+#: Evidence somebody stood behind - the scoring gates may hard-reject on a
+#: cost that rests on one of these, and only flag one that rests on a guess.
+STATED_EVIDENCE: frozenset[str] = frozenset({EVIDENCE_OBSERVED, EVIDENCE_READER})
+
+#: The tiers a reader may set. ``unknown`` is not a judgement anyone makes
+#: about a building they have seen; clearing the override is how to say
+#: "I do not know" - the inference then applies again.
+READER_TIERS: tuple[RenovationTier, ...] = (
+    RenovationTier.LIGHT,
+    RenovationTier.MEDIUM,
+    RenovationTier.HEAVY,
+    RenovationTier.COMPLETE,
+)
+
+
+def reader_renovation_tier(prop: Property) -> RenovationTier | None:
+    """The tier the reader set, or None when they set none.
+
+    A stored value outside :data:`READER_TIERS` (a hand-edited database, a
+    tier renamed in a later revision) is ignored rather than trusted: the
+    inference is a pessimistic default, a garbage override is not.
+    """
+    raw = getattr(prop, "user_renovation_tier", None)
+    if not raw:
+        return None
+    try:
+        tier = RenovationTier(str(raw))
+    except ValueError:
+        return None
+    return tier if tier in READER_TIERS else None
 
 
 def renovation_evidence(prop: Property) -> str:
@@ -165,7 +207,15 @@ def renovation_evidence(prop: Property) -> str:
 
     Kept separate from :func:`infer_renovation_tier` so the tier stays a single
     value with one meaning. Callers that must not act on a guess ask this.
+    ``reader`` outranks what the listing said: it is the tier being priced.
     """
+    if reader_renovation_tier(prop) is not None:
+        return EVIDENCE_READER
+    return listing_renovation_evidence(prop)
+
+
+def listing_renovation_evidence(prop: Property) -> str:
+    """What :func:`listing_renovation_tier` rests on, ignoring the reader."""
     if _tier_from_condition(prop) is not RenovationTier.UNKNOWN:
         return EVIDENCE_OBSERVED
     if _tier_from_tags(property_tags(prop)) is not RenovationTier.UNKNOWN:
@@ -174,8 +224,18 @@ def renovation_evidence(prop: Property) -> str:
 
 
 def infer_renovation_tier(prop: Property) -> RenovationTier:
+    """The tier the cost model prices: the reader's, else the listing's.
+
+    The reader's tier (:func:`reader_renovation_tier`) wins outright; without
+    one this is :func:`listing_renovation_tier`.
+    """
+    return reader_renovation_tier(prop) or listing_renovation_tier(prop)
+
+
+def listing_renovation_tier(prop: Property) -> RenovationTier:
     """Infer the renovation tier from condition, year of construction and tags.
 
+    Ignores ``user_renovation_tier`` - this is what the listing alone implies.
     Resolution order:
 
     1. the worst tier implied by any tag or by ``condition`` wins;

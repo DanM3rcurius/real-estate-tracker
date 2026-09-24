@@ -38,6 +38,7 @@ Public surface, per ``docs/MODULE_API.md``::
     freshness_score(prop, now) -> tuple[float, dict]
     confidence_score(prop) -> tuple[float, dict]
     rescore_all(session, profile, *, only_dirty=True, now=None) -> int
+    rescore_property(session, prop, profile, *, now=None) -> ScoreResult
     ranked_properties(session, profile, *, limit=None, include_rejected=False,
                       include_hidden=False, filters=None) -> list[tuple[Property, Score]]
 """
@@ -45,7 +46,12 @@ Public surface, per ``docs/MODULE_API.md``::
 from __future__ import annotations
 
 from hofradar.scoring.deal import deal_score
-from hofradar.scoring.engine import ranked_properties, rescore_all, score_property
+from hofradar.scoring.engine import (
+    ranked_properties,
+    rescore_all,
+    rescore_property,
+    score_property,
+)
 from hofradar.scoring.fit import fit_score
 from hofradar.scoring.signals import confidence_score, freshness_score, hidden_score
 
@@ -57,5 +63,6 @@ __all__ = [
     "hidden_score",
     "ranked_properties",
     "rescore_all",
+    "rescore_property",
     "score_property",
 ]
