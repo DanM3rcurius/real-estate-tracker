@@ -22,7 +22,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from hofradar.contracts import CostResult, ScoreResult
-from hofradar.costmodel import estimate_costs
+from hofradar.costmodel import EVIDENCE_INFERRED, estimate_costs
 from hofradar.db.enums import (
     HIDDEN_USER_STATES,
     CapitalRisk,
@@ -175,7 +175,8 @@ def _apply_gates(
 
     total_mid = float(cost.total_mid or 0.0)
     carve_out = development_score >= gates.exceptional_development_min
-    cost_is_inferred = cost.renovation_evidence != "observed"
+    # A manual tier counts as stood-behind: a person set it on purpose.
+    cost_is_inferred = cost.renovation_evidence == EVIDENCE_INFERRED
 
     def _cost_reject(reason: str) -> None:
         """Reject only on a figure somebody stood behind; otherwise flag."""

@@ -163,7 +163,7 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
     rates = profile.renovation
     assumptions: list[str] = []
 
-    tier = infer_renovation_tier(prop)
+    tier = infer_renovation_tier(prop, rates)
     rate_low, rate_mid, rate_high = _tier_rates(tier, profile)
     tier_word = TIER_WORDS.get(tier.value, tier.value)
     assumptions.append(
