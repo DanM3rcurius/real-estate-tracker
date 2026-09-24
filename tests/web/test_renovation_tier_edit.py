@@ -13,7 +13,7 @@ import re
 from sqlalchemy import select
 
 from hofradar.db.models import CostEstimate, Property, Score
-from tests.web.conftest import default_profile, make_property
+from tests.web.conftest import make_property
 
 ROUTE = "/property/HF-0001/sanierungsstufe"
 
@@ -40,7 +40,7 @@ def test_dossier_offers_the_tier_form(client, seeded):
     assert re.search(r'value="auto"\s+checked', html)
 
 
-def test_setting_a_tier_reprices_at_once(client, db, seeded):
+def test_setting_a_tier_reprices_at_once(client, db, seeded, default_profile):
     response = client.post(ROUTE, data={"tier": "complete"}, follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"] == "/property/HF-0001#kostenmodell"
@@ -52,7 +52,7 @@ def test_setting_a_tier_reprices_at_once(client, db, seeded):
     assert "selbst gesetzt" in cost.assumptions[0]
 
     # The score for the live profile was written in the same request.
-    profile_hash = default_profile().profile_hash
+    profile_hash = default_profile.profile_hash
     score = db.scalar(
         select(Score).where(Score.property_id == prop.id, Score.profile_hash == profile_hash)
     )
