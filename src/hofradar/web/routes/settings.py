@@ -92,7 +92,57 @@ FORM_SECTIONS: tuple[tuple[str, str, tuple[tuple[str, str, str, str], ...]], ...
             ("gates.llm_review_size", "LLM-Prüfumfang", "number", "1"),
         ),
     ),
+    # Placed last: everything above shapes *which* properties surface, this
+    # shapes what one of them is estimated to cost. The two year thresholds
+    # come first because they are the Sanierungsstufe's own dial (see
+    # ``RenovationRates`` in config.py); the €/m² bands and lump sums follow.
+    (
+        "renovation",
+        "Sanierung (Kostenmodell)",
+        (
+            (
+                "renovation.pre_modern_year",
+                "Altbau vor Baujahr (→ Schwer, wenn Inserat schweigt)",
+                "number",
+                "1",
+            ),
+            (
+                "renovation.modern_year",
+                "Modernisierungsbedarf vor Baujahr (→ Mittel)",
+                "number",
+                "1",
+            ),
+            ("renovation.light_min", "Leicht min. (€/m²)", "number", "50"),
+            ("renovation.light_max", "Leicht max. (€/m²)", "number", "50"),
+            ("renovation.medium_min", "Mittel min. (€/m²)", "number", "50"),
+            ("renovation.medium_max", "Mittel max. (€/m²)", "number", "50"),
+            ("renovation.heavy_min", "Schwer min. (€/m²)", "number", "50"),
+            ("renovation.heavy_max", "Schwer max. (€/m²)", "number", "50"),
+            ("renovation.complete_min", "Kernsanierung min. (€/m²)", "number", "50"),
+            ("renovation.complete_max", "Kernsanierung max. (€/m²)", "number", "50"),
+            ("renovation.roof_per_sqm_footprint", "Dach (€/m² Grundfläche)", "number", "50"),
+            ("renovation.outbuilding_per_sqm", "Nebengebäude (€/m²)", "number", "50"),
+            ("renovation.utilities_base", "Haustechnik pauschal (€)", "number", "50"),
+            ("renovation.contingency_pct", "Puffer (Anteil)", "number", "0.01"),
+            (
+                "renovation.immediate_capex_base",
+                "Sofortmaßnahmen pauschal (€)",
+                "number",
+                "50",
+            ),
+        ),
+    ),
 )
+
+#: A one-line hint rendered under a section's legend, keyed by section key.
+#: Optional - only sections whose fields need context beyond their label get one.
+SECTION_HINTS: dict[str, str] = {
+    "renovation": (
+        "Die beiden Baujahre entscheiden die Sanierungsstufe, wenn ein Inserat nichts "
+        "zum Zustand sagt; ein genannter Zustand auf einem Gebäude, das älter ist als "
+        "das erste Baujahr, wird eine Stufe nach oben verschoben."
+    ),
+}
 
 BOOLEAN_FIELDS = (
     ("radius.require_driving_check", "Fahrstrecke muss geprüft sein"),
@@ -106,7 +156,23 @@ LIST_FIELDS = (
     ("exclude", "Ausschlüsse"),
 )
 
-INT_PATHS = {"gates.shortlist_size", "gates.llm_review_size"}
+INT_PATHS = {
+    "gates.shortlist_size",
+    "gates.llm_review_size",
+    "renovation.pre_modern_year",
+    "renovation.modern_year",
+}
+
+#: These ``RenovationRates`` fields are not ``Optional`` - unlike the derived
+#: budget/radius bands, there is no "leer = abgeleitet" reading for them, so a
+#: blank input cannot become ``None``. Least surprising: leave the base
+#: profile's value in place, exactly as if the field had been left untouched.
+RENOVATION_PATHS = frozenset(
+    path
+    for section_key, _title, fields in FORM_SECTIONS
+    if section_key == "renovation"
+    for path, *_rest in fields
+)
 
 
 def _get_path(data: dict[str, Any], path: str) -> Any:
@@ -159,6 +225,7 @@ def _context(request: Request, session: Session, profile: SearchProfile, **extra
         "profile_data": data,
         "records": _records(session),
         "form_sections": FORM_SECTIONS,
+        "section_hints": SECTION_HINTS,
         "boolean_fields": BOOLEAN_FIELDS,
         "list_fields": LIST_FIELDS,
         "get_path": lambda path: _get_path(data, path),
@@ -191,6 +258,10 @@ async def settings_save(request: Request, session: Session = Depends(get_db)):
                 _set_path(data, path, raw)
                 continue
             if raw == "":
+                if path in RENOVATION_PATHS:
+                    # Non-Optional on RenovationRates: keep whatever the base
+                    # profile already had rather than send an invalid None.
+                    continue
                 _set_path(data, path, None)
                 continue
             value = to_int(raw, None) if path in INT_PATHS else to_float(raw, None)

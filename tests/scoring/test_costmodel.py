@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 from factories import make_property
+from pydantic import ValidationError
 
-from hofradar.config import SearchProfile
+from hofradar.config import RenovationRates, SearchProfile
 from hofradar.costmodel import acquisition_costs, estimate_costs, infer_renovation_tier
 from hofradar.costmodel.estimator import (
     DEFAULT_LIVING_SQM,
@@ -82,6 +83,32 @@ class TestRenovationTier:
         newer = make_property(building_features=["renovierungsbeduerftig"], year_built=1985)
         assert infer_renovation_tier(old) is RenovationTier.HEAVY
         assert infer_renovation_tier(newer) is RenovationTier.MEDIUM
+
+    def test_default_thresholds_are_unchanged(self) -> None:
+        """Moving the thresholds is opt-in - a bare ``RenovationRates()`` must
+        still read 1960 / 1995, or every existing profile silently shifts."""
+        rates = RenovationRates()
+        assert rates.pre_modern_year == 1960
+        assert rates.modern_year == 1995
+
+    def test_custom_rates_move_the_age_fallback(self) -> None:
+        """A building the defaults call MEDIUM/LIGHT follows a moved threshold."""
+        rates = RenovationRates(pre_modern_year=1960, modern_year=2000)
+        prop = make_property(condition=None, year_built=1997, building_features=[])
+        assert infer_renovation_tier(prop) is RenovationTier.LIGHT
+        assert infer_renovation_tier(prop, rates) is RenovationTier.MEDIUM
+
+    def test_custom_rates_move_the_pre_modern_bump(self) -> None:
+        """A stated light tag on a building the moved threshold now calls
+        pre-modern is bumped a tier, exactly as the module default is."""
+        rates = RenovationRates(pre_modern_year=2000, modern_year=2010)
+        prop = make_property(building_features=["saniert"], year_built=1990)
+        assert infer_renovation_tier(prop) is RenovationTier.LIGHT
+        assert infer_renovation_tier(prop, rates) is RenovationTier.MEDIUM
+
+    def test_renovation_rates_rejects_an_inverted_year_pair(self) -> None:
+        with pytest.raises(ValidationError):
+            RenovationRates(pre_modern_year=2000, modern_year=1999)
 
 
 class TestEstimateCosts:
