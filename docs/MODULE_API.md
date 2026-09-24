@@ -19,8 +19,8 @@ were read from; `lifecycle.ingest` remembers each as a `Document` row. See
 one advert it already knows to be one says nothing. Only a `listing` may
 become a `Property`; see `docs/DECISIONS.md` entry 19.
 `CostResult.renovation_evidence` is `"manual"`, `"observed"` or `"inferred"` (see
-`hofradar.costmodel.renovation_evidence`) - a "manual" or "observed" figure may
-hard-reject a property on total cost; an "inferred" one only flags it.
+`hofradar.costmodel.renovation_evidence`) - only a "manual" or "observed" figure
+may hard-reject a property on total cost; an "inferred" one only flags it.
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig,
 CoverageConfig). `SearchProfile.coverage.municipalities` is not a scoring slider - it
 is excluded from `scoring_payload()` / `profile_hash` - but loads through the same
@@ -222,8 +222,10 @@ def town_in_radius(town: str | None, profile: SearchProfile) -> bool | None  # N
 ```python
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
-def infer_renovation_tier(prop: Property,
-                          rates: RenovationRates | None = None) -> RenovationTier
+def infer_renovation_tier(prop: Property, rates: RenovationRates | None = None) -> RenovationTier
+    # Property.user_renovation_tier wins outright when it is one of MANUAL_TIERS.
+def automatic_renovation_tier(prop: Property, rates: RenovationRates | None = None) -> RenovationTier
+    # The same rules with the reader's tier ignored; the dossier prints it beside one.
 def renovation_evidence(prop: Property) -> str   # "manual" | "observed" | "inferred"
 def manual_tier(prop: Property) -> RenovationTier | None
 MANUAL_TIERS: tuple[RenovationTier, ...]         # light, medium, heavy, complete
@@ -258,6 +260,10 @@ def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True,
                 now: datetime | None = None) -> int
     # now: the clock freshness/confidence bands are measured against
     # (default wall clock); tests pass their fixed fixture clock.
+def rescore_property(session, prop: Property, profile: SearchProfile, *,
+                     now: datetime | None = None) -> None
+    # One property's CostEstimate and this profile's Score, flushed not
+    # committed - for a reader's edit that moves the cost model (/sanierung).
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
                       include_rejected: bool = False, include_hidden: bool = False,
                       filters: dict | None = None) -> list[tuple[Property, Score]]

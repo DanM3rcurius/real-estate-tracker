@@ -224,10 +224,23 @@ def infer_renovation_tier(
 
     ``rates`` supplies the two year thresholds; without it the defaults apply.
     """
-    rates = rates if rates is not None else RenovationRates()
     manual = manual_tier(prop)
     if manual is not None:
         return manual
+    return automatic_renovation_tier(prop, rates)
+
+
+def automatic_renovation_tier(
+    prop: Property, rates: RenovationRates | None = None
+) -> RenovationTier:
+    """Steps 1-3 of :func:`infer_renovation_tier`, with the reader's tier ignored.
+
+    The dossier prints this beside a manual tier ("automatisch wäre: schwer"):
+    an override must not hide what the listing and the age rule say, or the
+    reader loses the one fact that would tell them their setting is stale.
+    Pure - it reads ``prop`` and writes nothing.
+    """
+    rates = rates if rates is not None else RenovationRates()
     stated = max(
         (_tier_from_tags(property_tags(prop)), _tier_from_condition(prop)),
         key=lambda tier: _TIER_SEVERITY[tier],
