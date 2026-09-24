@@ -150,3 +150,15 @@ def test_a_property_never_scored_can_still_get_a_tier(client, db, seeded):
     assert "Sanierungsstufe ändern" in client.get("/property/HF-0077").text
     client.post("/property/HF-0077/sanierungsstufe", data={"tier": "heavy"})
     assert _cost(db, fresh).renovation_tier == "heavy"
+
+
+def test_a_stored_tier_the_model_ignores_is_not_shown_as_in_force(client, db, seeded):
+    """A hand-edited or since-renamed value is priced as the listing's tier,
+    so the page must say "Automatisch", not an override nobody applies."""
+    prop = _prop(db)
+    prop.user_renovation_tier = "unknown"
+    db.commit()
+    html = client.get("/property/HF-0001").text
+    assert re.search(r'value="auto"\s+checked', html)
+    assert "Aus dem Inserat geschätzt:" not in html
+    assert "· selbst gesetzt</small>" not in html

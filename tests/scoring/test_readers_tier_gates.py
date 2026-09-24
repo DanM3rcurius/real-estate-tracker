@@ -120,3 +120,20 @@ class TestRescoreProperty:
         assert cost_rows[0].id == cost_id_before
         assert score_rows[0].id == score_id_before
         assert cost_rows[0].renovation_tier == "light"
+
+
+def test_an_edit_that_moves_no_number_still_settles(session, now: datetime) -> None:
+    """Pinning the tier the listing already implies changes no score value,
+    so no UPDATE is emitted - the row must still be stamped newer than the
+    property, or ``rescore_all`` rescores it on every page load forever."""
+    from hofradar.scoring import rescore_all
+
+    prop = make_property(session, condition="renovierungsbeduerftig", year_built=1990)
+    session.commit()
+    profile = SearchProfile()
+    rescore_all(session, profile, only_dirty=False, now=now)
+
+    prop.user_renovation_tier = "medium"  # what the listing implies anyway
+    session.commit()
+    assert rescore_all(session, profile, now=now) == 1
+    assert rescore_all(session, profile, now=now) == 0

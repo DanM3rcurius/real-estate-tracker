@@ -1256,7 +1256,13 @@ now=None)` recomputes one property's `CostEstimate` and `Score` and flushes,
 in the same transaction as the edit, so the dossier shows the new band
 without a slider move. Other profiles are not touched; the edit bumps
 `Property.updated_at`, so `rescore_all`'s dirty check picks them up the next
-time their profile is used.
+time their profile is used. That only settles because `_write_score` and
+`_write_cost` now stamp `updated_at` on every rewrite: an edit that moves no
+number (pinning the tier the listing already implies, or a rename) emits no
+UPDATE, `onupdate` never fired, and the row stayed "dirty" - rescored on every
+page load, for every profile, forever. The dossier likewise reads the tier
+through `reader_renovation_tier`, not the raw column, so a stored value the
+cost model ignores is shown as *Automatisch*, not as an override in force.
 
 **Refused, never mapped.** `POST /property/{public_id}/sanierungsstufe` takes
 one form field, `tier`, in `{"auto", "light", "medium", "heavy", "complete"}`;

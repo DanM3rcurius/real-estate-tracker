@@ -8,13 +8,13 @@
     <fieldset>
       <legend>Welche Sanierung braucht das Objekt?</legend>
       <label class="switch">
-        <input type="radio" name="tier" value="auto" {% if not prop.user_renovation_tier %}checked{% endif %}>
+        <input type="radio" name="tier" value="auto" {% if not reader_tier %}checked{% endif %}>
         <span>Automatisch <small>(aus dem Inserat: {{ listing_tier_label }})</small></span>
       </label>
       {% for choice in tier_choices %}
       <label class="switch">
         <input type="radio" name="tier" value="{{ choice.value }}"
-               {% if prop.user_renovation_tier == choice.value %}checked{% endif %}>
+               {% if reader_tier == choice.value %}checked{% endif %}>
         <span>{{ choice.label }} <small>({{ choice.band }})</small></span>
       </label>
       {% endfor %}

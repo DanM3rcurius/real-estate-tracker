@@ -18,6 +18,7 @@ from hofradar.costmodel import (
     READER_TIERS,
     listing_renovation_evidence,
     listing_renovation_tier,
+    reader_renovation_tier,
     renovation_evidence,
 )
 from hofradar.db.models import Property
@@ -292,6 +293,9 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
     profile = profile_from_query(request.query_params, session=session)
     score = _score_for(prop, profile.profile_hash)
     cost = prop.cost_estimate
+    # What the cost model actually honours, not the raw column: a stored value
+    # it ignores must not be shown as an override in force.
+    reader_tier = reader_renovation_tier(prop)
     return {
         "prop": prop,
         "profile": profile,
@@ -304,6 +308,7 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "renovation_tier_label": de_tier(cost.renovation_tier) if cost else None,
         "renovation_basis": EVIDENCE_LABELS.get(renovation_evidence(prop), ""),
         "tier_choices": _tier_choices(profile),
+        "reader_tier": reader_tier.value if reader_tier else None,
         "listing_tier_label": de_tier(listing_renovation_tier(prop).value),
         "listing_tier_basis": EVIDENCE_LABELS.get(listing_renovation_evidence(prop), ""),
         "capital_risk_label": (

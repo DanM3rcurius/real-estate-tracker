@@ -122,7 +122,7 @@
         <tbody>
           <tr><th scope="row">Sanierungsstufe</th>
               <td><b>{{ renovation_tier_label }}</b> <small>· {{ renovation_basis }}</small>
-              {% if prop.user_renovation_tier %}<br><small>Aus dem Inserat geschätzt:
+              {% if reader_tier %}<br><small>Aus dem Inserat geschätzt:
                 {{ listing_tier_label }} · {{ listing_tier_basis }}</small>{% endif %}</td></tr>
           <tr><th scope="row">Kaufpreis</th><td>{{ cost.purchase_price | de_eur }}</td></tr>
           <tr><th scope="row">Erwerbsnebenkosten</th><td>{{ cost.acquisition_costs | de_eur }}</td></tr>

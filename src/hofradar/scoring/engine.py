@@ -30,7 +30,7 @@ from hofradar.db.enums import (
     PriceType,
     VerificationStatus,
 )
-from hofradar.db.models import CostEstimate, Property, PropertySource, Score
+from hofradar.db.models import CostEstimate, Property, PropertySource, Score, utcnow
 from hofradar.scoring._util import to_utc
 from hofradar.scoring.deal import deal_score
 from hofradar.scoring.fit import fit_score
@@ -345,6 +345,11 @@ def _write_cost(
         return
     for key, value in values.items():
         setattr(row, key, value)
+    # Stamp it even when nothing changed: identical values emit no UPDATE, so
+    # ``onupdate`` never fires and ``_is_dirty`` would find the row older than
+    # its property on every call - an edit that moved no number (a pinned
+    # tier, a rename) would be rescored on every page load, forever.
+    row.updated_at = utcnow()
 
 
 def _write_score(
@@ -368,6 +373,11 @@ def _write_score(
         return
     for key, value in values.items():
         setattr(row, key, value)
+    # Stamp it even when nothing changed: identical values emit no UPDATE, so
+    # ``onupdate`` never fires and ``_is_dirty`` would find the row older than
+    # its property on every call - an edit that moved no number (a pinned
+    # tier, a rename) would be rescored on every page load, forever.
+    row.updated_at = utcnow()
 
 
 def rescore_property(
