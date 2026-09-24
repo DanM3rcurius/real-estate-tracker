@@ -22,7 +22,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from hofradar.contracts import CostResult, ScoreResult
-from hofradar.costmodel import estimate_costs
+from hofradar.costmodel import EVIDENCE_INFERRED, estimate_costs
 from hofradar.db.enums import (
     HIDDEN_USER_STATES,
     CapitalRisk,
@@ -175,7 +175,8 @@ def _apply_gates(
 
     total_mid = float(cost.total_mid or 0.0)
     carve_out = development_score >= gates.exceptional_development_min
-    cost_is_inferred = cost.renovation_evidence != "observed"
+    # A manual tier counts as stood-behind: a person set it on purpose.
+    cost_is_inferred = cost.renovation_evidence == EVIDENCE_INFERRED
 
     def _cost_reject(reason: str) -> None:
         """Reject only on a figure somebody stood behind; otherwise flag."""
@@ -418,14 +419,57 @@ def rescore_all(
         score_row = scores.get(prop.id)
         if only_dirty and not _is_dirty(prop, score_row, cost_row):
             continue
-        cost = estimate_costs(prop, profile)
-        result = score_property(prop, profile, cost=cost, now=now)
-        _write_cost(session, prop, cost, cost_row)
-        _write_score(session, prop, profile_hash, result, score_row)
+        _rescore_one(session, prop, profile, cost_row, score_row, now)
         written += 1
 
     session.commit()
     return written
+
+
+def _rescore_one(
+    session: Session,
+    prop: Property,
+    profile: SearchProfile,
+    cost_row: CostEstimate | None,
+    score_row: Score | None,
+    now: datetime | None,
+) -> None:
+    """Compute and write one property's cost and score. The one place both
+    :func:`rescore_all` and :func:`rescore_property` turn facts into rows."""
+    cost = estimate_costs(prop, profile)
+    result = score_property(prop, profile, cost=cost, now=now)
+    _write_cost(session, prop, cost, cost_row)
+    _write_score(session, prop, profile.profile_hash, result, score_row)
+
+
+def rescore_property(
+    session: Session,
+    prop: Property,
+    profile: SearchProfile,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Recompute ``CostEstimate`` and this profile's ``Score`` for ONE property.
+
+    For a reader's edit that changes the cost model (the Sanierungsstufe): the
+    dossier must show the new figures on the very next render, and waiting
+    for the radar's :func:`rescore_all` would leave the page contradicting the
+    setting just saved. Rescoring the whole database for one click is not an
+    option on a database the crawl may be holding.
+
+    Flushes but does not commit - the caller owns the transaction, so a locked
+    database can be rolled back without undoing whatever it committed before.
+    """
+    # Queried rather than read through the relationships, for the same
+    # identity-map reason as in ``rescore_all``.
+    cost_row = session.scalar(select(CostEstimate).where(CostEstimate.property_id == prop.id))
+    score_row = session.scalar(
+        select(Score).where(
+            Score.property_id == prop.id, Score.profile_hash == profile.profile_hash
+        )
+    )
+    _rescore_one(session, prop, profile, cost_row, score_row, now)
+    session.flush()
 
 
 # --------------------------------------------------------------------------- #

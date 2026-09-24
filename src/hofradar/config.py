@@ -243,7 +243,14 @@ class GateConfig(BaseModel):
 
 
 class RenovationRates(BaseModel):
-    """EUR per square metre bands, by tier."""
+    """EUR per square metre bands, by tier, and the age thresholds that pick one.
+
+    The two year thresholds decide the Sanierungsstufe when a listing says
+    nothing about the condition (see :mod:`hofradar.costmodel.renovation`).
+    They live here rather than as module constants so the reader can move them
+    on the settings page; being part of ``scoring_payload`` they change
+    ``profile_hash`` like every other cost-model input.
+    """
 
     light_min: float = 300
     light_max: float = 600
@@ -260,6 +267,23 @@ class RenovationRates(BaseModel):
     utilities_base: float = 80_000
     contingency_pct: float = 0.20
     immediate_capex_base: float = 25_000
+
+    #: Built before this, assume pre-war substance: no insulation, no damp
+    #: course, single glazing. Silence on such a building means HEAVY, and a
+    #: stated light/medium condition is bumped one tier.
+    pre_modern_year: int = Field(1960, ge=1800, le=2100)
+    #: Built before this (and not pre-modern), silence means MEDIUM: the
+    #: 1970s-80s technical fit-out is due anyway. From here on, LIGHT.
+    modern_year: int = Field(1995, ge=1800, le=2100)
+
+    @model_validator(mode="after")
+    def _years_ordered(self) -> RenovationRates:
+        if self.modern_year < self.pre_modern_year:
+            raise ValueError(
+                f"modern_year ({self.modern_year}) darf nicht vor "
+                f"pre_modern_year ({self.pre_modern_year}) liegen"
+            )
+        return self
 
 
 class SearchProfile(BaseModel):

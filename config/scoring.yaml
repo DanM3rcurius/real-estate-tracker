@@ -35,3 +35,7 @@ scoring:
     utilities_base: 80000
     contingency_pct: 0.20
     immediate_capex_base: 25000
+    # Sanierungsstufe from the year of construction when the listing is silent:
+    # before pre_modern_year -> schwer, before modern_year -> mittel, else leicht.
+    pre_modern_year: 1960
+    modern_year: 1995

@@ -14,7 +14,16 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from hofradar.costmodel import renovation_evidence
+from hofradar.costmodel import (
+    EVIDENCE_INFERRED,
+    EVIDENCE_MANUAL,
+    EVIDENCE_OBSERVED,
+    MANUAL_TIERS,
+    automatic_renovation_tier,
+    infer_renovation_tier,
+    manual_tier,
+    renovation_evidence,
+)
 from hofradar.db.models import Property
 from hofradar.web import history
 from hofradar.web.charts import sparkline
@@ -128,9 +137,40 @@ CAPITAL_RISK_LABELS: dict[str, str] = {
 #: Whether the renovation tier came from the listing or was guessed from the
 #: year of construction - see :func:`hofradar.costmodel.renovation_evidence`.
 EVIDENCE_LABELS: dict[str, str] = {
-    "observed": "laut Inserat",
-    "inferred": "aus Baujahr geschätzt",
+    EVIDENCE_MANUAL: "manuell gesetzt",
+    EVIDENCE_OBSERVED: "laut Inserat",
+    EVIDENCE_INFERRED: "aus Baujahr geschätzt",
 }
+
+#: What the Sanierungsstufe form posts to hand the tier back to the inference
+#: rules. An empty value means the same, for a hand-built request.
+TIER_AUTO = "auto"
+TIER_AUTO_LABEL = "Automatisch (aus Inserat/Baujahr)"
+
+#: ``?sanierung=`` on the redirect back to the dossier: the page says what
+#: happened, because a plain POST has no other way to report it.
+TIER_SAVED = "gespeichert"
+#: Saved, but the cost model could not be recomputed (a crawl holds the lock).
+TIER_SAVED_NOT_RECOMPUTED = "nicht-neu-berechnet"
+TIER_STATUS_PARAM = "sanierung"
+
+#: The anchor of the Kostenmodell section, where the form sits.
+COST_ANCHOR = "kostenmodell"
+
+TIER_LOCKED = (
+    "Die Datenbank ist gerade gesperrt – vermutlich läuft ein Crawl. "
+    "Die Sanierungsstufe wurde nicht gespeichert; bitte nach dem Crawl noch einmal."
+)
+
+
+def tier_choices() -> list[tuple[str, str]]:
+    """The <select>'s options: automatic first, then every tier a reader may
+    set, worded by :func:`de_tier` so the dossier and the form never disagree."""
+    choices = [(TIER_AUTO, TIER_AUTO_LABEL)]
+    for tier in MANUAL_TIERS:
+        word = de_tier(tier.value)
+        choices.append((tier.value, word[:1].upper() + word[1:]))
+    return choices
 
 #: (attribute, German label, formatter). Order is the reading order of the page.
 FACT_FIELDS: tuple[tuple[str, str, str], ...] = (
@@ -276,6 +316,8 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
     profile = profile_from_query(request.query_params, session=session)
     score = _score_for(prop, profile.profile_hash)
     cost = prop.cost_estimate
+    manual = manual_tier(prop)
+    live_tier = infer_renovation_tier(prop, profile.renovation)
     return {
         "prop": prop,
         "profile": profile,
@@ -285,8 +327,22 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "facts": fact_rows(prop),
         "breakdown_rows": score_rows((score.breakdown if score else {}) or {}),
         "cost_rows": cost_rows((cost.breakdown if cost else {}) or {}),
-        "renovation_tier_label": de_tier(cost.renovation_tier) if cost else None,
+        # The cached figure when there is one; with no cost model yet, what
+        # the rules say now, so the form never sits beside an empty cell.
+        "renovation_tier_label": de_tier(cost.renovation_tier if cost else live_tier.value),
         "renovation_basis": EVIDENCE_LABELS.get(renovation_evidence(prop), ""),
+        # Beside a manual tier, what the listing and the age rule would say:
+        # an override must not hide the fact it overrides.
+        "automatic_tier_label": (
+            de_tier(automatic_renovation_tier(prop, profile.renovation).value)
+            if manual is not None
+            else None
+        ),
+        "tier_choices": tier_choices(),
+        "tier_selected": manual.value if manual is not None else TIER_AUTO,
+        "tier_status": request.query_params.get(TIER_STATUS_PARAM),
+        "tier_saved": TIER_SAVED,
+        "tier_saved_not_recomputed": TIER_SAVED_NOT_RECOMPUTED,
         "capital_risk_label": (
             CAPITAL_RISK_LABELS.get(score.capital_risk, score.capital_risk) if score else None
         ),
@@ -441,6 +497,87 @@ def rename(
     return RedirectResponse(f"/property/{prop.public_id}", status_code=303)
 
 
+@router.post("/property/{public_id}/sanierung")
+def set_renovation_tier(
+    public_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    tier: str = Form(default=""),
+):
+    """The reader's own Sanierungsstufe (``Property.user_renovation_tier``).
+
+    Somebody who has stood in the building knows more than a tag or the age
+    rule, so the value wins over every inference (``costmodel.renovation``).
+    ``auto`` or an empty value clears it. The tier moves every euro figure on
+    the page, so this one property's cost model and score are recomputed at
+    once - a saved tier beside the old figures would read as ignored.
+
+    Two transactions on purpose: the tier is the reader's decision and is
+    committed first; the recompute is derived and may fail on a crawl's lock
+    without costing the decision. ``updated_at`` moved with the tier, so the
+    radar's next ``rescore_all`` picks the property up either way.
+    """
+    requested = load_property(session, public_id)
+    if requested is None:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 404, "message": f"Kein Objekt mit der ID {public_id}."},
+            status_code=404,
+        )
+    prop = _surviving(session, requested)
+    wanted = (tier or "").strip().lower()
+    allowed = {t.value for t in MANUAL_TIERS}
+    if wanted not in allowed and wanted not in ("", TIER_AUTO):
+        words = ", ".join(label for _value, label in tier_choices())
+        return render(
+            request,
+            "pages/error.html",
+            {
+                "code": 400,
+                "message": (
+                    f"Nicht gespeichert: „{tier}“ ist keine Sanierungsstufe. "
+                    f"Erlaubt sind: {words}."
+                ),
+            },
+            status_code=400,
+        )
+    prop.user_renovation_tier = wanted if wanted in allowed else None
+    session.add(prop)
+    try:
+        session.commit()
+    except OperationalError as exc:
+        session.rollback()
+        if "database is locked" not in str(exc).lower():
+            raise
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 503, "message": TIER_LOCKED},
+            status_code=503,
+        )
+
+    from hofradar.scoring import rescore_property
+
+    status = TIER_SAVED
+    profile = profile_from_query(request.query_params, session=session)
+    try:
+        rescore_property(session, prop, profile)
+        session.commit()
+    except OperationalError as exc:
+        session.rollback()
+        if "database is locked" not in str(exc).lower():
+            raise
+        status = TIER_SAVED_NOT_RECOMPUTED
+
+    target = f"/property/{prop.public_id}?{TIER_STATUS_PARAM}={status}#{COST_ANCHOR}"
+    if request.headers.get("HX-Request"):
+        # The tier moves figures all over the page; reload it rather than
+        # patching one table and leaving the band and the score stale.
+        return Response(status_code=204, headers={"HX-Redirect": target})
+    return RedirectResponse(target, status_code=303)
+
+
 def _surviving(session: Session, prop: Property) -> Property:
     """The row a merge left standing, following the chain like ``ingest`` does.
 
@@ -567,6 +704,7 @@ def api_property(public_id: str, request: Request, session: Session = Depends(ge
     payload["evidence"] = prop.evidence or {}
     payload["user_note"] = prop.user_note
     payload["user_title"] = prop.user_title
+    payload["user_renovation_tier"] = prop.user_renovation_tier
     payload["timeline"] = [
         {
             "at": event["at"].isoformat() if event["at"] else None,

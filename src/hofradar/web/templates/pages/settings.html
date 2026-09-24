@@ -25,6 +25,9 @@
     {% for key, title, fields in form_sections %}
     <fieldset class="settings-group">
       <legend>{{ title }}</legend>
+      {% if section_hints.get(key) %}
+      <p class="hint">{{ section_hints.get(key) }}</p>
+      {% endif %}
       <div class="grid">
         {% for path, label, kind, step in fields %}
         <label class="field">

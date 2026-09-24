@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING
 
 from hofradar.contracts import CostResult
 from hofradar.costmodel._text import fold_all
-from hofradar.costmodel.renovation import infer_renovation_tier, renovation_evidence
+from hofradar.costmodel.renovation import (
+    EVIDENCE_MANUAL,
+    infer_renovation_tier,
+    renovation_evidence,
+)
 from hofradar.db.enums import RenovationTier
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -78,6 +82,9 @@ TIER_WORDS: dict[str, str] = {
     "complete": "Kernsanierung",
     "unknown": "unbekannt",
 }
+
+#: Appended to the tier word when the reader set the tier by hand.
+MANUAL_TIER_NOTE = " (manuell gesetzt)"
 
 #: Renovation rate bands, tier -> (min attribute, max attribute) on RenovationRates.
 _TIER_RATE_FIELDS: dict[RenovationTier, tuple[str, str]] = {
@@ -163,11 +170,15 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
     rates = profile.renovation
     assumptions: list[str] = []
 
-    tier = infer_renovation_tier(prop)
+    tier = infer_renovation_tier(prop, rates)
+    evidence = renovation_evidence(prop)
     rate_low, rate_mid, rate_high = _tier_rates(tier, profile)
     tier_word = TIER_WORDS.get(tier.value, tier.value)
+    # A hand-set tier must say so wherever the figure is quoted, or it reads
+    # as the listing's own claim once the reader has forgotten setting it.
+    origin = MANUAL_TIER_NOTE if evidence == EVIDENCE_MANUAL else ""
     assumptions.append(
-        f"Sanierungsstufe {tier_word} mit {rate_low:.0f}–{rate_high:.0f} €/m² Wohnfläche."
+        f"Sanierungsstufe {tier_word}{origin} mit {rate_low:.0f}–{rate_high:.0f} €/m² Wohnfläche."
     )
 
     living_sqm = _living_sqm(prop, assumptions)
@@ -264,7 +275,7 @@ def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult:
         total_mid=round(fixed + renovation_mid, 2),
         total_high=round(fixed + renovation_high, 2),
         renovation_tier=tier.value,
-        renovation_evidence=renovation_evidence(prop),
+        renovation_evidence=evidence,
         breakdown=breakdown,
         assumptions=assumptions,
     )

@@ -109,7 +109,7 @@
     {% endif %}
   </section>
 
-  <section class="dossier__section">
+  <section class="dossier__section" id="kostenmodell">
     <h2>Kostenmodell</h2>
     {% if cost %}
     <p class="dossier__band">{{ ui.cost_band(cost) }}</p>
@@ -118,7 +118,8 @@
         <thead><tr><th scope="col">Position</th><th scope="col">Betrag</th></tr></thead>
         <tbody>
           <tr><th scope="row">Sanierungsstufe</th>
-              <td><b>{{ renovation_tier_label }}</b> <small>· {{ renovation_basis }}</small></td></tr>
+              <td><b>{{ renovation_tier_label }}</b> <small>· {{ renovation_basis }}{% if automatic_tier_label %} · automatisch wäre: {{ automatic_tier_label }}{% endif %}</small>
+                {% include "partials/sanierung_form.html" %}</td></tr>
           <tr><th scope="row">Kaufpreis</th><td>{{ cost.purchase_price | de_eur }}</td></tr>
           <tr><th scope="row">Erwerbsnebenkosten</th><td>{{ cost.acquisition_costs | de_eur }}</td></tr>
           <tr><th scope="row">Sanierung (niedrig / mittel / hoch)</th>
@@ -132,7 +133,8 @@
     </div>
     <p class="hint">
       Stufe: das schlechteste Signal aus Zustand, Merkmalen und Baujahr gewinnt. Ohne Angabe
-      zum Zustand gilt ein Baujahr vor 1960 als „schwer“.
+      zum Zustand gilt ein Baujahr vor {{ profile.renovation.pre_modern_year }} als „schwer“.
+      Eine manuell gesetzte Stufe gilt vor allen diesen Regeln.
     </p>
     <h3>Annahmen</h3>
     {% if cost.assumptions %}
@@ -142,6 +144,8 @@
     {% endif %}
     {% else %}
     <p class="empty">Für dieses Objekt wurde noch kein Kostenmodell gerechnet.</p>
+    <p>Sanierungsstufe: <b>{{ renovation_tier_label }}</b> <small>· {{ renovation_basis }}{% if automatic_tier_label %} · automatisch wäre: {{ automatic_tier_label }}{% endif %}</small></p>
+    {% include "partials/sanierung_form.html" %}
     {% endif %}
   </section>
 

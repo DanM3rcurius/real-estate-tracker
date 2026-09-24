@@ -203,6 +203,12 @@ class Property(Base, TimestampMixin):
     #: it, while this survives every re-crawl. Null means "use the listing's".
     #: Written only by the ``/title`` route (and carried across a merge).
     user_title: Mapped[str | None] = mapped_column(String(500))
+    #: The reader's own Sanierungsstufe (a ``RenovationTier`` value other than
+    #: ``unknown``). Null means "infer it from the listing". When set it beats
+    #: every tag, condition and age rule in ``costmodel.renovation``, because
+    #: somebody stood in the building. Written only by the ``/sanierung``
+    #: route (and carried across a merge); ingest never touches it.
+    user_renovation_tier: Mapped[str | None] = mapped_column(String(16))
 
     #: On the reader's Merkliste since. Triage-class data like ``user_state``;
     #: null means not on the list. Written only by the ``/merken`` route.

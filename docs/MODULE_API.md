@@ -18,9 +18,9 @@ were read from; `lifecycle.ingest` remembers each as a `Document` row. See
 `hofradar.contracts`), defaulting to `"listing"` so a source that hands over
 one advert it already knows to be one says nothing. Only a `listing` may
 become a `Property`; see `docs/DECISIONS.md` entry 19.
-`CostResult.renovation_evidence` is `"observed"` or `"inferred"` (see
-`hofradar.costmodel.renovation_evidence`) - only an "observed" figure may
-hard-reject a property on total cost; an "inferred" one only flags it.
+`CostResult.renovation_evidence` is `"manual"`, `"observed"` or `"inferred"` (see
+`hofradar.costmodel.renovation_evidence`) - only a "manual" or "observed" figure
+may hard-reject a property on total cost; an "inferred" one only flags it.
 Config types live in `hofradar.config` (SearchProfile, KeywordConfig, SourceConfig,
 CoverageConfig). `SearchProfile.coverage.municipalities` is not a scoring slider - it
 is excluded from `scoring_payload()` / `profile_hash` - but loads through the same
@@ -222,9 +222,22 @@ def town_in_radius(town: str | None, profile: SearchProfile) -> bool | None  # N
 ```python
 def estimate_costs(prop: Property, profile: SearchProfile) -> CostResult
 def acquisition_costs(price: float, profile: SearchProfile) -> float
-def infer_renovation_tier(prop: Property) -> str
-def renovation_evidence(prop: Property) -> str   # "observed" | "inferred"
+def infer_renovation_tier(prop: Property, rates: RenovationRates | None = None) -> RenovationTier
+    # Property.user_renovation_tier wins outright when it is one of MANUAL_TIERS.
+def automatic_renovation_tier(prop: Property, rates: RenovationRates | None = None) -> RenovationTier
+    # The same rules with the reader's tier ignored; the dossier prints it beside one.
+def renovation_evidence(prop: Property) -> str   # "manual" | "observed" | "inferred"
+def manual_tier(prop: Property) -> RenovationTier | None
+MANUAL_TIERS: tuple[RenovationTier, ...]         # light, medium, heavy, complete
+EVIDENCE_MANUAL, EVIDENCE_OBSERVED, EVIDENCE_INFERRED
 ```
+
+`Property.user_renovation_tier` (a `MANUAL_TIERS` value or null) is the
+reader's own Sanierungsstufe; when set, `infer_renovation_tier` returns it
+outright and `renovation_evidence` says `"manual"`. The age fallback reads
+`rates.pre_modern_year` / `rates.modern_year` (`SearchProfile.renovation`,
+defaults 1960 / 1995, part of `profile_hash`); `estimate_costs` passes
+`profile.renovation`. See `docs/DECISIONS.md` entry 30.
 
 ## `hofradar.scoring`
 
@@ -247,6 +260,10 @@ def rescore_all(session, profile: SearchProfile, *, only_dirty: bool = True,
                 now: datetime | None = None) -> int
     # now: the clock freshness/confidence bands are measured against
     # (default wall clock); tests pass their fixed fixture clock.
+def rescore_property(session, prop: Property, profile: SearchProfile, *,
+                     now: datetime | None = None) -> None
+    # One property's CostEstimate and this profile's Score, flushed not
+    # committed - for a reader's edit that moves the cost model (/sanierung).
 def ranked_properties(session, profile: SearchProfile, *, limit: int | None = None,
                       include_rejected: bool = False, include_hidden: bool = False,
                       filters: dict | None = None) -> list[tuple[Property, Score]]
@@ -602,9 +619,22 @@ POST /property/{public_id}/title
     # HX-Redirect to the survivor when the id was merged away - and a 303 to
     # the survivor's dossier for a plain post. 404 for an unknown id.
 
+POST /property/{public_id}/sanierung
+    # Form field tier: one of costmodel.MANUAL_TIERS (light, medium, heavy,
+    # complete), or "auto" / "" to clear. Sets Property.user_renovation_tier,
+    # the only route that writes it (dedupe.merge carries it, docs/DECISIONS.md
+    # entry 30). Follows merged_into_id to the survivor. Commits the tier, then
+    # recomputes this one property's CostEstimate and Score under the base
+    # profile (scoring.rescore_property) in a second transaction, so a crawl's
+    # lock on the recompute costs only the figures, never the decision. 303 to
+    # /property/{id}?sanierung=gespeichert|nicht-neu-berechnet#kostenmodell;
+    # 204 + HX-Redirect for HTMX. 400 for any other tier, 503 when the lock
+    # refuses the tier itself, 404 for an unknown id.
+
 GET /api/property/{public_id}.json
     # The dossier as JSON: row_to_dict plus evidence, user_note, timeline,
-    # sources, documents. "title" is display_title; "user_title" (None unless
+    # sources, documents. "title" is display_title; "user_renovation_tier" is
+    # the reader's Sanierungsstufe or None; "user_title" (None unless
     # renamed) and "listing_title" (canonical_title, also on every row_to_dict
     # row, so the list JSON and the map carry it too) say whose words it is.
 

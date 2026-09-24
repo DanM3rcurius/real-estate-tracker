@@ -11,24 +11,41 @@ tier**. An unknown condition on a pre-1960 building is HEAVY, never MEDIUM.
 
 The tier is a fact about the building, not about the user's sliders, which is
 why it lives here and not in :mod:`hofradar.scoring` - it is cached once per
-property in ``CostEstimate`` and survives every slider move.
+property in ``CostEstimate`` and survives every slider move. The two age
+thresholds are the exception: they are how pessimistic *we* are about silence,
+not a fact about the building, so they are read from ``profile.renovation``
+(``pre_modern_year`` / ``modern_year``) and the reader can move them.
+
+A reader who has seen the building can overrule all of this with
+``Property.user_renovation_tier``. That value wins outright - no tag, no
+condition and no age bump - because the inference rules only exist to stand in
+for the look nobody had taken yet.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from hofradar.config import RenovationRates
 from hofradar.costmodel._text import contains_any, fold, fold_all
 from hofradar.db.enums import RenovationTier
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters for type checkers
     from hofradar.db.models import Property
 
-#: Built before this, assume pre-war substance: no insulation, no damp course,
-#: single glazing, and electrics that predate the current DIN standards.
-PRE_MODERN_YEAR = 1960
-#: Built before this, assume the 1970s-80s technical fit-out is due anyway.
-MODERN_YEAR = 1995
+#: Defaults of ``RenovationRates.pre_modern_year`` / ``modern_year``, kept as
+#: names for callers that quote them. The live values come from the profile.
+PRE_MODERN_YEAR = RenovationRates.model_fields["pre_modern_year"].default
+MODERN_YEAR = RenovationRates.model_fields["modern_year"].default
+
+#: Tiers a reader may set by hand. ``unknown`` is not a verdict, it is the
+#: absence of one, so "clear the override" is how a reader says it.
+MANUAL_TIERS: tuple[RenovationTier, ...] = (
+    RenovationTier.LIGHT,
+    RenovationTier.MEDIUM,
+    RenovationTier.HEAVY,
+    RenovationTier.COMPLETE,
+)
 
 #: Tags that prove the substance is gone. Note ``kernsanierung`` (the noun: work
 #: still to be done) is NOT ``kernsaniert`` (the participle: work already done).
@@ -140,22 +157,38 @@ def _tier_from_condition(prop: Property) -> RenovationTier:
     return RenovationTier.UNKNOWN
 
 
-def _tier_from_age(year_built: int | None) -> RenovationTier:
+def _tier_from_age(year_built: int | None, rates: RenovationRates) -> RenovationTier:
     """The fallback when nobody said anything about the condition.
 
     No stated condition is not good news on a farmstead: it usually means the
     listing is a three-line classified for a building nobody has maintained.
     """
-    if year_built is None or year_built < PRE_MODERN_YEAR:
+    if year_built is None or year_built < rates.pre_modern_year:
         return RenovationTier.HEAVY
-    if year_built < MODERN_YEAR:
+    if year_built < rates.modern_year:
         return RenovationTier.MEDIUM
     return RenovationTier.LIGHT
 
 
-#: What the renovation tier rests on. ``observed`` means the listing said
-#: something about the condition; ``inferred`` means we fell through to the age
-#: rule, which is a deliberately pessimistic default rather than a measurement.
+def manual_tier(prop: Property) -> RenovationTier | None:
+    """The reader's own tier, or None. A stored value that is not one of
+    :data:`MANUAL_TIERS` is ignored rather than trusted - the route never
+    writes one, and a typo must not silently become the cheapest tier."""
+    raw = getattr(prop, "user_renovation_tier", None)
+    if not raw:
+        return None
+    try:
+        tier = RenovationTier(str(raw).strip().lower())
+    except ValueError:
+        return None
+    return tier if tier in MANUAL_TIERS else None
+
+
+#: What the renovation tier rests on. ``manual`` means the reader set it by
+#: hand; ``observed`` means the listing said something about the condition;
+#: ``inferred`` means we fell through to the age rule, which is a deliberately
+#: pessimistic default rather than a measurement.
+EVIDENCE_MANUAL = "manual"
 EVIDENCE_OBSERVED = "observed"
 EVIDENCE_INFERRED = "inferred"
 
@@ -166,6 +199,8 @@ def renovation_evidence(prop: Property) -> str:
     Kept separate from :func:`infer_renovation_tier` so the tier stays a single
     value with one meaning. Callers that must not act on a guess ask this.
     """
+    if manual_tier(prop) is not None:
+        return EVIDENCE_MANUAL
     if _tier_from_condition(prop) is not RenovationTier.UNKNOWN:
         return EVIDENCE_OBSERVED
     if _tier_from_tags(property_tags(prop)) is not RenovationTier.UNKNOWN:
@@ -173,24 +208,46 @@ def renovation_evidence(prop: Property) -> str:
     return EVIDENCE_INFERRED
 
 
-def infer_renovation_tier(prop: Property) -> RenovationTier:
+def infer_renovation_tier(
+    prop: Property, rates: RenovationRates | None = None
+) -> RenovationTier:
     """Infer the renovation tier from condition, year of construction and tags.
 
     Resolution order:
 
+    0. the reader's own tier (``user_renovation_tier``) wins outright;
     1. the worst tier implied by any tag or by ``condition`` wins;
     2. if nothing was said at all, the age of the building decides, and an
-       unknown or pre-1960 year yields HEAVY (never MEDIUM);
-    3. a stated light/medium tier on pre-1960 substance is bumped one tier,
+       unknown or pre-``pre_modern_year`` year yields HEAVY (never MEDIUM);
+    3. a stated light/medium tier on pre-modern substance is bumped one tier,
        because "renoviert" on a 1890 Hofstelle means new paint, not new joists.
+
+    ``rates`` supplies the two year thresholds; without it the defaults apply.
     """
+    manual = manual_tier(prop)
+    if manual is not None:
+        return manual
+    return automatic_renovation_tier(prop, rates)
+
+
+def automatic_renovation_tier(
+    prop: Property, rates: RenovationRates | None = None
+) -> RenovationTier:
+    """Steps 1-3 of :func:`infer_renovation_tier`, with the reader's tier ignored.
+
+    The dossier prints this beside a manual tier ("automatisch wäre: schwer"):
+    an override must not hide what the listing and the age rule say, or the
+    reader loses the one fact that would tell them their setting is stale.
+    Pure - it reads ``prop`` and writes nothing.
+    """
+    rates = rates if rates is not None else RenovationRates()
     stated = max(
         (_tier_from_tags(property_tags(prop)), _tier_from_condition(prop)),
         key=lambda tier: _TIER_SEVERITY[tier],
     )
     year_built: int | None = getattr(prop, "year_built", None)
     if stated is RenovationTier.UNKNOWN:
-        return _tier_from_age(year_built)
-    if year_built is not None and year_built < PRE_MODERN_YEAR:
+        return _tier_from_age(year_built, rates)
+    if year_built is not None and year_built < rates.pre_modern_year:
         return _BUMPED_BY_AGE.get(stated, stated)
     return stated

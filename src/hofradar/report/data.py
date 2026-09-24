@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from hofradar.config import SearchProfile
+from hofradar.costmodel import manual_tier
 from hofradar.db.enums import HIDDEN_USER_STATES, ChangeKind, ListingStatus, VerificationStatus
 from hofradar.db.models import Property, Score
 from hofradar.report.yield_stats import (
@@ -318,7 +319,9 @@ def _risks(prop: Property, score: Score | None, cost: Any, profile: SearchProfil
     if cost is not None and cost.total_high and cost.total_high > profile.budget.effective_total_hard_max:
         risks.append(f"Oberes Kostenband {de_eur(cost.total_high)} über Budgetgrenze")
     if cost is not None and cost.renovation_tier in ("heavy", "complete"):
-        risks.append(f"Sanierungsstufe {cost.renovation_tier}")
+        manual = manual_tier(prop)
+        by_hand = " (manuell)" if manual is not None and manual.value == cost.renovation_tier else ""
+        risks.append(f"Sanierungsstufe {cost.renovation_tier}{by_hand}")
     if not risks:
         risks.append("Keine harten Risiken erkannt – trotzdem vor Ort prüfen")
     return risks[:6]

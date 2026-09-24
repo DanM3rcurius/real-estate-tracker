@@ -1,0 +1,26 @@
+{# The reader's own Sanierungsstufe. A plain form post, no JavaScript needed:
+   the route saves, recomputes this property's cost model and redirects back
+   to #kostenmodell, so every figure on the page follows the new tier. #}
+<form class="tier-edit" method="post" action="/property/{{ prop.public_id }}/sanierung">
+  <label class="field">
+    <span>Sanierungsstufe festlegen</span>
+    <select name="tier">
+      {% for value, label in tier_choices %}
+      <option value="{{ value }}"{% if value == tier_selected %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn btn--small" type="submit">Übernehmen</button>
+</form>
+{% if tier_status == tier_saved %}
+<p class="notice notice--ok" role="status">
+  Gespeichert{% if not prop.user_renovation_tier %}: Stufe wieder automatisch{% endif %} –
+  Kostenmodell neu berechnet.
+</p>
+{% elif tier_status == tier_saved_not_recomputed %}
+<p class="notice notice--warn" role="status">
+  Sanierungsstufe gespeichert, aber das Kostenmodell konnte nicht neu berechnet werden –
+  die Datenbank ist gesperrt, vermutlich läuft ein Crawl. Die Beträge unten sind noch die
+  alten; sie werden beim nächsten Aufruf des Radars neu berechnet.
+</p>
+{% endif %}
