@@ -482,3 +482,9 @@ small { color: var(--ink-soft); }
 .title-edit form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .title-edit .field { flex: 1 1 320px; }
 .title-edit .hint { flex-basis: 100%; margin: 0; }
+
+/* The Kostenmodell's Sanierungsstufe control: folded until the reader wants it. */
+.tier-edit { margin: 8px 0 12px; font-size: .9rem; }
+.tier-edit > summary { font-weight: 400; color: var(--ink-soft); }
+.tier-edit fieldset { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.tier-edit .hint { margin: 6px 0 0; }

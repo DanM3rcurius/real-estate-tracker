@@ -174,3 +174,18 @@ def test_a_rename_during_a_crawl_says_it_was_not_saved(
     plain = client.post("/property/hof-locked/title", data={"title": "Moarhof"})
     assert plain.status_code == 503
     assert "gesperrt" in plain.text
+
+
+def test_a_tier_change_during_a_crawl_says_it_was_not_saved(
+    locked_client: tuple[TestClient, sqlite3.Connection],
+) -> None:
+    """The override and its repriced numbers land together or not at all,
+    and the reader is told which - on the dossier, not a bare error page."""
+    client, _crawl = locked_client
+    response = client.post("/property/hof-locked/sanierungsstufe", data={"tier": "light"})
+
+    assert response.status_code == 503
+    assert "Nicht gespeichert" in response.text
+    assert "gesperrt" in response.text
+    assert "Kostenmodell" in response.text
+    assert "Sanierungsstufe ändern" in response.text

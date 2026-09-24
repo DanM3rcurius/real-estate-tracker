@@ -14,7 +14,13 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from hofradar.costmodel import renovation_evidence
+from hofradar.costmodel import (
+    READER_TIERS,
+    listing_renovation_evidence,
+    listing_renovation_tier,
+    reader_renovation_tier,
+    renovation_evidence,
+)
 from hofradar.db.models import Property
 from hofradar.web import history
 from hofradar.web.charts import sparkline
@@ -128,9 +134,20 @@ CAPITAL_RISK_LABELS: dict[str, str] = {
 #: Whether the renovation tier came from the listing or was guessed from the
 #: year of construction - see :func:`hofradar.costmodel.renovation_evidence`.
 EVIDENCE_LABELS: dict[str, str] = {
+    "reader": "selbst gesetzt",
     "observed": "laut Inserat",
     "inferred": "aus Baujahr geschätzt",
 }
+
+#: The Sanierungsstufe form's "follow the listing again" choice. Posting it (or
+#: nothing) clears ``Property.user_renovation_tier``.
+TIER_AUTO = "auto"
+
+#: Same lock, same reason as :data:`TITLE_LOCKED`: a refused save must say so.
+TIER_LOCKED = (
+    "Die Datenbank ist gerade gesperrt – vermutlich läuft ein Crawl. "
+    "Die Sanierungsstufe wurde nicht gespeichert; bitte nach dem Crawl noch einmal."
+)
 
 #: (attribute, German label, formatter). Order is the reading order of the page.
 FACT_FIELDS: tuple[tuple[str, str, str], ...] = (
@@ -276,6 +293,9 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
     profile = profile_from_query(request.query_params, session=session)
     score = _score_for(prop, profile.profile_hash)
     cost = prop.cost_estimate
+    # What the cost model actually honours, not the raw column: a stored value
+    # it ignores must not be shown as an override in force.
+    reader_tier = reader_renovation_tier(prop)
     return {
         "prop": prop,
         "profile": profile,
@@ -287,6 +307,10 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "cost_rows": cost_rows((cost.breakdown if cost else {}) or {}),
         "renovation_tier_label": de_tier(cost.renovation_tier) if cost else None,
         "renovation_basis": EVIDENCE_LABELS.get(renovation_evidence(prop), ""),
+        "tier_choices": _tier_choices(profile),
+        "reader_tier": reader_tier.value if reader_tier else None,
+        "listing_tier_label": de_tier(listing_renovation_tier(prop).value),
+        "listing_tier_basis": EVIDENCE_LABELS.get(listing_renovation_evidence(prop), ""),
         "capital_risk_label": (
             CAPITAL_RISK_LABELS.get(score.capital_risk, score.capital_risk) if score else None
         ),
@@ -310,6 +334,22 @@ def _context(request: Request, session: Session, prop: Property) -> dict[str, An
         "documents": list(prop.documents or []),
         "images": list(prop.images or []),
     }
+
+
+def _tier_choices(profile: Any) -> list[dict[str, str]]:
+    """The tiers a reader may pick, each with the band it will be priced at.
+
+    The band is read from ``profile.renovation`` so the form cannot promise a
+    rate the cost model does not use.
+    """
+    rates = profile.renovation
+    choices: list[dict[str, str]] = []
+    for tier in READER_TIERS:
+        low = getattr(rates, f"{tier.value}_min")
+        high = getattr(rates, f"{tier.value}_max")
+        band = f"{de_number(low, 0)}–{de_number(high, 0)} €/m²"
+        choices.append({"value": tier.value, "label": de_tier(tier.value), "band": band})
+    return choices
 
 
 @router.get("/property/{public_id}")
@@ -441,6 +481,72 @@ def rename(
     return RedirectResponse(f"/property/{prop.public_id}", status_code=303)
 
 
+def _tier_refused(
+    request: Request, session: Session, prop: Property, message: str, status_code: int
+) -> Response:
+    """Not saved, and said so - on the dossier itself, at the Kostenmodell."""
+    context = _context(request, session, prop)
+    context["tier_error"] = message
+    return render(request, "pages/dossier.html", context, status_code=status_code)
+
+
+@router.post("/property/{public_id}/sanierungsstufe")
+def set_renovation_tier(
+    public_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+    tier: str = Form(default=TIER_AUTO),
+):
+    """The reader's own Sanierungsstufe (``Property.user_renovation_tier``).
+
+    The inferred tier is a guess from an advert; a reader who has seen the
+    building knows better. The cost estimate and this profile's score are
+    recomputed in the same transaction, so the page the reader lands on
+    already prices their tier. ``auto`` clears it. Unlike the title, picking
+    the tier the inference also gives is stored: it pins a guess that a later
+    crawl could move, and it is a judgement somebody stood behind (the cost
+    gates may then reject on it). See docs/DECISIONS.md entry 30.
+    """
+    from hofradar.scoring import rescore_property
+
+    requested = load_property(session, public_id)
+    if requested is None:
+        return render(
+            request,
+            "pages/error.html",
+            {"code": 404, "message": f"Kein Objekt mit der ID {public_id}."},
+            status_code=404,
+        )
+    prop = _surviving(session, requested)
+    wanted = (tier or TIER_AUTO).strip().lower()
+    allowed = {choice.value for choice in READER_TIERS}
+    if wanted != TIER_AUTO and wanted not in allowed:
+        # Never read as "automatisch": that would be a save the reader did
+        # not ask for, reported as done.
+        return _tier_refused(
+            request, session, prop, f"Unbekannte Sanierungsstufe „{tier}“.", 400
+        )
+    # Read before the write: loading the profile queries, and an autoflush of
+    # the new tier there would meet a crawl's lock outside the handler below.
+    profile = profile_from_query(request.query_params, session=session)
+    prop.user_renovation_tier = None if wanted == TIER_AUTO else wanted
+    session.add(prop)
+    try:
+        rescore_property(session, prop, profile)
+        session.commit()
+    except OperationalError as exc:
+        session.rollback()
+        if "database is locked" not in str(exc).lower():
+            raise
+        session.refresh(prop)
+        return _tier_refused(request, session, prop, TIER_LOCKED, 503)
+    # The dossier reads its profile from the query string; land on the same one.
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(
+        f"/property/{prop.public_id}{query}#kostenmodell", status_code=303
+    )
+
+
 def _surviving(session: Session, prop: Property) -> Property:
     """The row a merge left standing, following the chain like ``ingest`` does.
 
@@ -567,6 +673,7 @@ def api_property(public_id: str, request: Request, session: Session = Depends(ge
     payload["evidence"] = prop.evidence or {}
     payload["user_note"] = prop.user_note
     payload["user_title"] = prop.user_title
+    payload["user_renovation_tier"] = prop.user_renovation_tier
     payload["timeline"] = [
         {
             "at": event["at"].isoformat() if event["at"] else None,

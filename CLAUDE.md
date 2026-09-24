@@ -204,6 +204,16 @@ rewrites it; `user_title` is the reader's, written only by
 Render `display_title` (`user_title or canonical_title`) wherever a reader sees
 a title; score, dedupe and feed the LLM `canonical_title`. Decision 29.
 
+**A Sanierungsstufe has two owners too.** `costmodel.listing_renovation_tier`
+is the inference from tags, condition and building age; a reader who has
+walked the building can pin their own in `Property.user_renovation_tier`
+(`POST /property/{id}/sanierungsstufe`, never written by `ingest`), and
+`infer_renovation_tier` - what `estimate_costs` prices - prefers it outright,
+no age bump. It also gates: a reader's tier counts as stood-behind evidence
+(`costmodel.STATED_EVIDENCE`), so it may hard-reject on total cost where a
+guessed one only flags. `scoring.rescore_property` recomputes cost and score
+for one property in the same transaction as the edit. Decision 30.
+
 **Rentals and flats.** A monthly figure is `price_type="rent"`, set by
 `parse_price` (price field) or `extract_features.is_rental` (prose), and it is
 the one exclusion farm substance cannot override - `REJECT_RENTAL` in scoring,
