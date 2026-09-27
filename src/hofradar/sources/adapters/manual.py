@@ -35,7 +35,12 @@ from datetime import UTC, datetime
 from hofradar.config import KeywordConfig, SearchProfile
 from hofradar.contracts import RawListing
 from hofradar.sources.adapters._botcheck import challenge_marker
-from hofradar.sources.adapters._htmlutil import extract_labeled_fields, raw_listing_from_html
+from hofradar.sources.adapters._htmlutil import (
+    extract_labeled_fields,
+    headline_from_url_slug,
+    is_utility_heading,
+    raw_listing_from_html,
+)
 from hofradar.sources.adapters._pdfutil import (
     DOCUMENT_KIND_UPLOAD,
     is_pdf_response,
@@ -84,12 +89,34 @@ def _looks_like_html(text: str) -> bool:
     return bool(_HTML_HINT_RE.search(text))
 
 
+def _plain_title(lines: list[str], url: str) -> str | None:
+    """The headline of a pasted text, which is not always its first line.
+
+    A whole portal page copied as text opens with the site's navigation -
+    thirteen OVBimmo pastes were titled "Merkliste" that way. The URL's slug
+    names the headline when there is one; otherwise the first line that is
+    neither a portal function's name nor free of letters.
+    """
+    return (
+        headline_from_url_slug(lines, url)
+        or next(
+            (
+                line
+                for line in lines
+                if not is_utility_heading(line) and any(char.isalpha() for char in line)
+            ),
+            None,
+        )
+        or next(iter(lines), None)
+    )
+
+
 def _from_plain_text(source_key: str, url: str, text: str, *, http_status: int | None) -> RawListing:
     # Plain text is often text that left a PDF: a viewer's copy, or an
     # upload's stored text read back by scripts/repair_pastes.py.
     text, warnings = recover_ligatures(text)
-    lines = [line.strip() for line in text.splitlines()]
-    title = next((line for line in lines if line), None)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    title = _plain_title(lines, url)
     if title and len(title) > _MAX_PLAIN_TITLE_LEN:
         title = title[:_MAX_PLAIN_TITLE_LEN].rstrip() + "..."
 

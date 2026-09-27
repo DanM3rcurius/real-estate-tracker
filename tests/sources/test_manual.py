@@ -234,3 +234,49 @@ async def test_ingest_url_refuses_a_page_its_javascript_would_have_filled(adapte
             await adapter.ingest_url(url)
 
     assert caught.value.notice == SCRIPT_PAGE_NOTICE
+
+
+#: A whole OVBimmo detail page selected and copied as text: the site's
+#: navigation first, the headline further down. Thirteen pastes stored this
+#: way were titled "Merkliste".
+COPIED_PORTAL_PAGE = """Merkliste
+0
+Benutzermenü
+Homepage
+Gesuche
+Login
+Rosenheim (Kreis)
+Bernau a. Chiemsee
+Exposé
+REH in Bernau mit DHH-Charakter und kleinem Garten - sofort frei!
+Kaufpreis
+699.000,-€
+"""
+
+_OVB_URL = (
+    "https://ovbimmo.de/immobilien/"
+    "reh-in-bernau-mit-dhh-charakter-und-kleinem-garten-sofort-frei-H3B2JB?t=all:sale:living"
+)
+
+
+def test_a_copied_portal_page_is_titled_by_the_line_its_url_names(adapter):
+    listing = adapter.ingest_text(_OVB_URL, COPIED_PORTAL_PAGE)
+    assert listing.title == "REH in Bernau mit DHH-Charakter und kleinem Garten - sofort frei!"
+
+
+def test_the_slug_match_reads_umlauts_the_way_urls_spell_them(adapter):
+    text = "Merkliste\nSeenähe und Bergblick - gepflegtes Einfamilienhaus\nKaufpreis: 1 €"
+    url = "https://ovbimmo.de/immobilien/seenaehe-und-bergblick-gepflegtes-einfamilienhaus-H52Q5Z"
+    listing = adapter.ingest_text(url, text)
+    assert listing.title == "Seenähe und Bergblick - gepflegtes Einfamilienhaus"
+
+
+def test_without_a_slug_portal_chrome_is_still_never_the_title(adapter):
+    listing = adapter.ingest_text("manual:2026-09-27T20:00:00+00:00", COPIED_PORTAL_PAGE)
+    assert listing.title not in {"Merkliste", "0", "Benutzermenü", "Homepage", "Login"}
+
+
+def test_a_short_town_name_is_not_taken_for_the_slug(adapter):
+    text = "Bernau\nGepflegte Hofstelle mit Scheune\nKaufpreis: 480.000 €"
+    url = "https://makler.example/objekt/bernau-hofstelle-mit-scheune-und-stadel-4711"
+    assert adapter.ingest_text(url, text).title == "Bernau"
