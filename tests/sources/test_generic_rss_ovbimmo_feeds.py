@@ -72,7 +72,7 @@ async def test_discover_parses_a_real_ovbimmo_atom_capture(
     cfg = make_source_config(
         key="generic_rss",
         adapter="generic_rss",
-        options={"feeds": [_REAL_ROSENHEIM_FEED_URL]},
+        options={"feeds": [_REAL_ROSENHEIM_FEED_URL], "fetch_detail": False},
     )
     adapter = GenericRssAdapter(cfg)
 
@@ -135,6 +135,7 @@ async def test_configured_entry_field_map_lifts_the_feeds_own_location_fields(
         adapter="generic_rss",
         options={
             "feeds": [_REAL_ROSENHEIM_FEED_URL],
+            "fetch_detail": False,
             "entry_field_map": {"cm_postalcode": "postcode", "cm_locality": "town"},
         },
     )
@@ -189,6 +190,7 @@ async def test_an_unmappable_target_field_is_ignored_not_written(
         adapter="generic_rss",
         options={
             "feeds": [_REAL_ROSENHEIM_FEED_URL],
+            "fetch_detail": False,
             "entry_field_map": {"cm_locality": "contact_kind", "cm_postalcode": "postcode"},
         },
     )
@@ -204,3 +206,42 @@ async def test_an_unmappable_target_field_is_ignored_not_written(
 
     assert all(r.contact_kind is None for r in results)
     assert results[0].postcode == "83071"
+
+
+@pytest.mark.asyncio
+async def test_each_ovbimmo_entry_is_completed_from_its_detail_page(
+    make_source_config, search_profile, sample_keywords, read_fixture
+):
+    """The teaser carries no price and no area; the detail page's Objektdaten
+    table does. Every entry of the real capture is followed and completed,
+    while the feed's own postcode and town stay as the mapping set them."""
+    cfg = make_source_config(
+        key="generic_rss",
+        adapter="generic_rss",
+        options={
+            "feeds": [_REAL_ROSENHEIM_FEED_URL],
+            "entry_field_map": {"cm_postalcode": "postcode", "cm_locality": "town"},
+        },
+    )
+    adapter = GenericRssAdapter(cfg)
+
+    with respx.mock:
+        respx.get(_REAL_ROSENHEIM_FEED_URL).mock(
+            return_value=httpx.Response(
+                200,
+                text=read_fixture("ovbimmo_suchergebnisse_rosenheim.atom"),
+                headers={"Content-Type": "application/atom+xml"},
+            )
+        )
+        details = respx.get(url__startswith="https://ovbimmo.de/immobilien/").mock(
+            return_value=httpx.Response(200, text=read_fixture("ovbimmo_detail.html"))
+        )
+        results = [item async for item in adapter.discover(search_profile, sample_keywords)]
+
+    assert details.call_count == 100
+    assert [r.price_raw for r in results] == ["690.000,00\xa0€"] * 100
+    assert all(r.living_raw == "165 m²" and r.land_raw == "611 m²" for r in results)
+    first = results[0]
+    assert (first.postcode, first.town) == ("83071", "Stephanskirchen")
+    assert first.external_id == first.url
+    assert first.warnings == []
