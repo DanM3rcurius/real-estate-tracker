@@ -6,7 +6,12 @@ import httpx
 import pytest
 import respx
 
-from hofradar.sources.adapters.manual import ManualAdapter
+from hofradar.sources.adapters.manual import (
+    BLOCKED_PAGE_NOTICE,
+    SCRIPT_PAGE_NOTICE,
+    ManualAdapter,
+)
+from hofradar.sources.exceptions import PageUnreadable
 from tests.fixtures.pdf import make_pdf
 
 #: The lines a broker's exposé PDF actually carries: a headline, then the
@@ -191,3 +196,87 @@ def test_ingest_text_recovers_unmapped_ligatures_copied_out_of_a_pdf(adapter):
     assert listing.living_raw == "140 m²"
     assert "Verpflichtung" in listing.description
     assert any("Ligatur" in warning for warning in listing.warnings)
+
+
+#: What ImmoScout answered a pasted exposé link with (HTTP 401), abridged.
+BOT_WALL = """<html><head><title>Ich bin kein Roboter - ImmobilienScout24</title></head>
+<body><h1>Ich bin kein Roboter</h1>
+<p>Du bist ein Mensch aus Fleisch und Blut? Entschuldige bitte, dann hat unser System
+dich fälschlicherweise als Roboter identifiziert.</p></body></html>"""
+
+#: A CloudFront "Interaktives Exposé": a title and a script, nothing to read.
+SCRIPT_SHELL = """<html><head><title>Interaktives Exposé</title></head>
+<body><div id="root"></div><script src="/static/js/main.js"></script></body></html>"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 200])
+async def test_ingest_url_refuses_a_bot_wall(adapter, status):
+    """Stored, it became a property titled "Ich bin kein Roboter" with every
+    fact "k. A.". Refused, with the reason in the reader's words - and never
+    retried or worked around."""
+    url = "https://www.immobilienscout24.de/expose/169936773"
+    with respx.mock:
+        route = respx.get(url).mock(return_value=httpx.Response(status, text=BOT_WALL))
+        with pytest.raises(PageUnreadable) as caught:
+            await adapter.ingest_url(url)
+
+    assert caught.value.notice == BLOCKED_PAGE_NOTICE
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_url_refuses_a_page_its_javascript_would_have_filled(adapter):
+    url = "https://d22fpj9jctru7v.cloudfront.net/?exposeId=44fc6015"
+    with respx.mock:
+        respx.get(url).mock(return_value=httpx.Response(200, text=SCRIPT_SHELL))
+        with pytest.raises(PageUnreadable) as caught:
+            await adapter.ingest_url(url)
+
+    assert caught.value.notice == SCRIPT_PAGE_NOTICE
+
+
+#: A whole OVBimmo detail page selected and copied as text: the site's
+#: navigation first, the headline further down. Thirteen pastes stored this
+#: way were titled "Merkliste".
+COPIED_PORTAL_PAGE = """Merkliste
+0
+Benutzermenü
+Homepage
+Gesuche
+Login
+Rosenheim (Kreis)
+Bernau a. Chiemsee
+Exposé
+REH in Bernau mit DHH-Charakter und kleinem Garten - sofort frei!
+Kaufpreis
+699.000,-€
+"""
+
+_OVB_URL = (
+    "https://ovbimmo.de/immobilien/"
+    "reh-in-bernau-mit-dhh-charakter-und-kleinem-garten-sofort-frei-H3B2JB?t=all:sale:living"
+)
+
+
+def test_a_copied_portal_page_is_titled_by_the_line_its_url_names(adapter):
+    listing = adapter.ingest_text(_OVB_URL, COPIED_PORTAL_PAGE)
+    assert listing.title == "REH in Bernau mit DHH-Charakter und kleinem Garten - sofort frei!"
+
+
+def test_the_slug_match_reads_umlauts_the_way_urls_spell_them(adapter):
+    text = "Merkliste\nSeenähe und Bergblick - gepflegtes Einfamilienhaus\nKaufpreis: 1 €"
+    url = "https://ovbimmo.de/immobilien/seenaehe-und-bergblick-gepflegtes-einfamilienhaus-H52Q5Z"
+    listing = adapter.ingest_text(url, text)
+    assert listing.title == "Seenähe und Bergblick - gepflegtes Einfamilienhaus"
+
+
+def test_without_a_slug_portal_chrome_is_still_never_the_title(adapter):
+    listing = adapter.ingest_text("manual:2026-09-27T20:00:00+00:00", COPIED_PORTAL_PAGE)
+    assert listing.title not in {"Merkliste", "0", "Benutzermenü", "Homepage", "Login"}
+
+
+def test_a_short_town_name_is_not_taken_for_the_slug(adapter):
+    text = "Bernau\nGepflegte Hofstelle mit Scheune\nKaufpreis: 480.000 €"
+    url = "https://makler.example/objekt/bernau-hofstelle-mit-scheune-und-stadel-4711"
+    assert adapter.ingest_text(url, text).title == "Bernau"

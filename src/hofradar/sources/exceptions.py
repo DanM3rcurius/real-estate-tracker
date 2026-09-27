@@ -47,3 +47,19 @@ class BotDefenseDetected(SourceDiscoveryError):
     adapters never try to get around a block - this is the clean stop
     instead.
     """
+
+
+class PageUnreadable(SourceError):
+    """A pasted URL answered, but with nothing a listing could be read from.
+
+    Raised by the paste-ingest adapter for a bot wall ("Ich bin kein Roboter")
+    and for a page that builds its content with JavaScript and hands a plain
+    fetch an empty shell. Storing either as a property is the silence that
+    looks like success: an advert titled "Ich bin kein Roboter", every fact
+    "k. A.". ``notice`` is the reader-facing explanation (UI copy, German),
+    so the web layer can show it without knowing this class.
+    """
+
+    def __init__(self, message: str, *, notice: str) -> None:
+        super().__init__(message)
+        self.notice = notice

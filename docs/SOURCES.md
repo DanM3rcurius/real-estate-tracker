@@ -479,15 +479,24 @@ path - real, scoped work for whoever picks this up, not a config change.
 
 **Net effect today: ovbimmo.de arrives through two routes -
 `generic_rss`'s Atom feeds and the dedicated `ovbimmo` adapter's own search
-crawl - and *both* now yield a postcode and a town, while *neither* yields a
-typed price or room count.** The feed route gets its location from
-`options.entry_field_map`; the dedicated adapter gets it from the detail
-page's `dataLayer`. That is what `locate()` needs: `"83109
-Großkarolinenfeld"` is a geocodable query, and the title/description prose
-these listings used to be geocoded from was not. The figures are the part
-still missing, for the two separate reasons above (feedparser drops the text
-of an attribute-carrying namespaced element; `extract_labeled_fields` cannot
-read a value-then-label block).
+crawl - and both yield a location and the figures.** The feed route gets its
+location from `options.entry_field_map`; the dedicated adapter gets it from the
+detail page's `dataLayer`. The figures come the same way on both routes: from
+the detail page's Objektdaten table through `raw_listing_from_html`, which
+`generic_rss.discover` now reaches by following every entry's link through
+`fetch_detail` (`options.fetch_detail`, default true). The feed's `cm:price` /
+`cm:area` stay unread - the page states the same facts in a shape the generic
+lift already reads.
+
+Until 2026-09-27 the feed route stopped at the entry: `fetch_detail` existed
+and was never called (the pipeline leaves following links to each adapter's
+`discover`), so every property found only by feed - Lkr. Traunstein, Miesbach
+and Ebersberg, which the `ovbimmo` adapter's municipality list does not reach -
+carried a 150-character teaser and showed "k. A." for price and every area.
+A detail page that cannot be read now yields the teaser with a `warnings`
+line (`generic_rss.DETAIL_UNREADABLE_WARNING`) instead of silently. The cost is
+one request per entry at the source's 5 s rate limit: roughly 200 entries,
+so about a quarter of an hour per run.
 
 Because both routes reach the *same* canonical listing URLs — verified: the
 Atom `<link>` and the search page's `href` for

@@ -23,7 +23,15 @@ _BLOCK_MARKERS: tuple[str, ...] = (
     "unusual traffic",
     "automatisierte anfragen",
     "verify you are a human",
+    "ich bin kein roboter",
+    "als roboter identifiziert",
 )
+
+
+def challenge_marker(text: str | None) -> str | None:
+    """The bot-challenge phrase this page opens with, or ``None``."""
+    sample = (text or "")[:5000].lower()
+    return next((marker for marker in _BLOCK_MARKERS if marker in sample), None)
 
 
 def raise_if_blocked(response: httpx.Response, *, source_key: str) -> None:
@@ -40,10 +48,9 @@ def raise_if_blocked(response: httpx.Response, *, source_key: str) -> None:
             "does not attempt to evade bot defences - if you need it, supply your own "
             "authenticated session and run it, at a low rate, from your own machine/IP."
         )
-    sample = (response.text or "")[:5000].lower()
-    for marker in _BLOCK_MARKERS:
-        if marker in sample:
-            raise BotDefenseDetected(
-                f"{source_key}: response looks like a bot-defence challenge "
-                f"(matched {marker!r}). Stopping rather than attempting to solve it."
-            )
+    marker = challenge_marker(response.text)
+    if marker is not None:
+        raise BotDefenseDetected(
+            f"{source_key}: response looks like a bot-defence challenge "
+            f"(matched {marker!r}). Stopping rather than attempting to solve it."
+        )

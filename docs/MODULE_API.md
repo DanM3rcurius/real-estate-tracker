@@ -366,6 +366,12 @@ MAPPABLE_ENTRY_FIELDS: frozenset[str]
     # fields only: identity (external_id, url) and authority (contact_kind,
     # listing_visible) fields are not mappable, and a non-string value is
     # refused rather than coerced.
+DETAIL_UNREADABLE_WARNING: str
+    # The warnings line on a feed entry whose detail page could not be read.
+    # discover() follows every entry's link through fetch_detail and merges
+    # the page in (feed keeps url/external_id/title/date and mapped fields;
+    # the page supplies description, page_kind, visibility and every empty
+    # raw field) unless options.fetch_detail is false.
 
 # hofradar.sources.adapters._htmlutil - the shared full-page lift. Package
 # internal (adapters only), but every HTML adapter depends on it, so its

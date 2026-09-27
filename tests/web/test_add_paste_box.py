@@ -425,3 +425,49 @@ def test_a_paste_without_its_areas_says_so_on_the_confirmation_page(
         response = client.post("/add", data={"url": "", "text": thin})
 
     assert "Eckdaten: kein Wert gefunden für Wohnfläche, Grundstücksfläche" in response.text
+
+
+# --------------------------------------------------------------------------- #
+# A pasted URL that answers with a bot wall or an empty JavaScript shell
+# --------------------------------------------------------------------------- #
+
+_IMMOSCOUT = "https://www.immobilienscout24.de/expose/169936773"
+_BOT_WALL = "<html><body><h1>Ich bin kein Roboter</h1><p>Anfrage blockiert.</p></body></html>"
+
+
+def _url_answers(response: httpx.Response):
+    mock = respx.mock(assert_all_called=False)
+    mock.get(_IMMOSCOUT).mock(return_value=response)
+    mock.route(url__regex=_ANY_HTTP).mock(return_value=httpx.Response(200, json=[]))
+    return mock
+
+
+def test_a_blocked_url_alone_stores_nothing_and_says_why(client: TestClient, db_session) -> None:
+    with _url_answers(httpx.Response(401, text=_BOT_WALL)):
+        response = client.post("/add", data={"url": _IMMOSCOUT, "text": ""})
+
+    assert response.status_code == 400
+    assert "Roboter-Prüfung" in response.text
+    assert "nichts gespeichert" in response.text
+    assert db_session.query(Property).count() == 0
+
+
+def test_a_blocked_url_with_pasted_text_keeps_the_text(client: TestClient, db_session) -> None:
+    with _url_answers(httpx.Response(401, text=_BOT_WALL)):
+        response = client.post("/add", data={"url": _IMMOSCOUT, "text": PASTED})
+
+    assert response.status_code == 200
+    assert "Roboter-Prüfung" in response.text
+    prop = db_session.query(Property).one()
+    assert prop.price == 595000.0
+    assert prop.canonical_title != "Ich bin kein Roboter"
+
+
+def test_a_script_only_page_stores_nothing(client: TestClient, db_session) -> None:
+    shell = "<html><head><title>Interaktives Exposé</title></head><body><div id=root></div></body></html>"
+    with _url_answers(httpx.Response(200, text=shell)):
+        response = client.post("/add", data={"url": _IMMOSCOUT, "text": ""})
+
+    assert response.status_code == 400
+    assert "JavaScript" in response.text
+    assert db_session.query(Property).count() == 0

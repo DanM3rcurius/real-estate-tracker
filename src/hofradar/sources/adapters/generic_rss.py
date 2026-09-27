@@ -1,9 +1,19 @@
 """RSS/Atom feed adapter for regional brokers who publish one.
 
-Each configured feed URL turns into a batch of RawListings straight from the
-feed entries (cheap - one request per feed). ``fetch_detail`` then does the
-one-page GET that fills in whatever the entry didn't carry: full body text,
-images, and any "Label: value" fields on the actual listing page.
+Each configured feed URL turns into a batch of RawListings from the feed
+entries, and ``discover`` then follows every entry's link through
+``fetch_detail`` and merges the page into it: full body text, images, and the
+"Label: value" facts (price, areas, rooms, build year) on the listing page.
+
+That follow-up is not optional garnish. A feed entry is a teaser - ovbimmo.de's
+summaries stop after 150 characters mid-word - and carries none of the labeled
+facts, so without the detail page every property from this route showed
+"k. A." for price and every area. The pipeline never calls ``fetch_detail``
+itself (each adapter follows its own links inside ``discover``); for a long
+time this adapter defined it and never called it, which is exactly the
+silence-that-looks-like-success shape. A detail page that cannot be read
+still yields the teaser, with a ``warnings`` line saying so. Set
+``options.fetch_detail: false`` to skip the extra request per entry.
 
 Beyond the standard syndication elements, a feed's *own* extension namespace
 often carries the fields that matter most - a classmarkets feed states the
@@ -27,6 +37,7 @@ pre-empt it.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -86,6 +97,47 @@ def _resolve_entry_field_map(options: dict[str, Any]) -> dict[str, str]:
                 field,
             )
     return resolved
+
+
+#: Shown on a listing whose detail page could not be read (UI copy, German).
+DETAIL_UNREADABLE_WARNING = (
+    "Detailseite nicht abrufbar - nur der Feed-Auszug wurde gelesen, "
+    "Preis und Flächen fehlen deshalb."
+)
+
+#: Fields the feed entry owns even when the detail page states them too: the
+#: identity the feed announced (so dedupe keys stay stable), its headline and
+#: its publication date. Everything else the page fills where the entry is empty.
+_FEED_OWNED_FIELDS: frozenset[str] = frozenset(
+    {"source_key", "url", "external_id", "title", "source_date_raw", "fetched_at"}
+)
+
+
+def _merge_detail(entry: RawListing, detail: RawListing) -> RawListing:
+    """The feed entry, completed by its detail page.
+
+    The page wins for what only a fetch can know - its full text, whether it is
+    still a listing (``page_kind``, ``listing_visible``), its HTTP status - and
+    fills every raw field the entry left empty. A field the entry set through
+    ``entry_field_map`` stays: the operator mapped it deliberately.
+    """
+    for spec in dataclasses.fields(RawListing):
+        name = spec.name
+        if name in _FEED_OWNED_FIELDS:
+            if getattr(entry, name) is None:
+                setattr(entry, name, getattr(detail, name))
+            continue
+        ours, theirs = getattr(entry, name), getattr(detail, name)
+        if name in {"description", "page_kind", "listing_visible", "http_status"}:
+            if theirs is not None and theirs != "":
+                setattr(entry, name, theirs)
+        elif isinstance(ours, list):
+            setattr(entry, name, ours + [item for item in theirs if item not in ours])
+        elif isinstance(ours, dict):
+            setattr(entry, name, {**theirs, **ours})
+        elif ours is None:
+            setattr(entry, name, theirs)
+    return entry
 
 
 def _entry_image_urls(entry: Any) -> list[str]:
@@ -166,6 +218,7 @@ class GenericRssAdapter(SourceAdapter):
             return
 
         field_map = _resolve_entry_field_map(self.options)
+        follow_links = bool(self.options.get("fetch_detail", True))
         any_readable = False
         for feed_url in feeds:
             try:
@@ -200,6 +253,12 @@ class GenericRssAdapter(SourceAdapter):
                     # way, so skipping an entry cannot change what it proves.
                     logger.debug("%s: skipping utility URL %s", self.key, listing.url)
                     continue
+                if follow_links:
+                    detail = await self.fetch_detail(listing.url)
+                    if detail is None:
+                        listing.warnings.append(DETAIL_UNREADABLE_WARNING)
+                    else:
+                        listing = _merge_detail(listing, detail)
                 yield listing
 
         if not any_readable:

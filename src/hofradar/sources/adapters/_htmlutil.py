@@ -530,6 +530,11 @@ _UTILITY_HEADINGS: frozenset[str] = frozenset(
         "datenschutzerklarung",
         "agb",
         "kontakt",
+        "benutzermenu",
+        "menu",
+        "navigation",
+        "startseite",
+        "homepage",
     }
 )
 
@@ -631,6 +636,47 @@ _UMLAUT_FOLDING = str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "ss"})
 def _fold(text: str) -> str:
     """Casefolded, umlaut-folded, punctuation-free - for comparing names only."""
     return re.sub(r"[^a-z0-9]", "", text.casefold().translate(_UMLAUT_FOLDING))
+
+
+def is_utility_heading(text: str) -> bool:
+    """Is this line a portal function's name ("Merkliste", "Login") rather than content?"""
+    head = _TITLE_SUFFIX_RE.match(text)
+    return _fold(head.group("head") if head is not None else text) in _UTILITY_HEADINGS
+
+
+#: How URL slugs spell umlauts - "seenaehe", not "seenahe".
+_SLUG_UMLAUT_FOLDING = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+#: The shortest stretch a line and a URL slug must share to count as the same
+#: headline. Short enough for "Resthof bei Wasserburg", long enough that
+#: "Haus" or a town name alone never matches.
+_MIN_SLUG_MATCH_CHARS = 18
+
+
+def _slug_fold(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.casefold().translate(_SLUG_UMLAUT_FOLDING))
+
+
+def headline_from_url_slug(lines: list[str], url: str) -> str | None:
+    """The line a listing URL's slug was made from, if the text carries it.
+
+    A portal names its detail pages after the headline
+    (``/immobilien/reh-in-bernau-mit-dhh-charakter-...-H3B2JB``), so in a whole
+    page copied as text - navigation, "Merkliste", breadcrumbs and all - the
+    slug is the one thing that says which line is the headline. Either may run
+    longer than the other: the slug carries an id, and a portal shortens long
+    headlines.
+    """
+    path = urlsplit(url).path.rstrip("/")
+    slug = _slug_fold(path.rsplit("/", 1)[-1]) if path else ""
+    if len(slug) < _MIN_SLUG_MATCH_CHARS:
+        return None
+    for line in lines:
+        for folded in {_slug_fold(line), _fold(line)}:
+            shared = min(len(folded), len(slug))
+            if shared >= _MIN_SLUG_MATCH_CHARS and folded[:shared] == slug[:shared]:
+                return line
+    return None
 
 
 def _looks_like_a_utility_heading(tree: HTMLParser) -> bool:
