@@ -17,6 +17,12 @@ So ``ingest_pdf`` takes an uploaded file and ``ingest_url`` notices when the
 URL it just fetched answered with a PDF instead of a page; both hand the
 bytes to the shared lift in ``_pdfutil`` and produce the same RawListing
 shape as any other source.
+
+A URL that answers with a bot wall or an empty JavaScript shell is refused
+with :class:`PageUnreadable` rather than read: ImmoScout's "Ich bin kein
+Roboter" page and a CloudFront "Interaktives Exposé" were both stored as
+properties with every fact "k. A." before this. Neither is retried or worked
+around (invariant 7) - the reader is told to paste the text or upload the PDF.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from datetime import UTC, datetime
 
 from hofradar.config import KeywordConfig, SearchProfile
 from hofradar.contracts import RawListing
+from hofradar.sources.adapters._botcheck import challenge_marker
 from hofradar.sources.adapters._htmlutil import extract_labeled_fields, raw_listing_from_html
 from hofradar.sources.adapters._pdfutil import (
     DOCUMENT_KIND_UPLOAD,
@@ -36,6 +43,7 @@ from hofradar.sources.adapters._pdfutil import (
     recover_ligatures,
 )
 from hofradar.sources.base import SourceAdapter, text_indicates_gone
+from hofradar.sources.exceptions import PageUnreadable
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +56,28 @@ _BARE_IMAGE_URL_RE = re.compile(
 )
 
 _MAX_PLAIN_TITLE_LEN = 300
+
+#: Answers that mean "not for a script", whatever the body says.
+_BLOCKED_STATUSES = frozenset({401, 403, 429})
+
+#: Below this much visible text, with no fact read either, a page is a shell
+#: its own JavaScript was meant to fill. The shortest real detail page in the
+#: fixtures carries well over a thousand characters.
+MIN_PAGE_TEXT_CHARS = 80
+
+#: Reader-facing refusals (UI copy, German).
+BLOCKED_PAGE_NOTICE = (
+    "Die Seite hat den Abruf als automatisiert blockiert (Roboter-Prüfung). "
+    "Hofradar umgeht das nicht – bitte den Text des Inserats einfügen oder "
+    "das Exposé als PDF hochladen."
+)
+SCRIPT_PAGE_NOTICE = (
+    "Die Seite enthält ohne JavaScript keinen lesbaren Text – sie baut das "
+    "Exposé erst im Browser auf. Bitte den Text des Inserats einfügen oder "
+    "das Exposé als PDF hochladen."
+)
+
+_FACT_FIELDS = ("price_raw", "land_raw", "living_raw", "usable_raw", "rooms_raw", "year_raw")
 
 
 def _looks_like_html(text: str) -> bool:
@@ -131,7 +161,19 @@ class ManualAdapter(SourceAdapter):
             )
             listing.listing_visible = response.status_code not in (404, 410)
             return listing
+        marker = challenge_marker(response.text)
+        if response.status_code in _BLOCKED_STATUSES or marker is not None:
+            raise PageUnreadable(
+                f"{url}: blocked (HTTP {response.status_code}, marker {marker!r})",
+                notice=BLOCKED_PAGE_NOTICE,
+            )
         listing = raw_listing_from_html(self.key, url, response.text, http_status=response.status_code)
+        if len((listing.description or "").strip()) < MIN_PAGE_TEXT_CHARS and not any(
+            getattr(listing, name) for name in _FACT_FIELDS
+        ):
+            raise PageUnreadable(
+                f"{url}: no readable text without JavaScript", notice=SCRIPT_PAGE_NOTICE
+            )
         listing.listing_visible = not (
             response.status_code in (404, 410) or text_indicates_gone(response.text)
         )

@@ -105,6 +105,9 @@ UPLOAD_EMPTY_NOTICE = (
     "Aus der Datei „{name}“ ließ sich nichts lesen. Es wurde nichts gespeichert "
     "– bitte den Exposé-Text zusätzlich einfügen."
 )
+NOTHING_READABLE_NOTICE = (
+    "Unter der URL war nichts Lesbares – es wurde nichts gespeichert."
+)
 NOTHING_SUBMITTED_NOTICE = (
     "Bitte eine Inserats-URL, einen Exposé-Text oder eine PDF-Datei angeben."
 )
@@ -419,10 +422,14 @@ async def add_submit(
             except lazy.ModuleUnavailable as exc:
                 degraded.append(lazy.Degraded(exc.user_message))
             except Exception as exc:  # noqa: BLE001 - a dead URL is not our bug
+                # A bot wall or a JavaScript shell says why in its own words
+                # (sources.exceptions.PageUnreadable); anything else is a fetch
+                # that simply failed.
                 degraded.append(
                     lazy.Degraded(
-                        "Die URL konnte nicht abgerufen werden – der eingefügte Text wird trotzdem "
-                        f"verarbeitet. ({type(exc).__name__})"
+                        getattr(exc, "notice", None)
+                        or "Die URL konnte nicht abgerufen werden – der eingefügte Text wird "
+                        f"trotzdem verarbeitet. ({type(exc).__name__})"
                     )
                 )
 
@@ -451,6 +458,26 @@ async def add_submit(
                     },
                     status_code=400,
                 )
+
+        if not _has_content(raw):
+            # Only a URL was handed over and it gave nothing up - a block, a
+            # script-only page, a dead host. The notice above says which;
+            # storing an empty property under it would be the paste box
+            # pretending it worked.
+            session.rollback()
+            degraded.append(lazy.Degraded(NOTHING_READABLE_NOTICE))
+            return render(
+                request,
+                "pages/add.html",
+                {
+                    "profile": profile,
+                    "degraded": degraded,
+                    "result": None,
+                    "url_value": url,
+                    "text_value": text,
+                },
+                status_code=400,
+            )
 
         keywords, kw_note = lazy.call_or("hofradar.config:load_keywords", None)
         if kw_note is not None:
