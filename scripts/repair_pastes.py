@@ -27,9 +27,11 @@ invisible as before, with better-looking fields.
 
 Counts what it did not repair in three separate buckets - already complete,
 nothing recoverable, no stored text - because one summed "skipped" said
-nothing about which of them a run had actually hit. A chrome title (issue #10)
-counts as recoverable: canonical_title is never NULL, so a wrong one can only
-be spotted by comparing it with what a re-parse produces.
+nothing about which of them a run had actually hit. A chrome title (issue #10;
+"Merkliste", a "needs JavaScript" notice) counts as recoverable: canonical_title
+is never NULL, so a wrong one can only be spotted by comparing it with what a
+re-parse produces. On a paste only a chrome title is replaced - the re-parse's
+headline is a guess when the URL names none.
 
 Dry run unless you pass --apply.
 """
@@ -52,6 +54,7 @@ from hofradar.normalize import normalize_listing
 from hofradar.sources import get_adapter
 from hofradar.sources.adapters._htmlutil import reads_like_a_place
 from hofradar.sources.adapters._pdfutil import PdfText, pdf_title
+from hofradar.sources.adapters.manual import is_chrome_line
 from hofradar.web.uploads import UPLOAD_URL_PREFIX
 
 MANUAL_KEY = "manual"
@@ -160,9 +163,20 @@ async def run(apply: bool) -> int:
             # title lifted off portal markup is a *wrong* value rather than a
             # missing one - so a re-parse that produces a different title is a
             # gain too. ingest overwrites it, this source being a verifying one.
-            if listing.title and listing.title != prop.canonical_title:
-                # Old and new, not just "title": a title is the one change a
-                # reader has to judge by eye before --apply.
+            if (
+                listing.title
+                and listing.title != prop.canonical_title
+                and not is_chrome_line(listing.title)
+                and (
+                    observation.url.startswith(UPLOAD_URL_PREFIX)
+                    or is_chrome_line(prop.canonical_title or "")
+                )
+            ):
+                # An upload is re-titled by the same cover-page reader that
+                # titled it. A paste's plain-text headline is a guess when the
+                # URL names none, so only a chrome title is replaced: a good
+                # one from an earlier HTML read ("Kleinbauernhof in
+                # Altenstadt") must not lose to a cookie banner's first line.
                 gains.append(f"title -> {listing.title[:60]!r}")
 
             if not gains:

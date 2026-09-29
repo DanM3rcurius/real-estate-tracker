@@ -77,7 +77,8 @@ MIN_PAGE_TEXT_CHARS = 80
 MAX_SHELL_TEXT_CHARS = 600
 _NOSCRIPT_RE = re.compile(
     r"without javascript|enable javascript|javascript (?:is )?(?:enabled|disabled|required)"
-    r"|ohne javascript|javascript aktivier|javascript (?:ist )?deaktiviert",
+    r"|ohne javascript|javascript aktivier|javascript (?:ist )?deaktiviert"
+    r"|aktivieren sie (?:bitte )?javascript",
     re.IGNORECASE,
 )
 
@@ -107,6 +108,11 @@ def _looks_like_html(text: str) -> bool:
     return text.lstrip().startswith("<") and bool(_HTML_HINT_RE.search(text))
 
 
+def is_chrome_line(line: str) -> bool:
+    """A portal function's name or a "needs JavaScript" notice - never a headline."""
+    return is_utility_heading(line) or bool(_NOSCRIPT_RE.search(line))
+
+
 def _is_script_shell(listing: RawListing) -> bool:
     """A page its own JavaScript was meant to fill, fetched before it did."""
     if any(getattr(listing, name) for name in _FACT_FIELDS):
@@ -123,7 +129,9 @@ def _plain_title(lines: list[str], url: str) -> str | None:
     A whole portal page copied as text opens with the site's navigation -
     thirteen OVBimmo pastes were titled "Merkliste" that way. The URL's slug
     names the headline when there is one; otherwise the first line that is
-    neither a portal function's name nor free of letters.
+    neither chrome (:func:`is_chrome_line`) nor free of letters. That fallback
+    is a guess: a Denkmalbörse page opens with a cookie banner and states its
+    headline 500 lines down.
     """
     return (
         headline_from_url_slug(lines, url)
@@ -131,7 +139,7 @@ def _plain_title(lines: list[str], url: str) -> str | None:
             (
                 line
                 for line in lines
-                if not is_utility_heading(line) and any(char.isalpha() for char in line)
+                if not is_chrome_line(line) and any(char.isalpha() for char in line)
             ),
             None,
         )
