@@ -242,3 +242,20 @@ def test_a_postcode_is_not_space_grouped():
 def test_parse_price_skips_a_percentage_before_the_price():
     value, _ = parse_price("3,57 % Käuferprovision, Kaufpreis 450.000 €")
     assert value == pytest.approx(450000.0)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("1,608 m²", 1608.0, id="ovbimmo-objektdaten"),
+        pytest.param("12,500 qm", 12500.0, id="two-groups"),
+        pytest.param("1,608", 1608.0, id="no-unit-means-sqm"),
+        pytest.param("140,50 m²", 140.5, id="two-decimals-stay-decimal"),
+        pytest.param("2,5 m²", 2.5, id="one-decimal-stays-decimal"),
+        pytest.param("2,125 ha", 21250.0, id="hectares-keep-the-decimal-comma"),
+    ],
+)
+def test_parse_area_comma_grouped_thousands(text, expected):
+    """OVBimmo's Objektdaten table writes "1,608 m²" for the plot its own prose
+    calls "1.608m²". Read as a decimal it was a 1.6 m² plot."""
+    assert parse_area(text) == expected
