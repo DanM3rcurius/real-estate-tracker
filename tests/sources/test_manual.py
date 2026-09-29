@@ -10,6 +10,7 @@ from hofradar.sources.adapters.manual import (
     BLOCKED_PAGE_NOTICE,
     SCRIPT_PAGE_NOTICE,
     ManualAdapter,
+    is_chrome_line,
 )
 from hofradar.sources.exceptions import PageUnreadable
 from tests.fixtures.pdf import make_pdf
@@ -312,3 +313,12 @@ async def test_ingest_url_refuses_a_shell_that_says_it_needs_javascript(adapter)
             await adapter.ingest_url(url)
 
     assert caught.value.notice == SCRIPT_PAGE_NOTICE
+
+
+def test_a_german_javascript_notice_is_chrome_too():
+    assert is_chrome_line(
+        "Bitte aktivieren Sie JavaScript in Ihrem Browser, um den vollen "
+        "Funktionsumfang dieser Seite nutzen zu können."
+    )
+    assert is_chrome_line("Merkliste")
+    assert not is_chrome_line("Kleinbauernhof in Altenstadt bei Schongau")
