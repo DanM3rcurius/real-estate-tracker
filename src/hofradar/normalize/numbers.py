@@ -228,6 +228,10 @@ _AREA_UNITS: list[tuple[re.Pattern[str], float]] = [
 ]
 
 
+#: "1,608" / "12,500": comma-grouped thousands, no decimal part.
+_COMMA_THOUSANDS_RE = re.compile(r"\d{1,3}(?:,\d{3})+")
+
+
 def parse_area(text: str | None) -> float | None:
     """Parse a German area string into square metres, always as a float.
 
@@ -245,16 +249,21 @@ def parse_area(text: str | None) -> float | None:
     match = _NUMBER_TOKEN_RE.search(text)
     if not match:
         return None
-    base = _parse_number_token(match.group())
+    token = match.group()
 
     tail = text[match.end() : match.end() + 40]
-    for pattern, multiplier in _AREA_UNITS:
-        if pattern.search(tail):
-            return base * multiplier
-    for pattern, multiplier in _AREA_UNITS:
-        if pattern.search(text):
-            return base * multiplier
-    return base
+    multiplier = next(
+        (factor for pattern, factor in _AREA_UNITS if pattern.search(tail)),
+        next((factor for pattern, factor in _AREA_UNITS if pattern.search(text)), 1.0),
+    )
+    if multiplier == 1.0 and _COMMA_THOUSANDS_RE.fullmatch(token):
+        # "1,608 m²" is 1608 m², not 1.6: OVBimmo's Objektdaten table groups
+        # thousands with a comma while its own prose on the same page says
+        # "1.608m²". Nobody states square metres to three decimals, so a
+        # comma before exactly three digits is a grouping here. Hectares and
+        # Tagwerk keep the comma as the decimal point ("2,125 ha").
+        return float(token.replace(",", ""))
+    return _parse_number_token(token) * multiplier
 
 
 def prices_equivalent(a: float | None, b: float | None, tol_pct: float = 1.0) -> bool:

@@ -161,7 +161,9 @@ async def run(apply: bool) -> int:
             # missing one - so a re-parse that produces a different title is a
             # gain too. ingest overwrites it, this source being a verifying one.
             if listing.title and listing.title != prop.canonical_title:
-                gains.append("title")
+                # Old and new, not just "title": a title is the one change a
+                # reader has to judge by eye before --apply.
+                gains.append(f"title -> {listing.title[:60]!r}")
 
             if not gains:
                 if any(getattr(prop, name, None) is None for name in RECOVERABLE_FIELDS):

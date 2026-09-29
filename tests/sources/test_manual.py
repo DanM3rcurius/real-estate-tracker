@@ -280,3 +280,35 @@ def test_a_short_town_name_is_not_taken_for_the_slug(adapter):
     text = "Bernau\nGepflegte Hofstelle mit Scheune\nKaufpreis: 480.000 €"
     url = "https://makler.example/objekt/bernau-hofstelle-mit-scheune-und-stadel-4711"
     assert adapter.ingest_text(url, text).title == "Bernau"
+
+
+#: A fetched page's stored text, as repair_pastes.py reads it back: the page's
+#: words first, markup only inside an inline script further down.
+STORED_PAGE_TEXT = COPIED_PORTAL_PAGE + """(function() {
+    el.innerHTML = '<div class="gallery"><p>Bild</p></div>';
+})();
+"""
+
+
+def test_stored_page_text_with_markup_in_a_script_is_read_as_text(adapter):
+    """Read as HTML, the text had no headline at all, so repair_pastes.py
+    could never replace a "Merkliste" title."""
+    listing = adapter.ingest_text(_OVB_URL, STORED_PAGE_TEXT)
+    assert listing.title == "REH in Bernau mit DHH-Charakter und kleinem Garten - sofort frei!"
+
+
+#: What my.homeday.de hands a plain fetch: the noscript sentence and nothing else.
+NOSCRIPT_SHELL = """<html><head><title>myHomeday Kundenplattform</title></head><body>
+<noscript><strong>We're sorry but myHomeday doesn't work properly without JavaScript
+enabled. Please enable it to continue.</strong></noscript><div id="app"></div></body></html>"""
+
+
+@pytest.mark.asyncio
+async def test_ingest_url_refuses_a_shell_that_says_it_needs_javascript(adapter):
+    url = "https://my.homeday.de/expose/H8LL8ZMR"
+    with respx.mock:
+        respx.get(url).mock(return_value=httpx.Response(200, text=NOSCRIPT_SHELL))
+        with pytest.raises(PageUnreadable) as caught:
+            await adapter.ingest_url(url)
+
+    assert caught.value.notice == SCRIPT_PAGE_NOTICE

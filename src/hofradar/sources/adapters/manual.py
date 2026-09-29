@@ -70,6 +70,17 @@ _BLOCKED_STATUSES = frozenset({401, 403, 429})
 #: fixtures carries well over a thousand characters.
 MIN_PAGE_TEXT_CHARS = 80
 
+#: A shell often says so in its <noscript> fallback ("We're sorry but
+#: myHomeday doesn't work properly without JavaScript enabled"), which puts it
+#: past MIN_PAGE_TEXT_CHARS. Below this length, with no fact read, that
+#: sentence is the whole page.
+MAX_SHELL_TEXT_CHARS = 600
+_NOSCRIPT_RE = re.compile(
+    r"without javascript|enable javascript|javascript (?:is )?(?:enabled|disabled|required)"
+    r"|ohne javascript|javascript aktivier|javascript (?:ist )?deaktiviert",
+    re.IGNORECASE,
+)
+
 #: Reader-facing refusals (UI copy, German).
 BLOCKED_PAGE_NOTICE = (
     "Die Seite hat den Abruf als automatisiert blockiert (Roboter-Prüfung). "
@@ -86,7 +97,24 @@ _FACT_FIELDS = ("price_raw", "land_raw", "living_raw", "usable_raw", "rooms_raw"
 
 
 def _looks_like_html(text: str) -> bool:
-    return bool(_HTML_HINT_RE.search(text))
+    """Is this a pasted page *source*, as opposed to text that mentions a tag?
+
+    A page source opens with markup. A fetched page's stored text - what
+    repair_pastes.py reads back - opens with the page's words and carries
+    "<div" only inside inline scripts; read as HTML, it had no headline at
+    all, so a "Merkliste" title could never be repaired.
+    """
+    return text.lstrip().startswith("<") and bool(_HTML_HINT_RE.search(text))
+
+
+def _is_script_shell(listing: RawListing) -> bool:
+    """A page its own JavaScript was meant to fill, fetched before it did."""
+    if any(getattr(listing, name) for name in _FACT_FIELDS):
+        return False
+    text = (listing.description or "").strip()
+    return len(text) < MIN_PAGE_TEXT_CHARS or (
+        len(text) < MAX_SHELL_TEXT_CHARS and bool(_NOSCRIPT_RE.search(text))
+    )
 
 
 def _plain_title(lines: list[str], url: str) -> str | None:
@@ -195,9 +223,7 @@ class ManualAdapter(SourceAdapter):
                 notice=BLOCKED_PAGE_NOTICE,
             )
         listing = raw_listing_from_html(self.key, url, response.text, http_status=response.status_code)
-        if len((listing.description or "").strip()) < MIN_PAGE_TEXT_CHARS and not any(
-            getattr(listing, name) for name in _FACT_FIELDS
-        ):
+        if _is_script_shell(listing):
             raise PageUnreadable(
                 f"{url}: no readable text without JavaScript", notice=SCRIPT_PAGE_NOTICE
             )
